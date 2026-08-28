@@ -5456,14 +5456,14 @@ public class GameClient extends Application {
 
                             if (isControlling) {
                                 // 如果正在控制，发送一个不带 targetId 的请求，服务器会将其识别为“释放”
-                                sendMessage(createJsonMessage("requestControlBot"));
+                                sendMessage(createControlBotRequest(null));
                             } else {
                                 // 如果不在控制，获取当前观战目标的ID
                                 String targetId = (me != null && me.data != null)
                                         ? getString(me.data, "spectatorTargetId")
                                         : null;
-                                // 发送带 targetId 的请求
-                                sendMessage(createJsonMessage("requestControlBot", "targetId", targetId));
+                                // TDM 通常没有固定 spectatorTargetId；空目标必须省略，让服务端自动寻找同队 BOT。
+                                sendMessage(createControlBotRequest(targetId));
                             }
                         }
                     }
@@ -5919,6 +5919,15 @@ public class GameClient extends Application {
         obj.addProperty("type", "switchToSlot");
         addProtocolMetadata(obj);
         obj.addProperty("slot", slot);
+        return gson.toJson(obj);
+    }
+
+    private String createControlBotRequest(String targetId) {
+        JsonObject obj = new JsonObject();
+        obj.addProperty("type", "requestControlBot");
+        addProtocolMetadata(obj);
+        if (targetId != null && !targetId.isBlank())
+            obj.addProperty("targetId", targetId);
         return gson.toJson(obj);
     }
 

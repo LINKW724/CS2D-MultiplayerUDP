@@ -1,5 +1,6 @@
 package cs2d.client;
 
+import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
@@ -93,6 +94,21 @@ class GameClientProtocolTest {
         assertEquals("DEMOLITION", merged.get("mode").getAsString());
         assertEquals("IN_PROGRESS", merged.get("roundPhase").getAsString());
         assertEquals(29_500, merged.get("bombTimer").getAsInt());
+    }
+
+    @Test
+    void controlBotRequestOmitsBlankSpectatorTarget() throws Exception {
+        GameClient client = new GameClient();
+        Method request = GameClient.class.getDeclaredMethod("createControlBotRequest", String.class);
+        request.setAccessible(true);
+        Gson gson = new Gson();
+
+        JsonObject blank = gson.fromJson((String) request.invoke(client, ""), JsonObject.class);
+        JsonObject explicit = gson.fromJson((String) request.invoke(client, "bot-7"), JsonObject.class);
+
+        assertEquals("requestControlBot", blank.get("type").getAsString());
+        assertFalse(blank.has("targetId"));
+        assertEquals("bot-7", explicit.get("targetId").getAsString());
     }
 
     private static JsonObject state(String sessionId, long sequence) {
