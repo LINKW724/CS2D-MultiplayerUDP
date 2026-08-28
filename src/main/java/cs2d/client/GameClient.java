@@ -66,6 +66,7 @@ import java.util.*;
 import java.util.concurrent.*;
 // 导入 Java 的函数式接口类
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 // 导入 Java 的 Stream API 类，用于数据流处理
 import java.util.stream.Collectors;
@@ -79,6 +80,8 @@ import javafx.scene.effect.ColorAdjust;
 
 // 定义游戏客户端的主类，它继承自 JavaFX 的 Application 类
 public class GameClient extends Application {
+
+    private static final int SUPPORTED_PROTOCOL_VERSION = 2;
 
     private QuadtreeNode quadtreeRootNode; //
     private static final int QUADTREE_MAX_OBJECTS = 8; // 根据需要调整
@@ -484,6 +487,10 @@ public class GameClient extends Application {
 
     /** 用于防止多个线程同时触发重连的原子锁 */
     private final AtomicBoolean isReconnecting = new AtomicBoolean(false);
+    private final AtomicLong lastStateSequence = new AtomicLong(-1);
+    private volatile String serverSessionId;
+    private java.util.concurrent.ScheduledFuture<?> reconnectRetryHandle;
+    private int reconnectAttempt = 0;
     // --- 游戏状态 ---
     private volatile cs2d.client.GameClient.ClientState clientState = cs2d.client.GameClient.ClientState.CONNECTING; // 当前客户端状态，volatile保证多线程可见性
     private volatile JsonObject mapData; // 当前地图的数据，volatile保证多SFX线程可见性
@@ -496,8 +503,9 @@ public class GameClient extends Application {
     // 存储所有僵尸的信息
     private final ConcurrentHashMap<String, cs2d.client.GameClient.ClientPlayer> clientZombies = new ConcurrentHashMap<>();
     private volatile JsonObject latestGameState; // 最新的游戏状态快照，volatile保证多线程可见性
+    private volatile JsonObject latestFullGameState;
     private volatile String myPlayerId; // 我自己的玩家ID，需对握手重试线程立即可见
-    private cs2d.client.GameClient.ClientPlayer me; // 对我自己的 ClientPlayer 对象的引用
+    private volatile cs2d.client.GameClient.ClientPlayer me; // 对我自己的 ClientPlayer 对象的引用
     private String playerName = "Player"; // 玩家设置的名字
     private final Set<KeyCode> keysDown = new HashSet<>(); // 存储当前按下的所有键盘按键
     private boolean isShooting = false; // 标记是否正在开火
@@ -787,6 +795,7 @@ public class GameClient extends Application {
         // 1. 停止运行标志和循环
         running = false;
         cancelStaticDataRequests();
+        completeReconnect();
         if (gameLoop != null) {
             gameLoop.stop();
         }
@@ -835,6 +844,7 @@ public class GameClient extends Application {
             myPlayerId = null;
             me = null;
             latestGameState = null;
+            latestFullGameState = null;
             fovPoints = new ArrayList<>();
             spectateTeammateIndex = 0; // 重置观战索引
             clientState = cs2d.client.GameClient.ClientState.CONNECTING; // 重置为初始状态
@@ -895,6 +905,10 @@ public class GameClient extends Application {
             this.socket.close();
         }
         this.mapData = null;
+        this.serverSessionId = null;
+        this.lastStateSequence.set(-1);
+        this.chunkBuffers.clear();
+        this.messageBatchQueue.clear();
 
         // [核心修复] 切断之前残留的定时握手器和心跳线程，防止重开端口导致成倍发送洪水包。
         if (this.connectionHandle != null && !this.connectionHandle.isDone()) {
@@ -997,6 +1011,10 @@ public class GameClient extends Application {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 // 阻塞等待接收数据包
                 socket.receive(packet);
+                if (!isExpectedServer(packet)) {
+                    System.err.println("[CLIENT] 丢弃来自非当前服务器的数据包: " + packet.getSocketAddress());
+                    continue;
+                }
                 // 将接收到的字节数据转换为UTF-8编码的字符串
                 String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
 
@@ -1016,6 +1034,13 @@ public class GameClient extends Application {
                     System.err.println("Error in listen thread: " + e.getMessage());
             }
         }
+    }
+
+    private boolean isExpectedServer(DatagramPacket packet) {
+        InetSocketAddress expected = serverAddress;
+        return expected != null && expected.getAddress() != null
+                && expected.getPort() == packet.getPort()
+                && expected.getAddress().equals(packet.getAddress());
     }
 
     /**
@@ -1107,6 +1132,7 @@ public class GameClient extends Application {
             me = null;
             fovPoints = new ArrayList<>(); // 关键：清除FOV
             latestGameState = null; // 关键：清除旧状态
+            latestFullGameState = null;
 
             // 隐藏游戏内面板
             buyMenuPane.setVisible(false);
@@ -1119,35 +1145,43 @@ public class GameClient extends Application {
             clientState = cs2d.client.GameClient.ClientState.CONNECTING;
         });
 
-        // 3. 安排一个稍后执行的连接任务
-        connectionExecutor.schedule(() -> {
-            try {
-                System.out.println("[Reconnect] 正在调用 connect() 来建立新连接...");
+        reconnectAttempt = 0;
+        scheduleReconnectAttempt(1);
+    }
 
-                // 调用原始的 connect() 方法。
-                // 它将：
-                // 1. 创建一个新 socket
-                // 2. 启动一个新的 listen() 线程
-                // 3. 启动“初始加入”循环 (Task 1)，不断发送 "joinGame" 请求
-                connect();
+    private synchronized void scheduleReconnectAttempt(long delaySeconds) {
+        if (!isReconnecting.get())
+            return;
+        reconnectRetryHandle = connectionExecutor.schedule(() -> {
+            if (!isReconnecting.get())
+                return;
+            reconnectAttempt++;
+            System.out.println("[Reconnect] 第 " + reconnectAttempt + " 次连接尝试...");
+            connect();
 
-                // 一旦服务器响应 "initialInfo"，connect() 中的逻辑将
-                // 自动设置 myPlayerId，取消“初始加入”循环，
-                // 并调用 setClientState(ClientState.LOBBY)，
-                // 此时用户就可以重新选择队伍进入游戏了。
+            // connect() 内部会吞掉 Socket 创建异常，因此统一在等待欢迎包后判断成功与否。
+            connectionExecutor.schedule(() -> {
+                if (!isReconnecting.get())
+                    return;
+                if (myPlayerId != null) {
+                    completeReconnect();
+                    return;
+                }
+                long nextDelay = Math.min(8L, 1L << Math.min(reconnectAttempt, 3));
+                Platform.runLater(() -> connectionStatusLabel
+                        .setText("Reconnect failed. Retrying in " + nextDelay + "s..."));
+                scheduleReconnectAttempt(nextDelay);
+            }, 3, TimeUnit.SECONDS);
+        }, delaySeconds, TimeUnit.SECONDS);
+    }
 
-                System.out.println("[Reconnect] connect() 调用完毕。等待服务器响应...");
-
-            } catch (Exception e) {
-                System.err.println("[Reconnect] connect() 尝试失败: " + e.getMessage());
-                Platform.runLater(() -> connectionStatusLabel.setText("Reconnect failed. Will try again..."));
-                // 即使失败，我们也不做任何事。看门狗会在 2 秒后再次检测到超时，
-                // 并再次调用 reconnect()，自动实现重试。
-            } finally {
-                // 4. 无论成功与否，都释放锁，允许下一次重连
-                isReconnecting.set(false);
-            }
-        }, 1, TimeUnit.SECONDS); // 等待1秒，让旧的 listen() 线程完全关闭
+    private synchronized void completeReconnect() {
+        isReconnecting.set(false);
+        reconnectAttempt = 0;
+        if (reconnectRetryHandle != null) {
+            reconnectRetryHandle.cancel(false);
+            reconnectRetryHandle = null;
+        }
     }
 
     // 处理从服务器接收到的JSON消息
@@ -1180,6 +1214,19 @@ public class GameClient extends Application {
             int total = getInt(json, "total");
             String data = getString(json, "data");
             String checksum = getString(json, "checksum");
+
+            if (serverSessionId != null && !hasCurrentSession(json)) {
+                if (id != null)
+                    chunkBuffers.remove(id);
+                return;
+            }
+            if (json.has("sequence") && json.get("sequence").isJsonPrimitive()
+                    && json.getAsJsonPrimitive("sequence").isNumber()
+                    && json.get("sequence").getAsLong() <= lastStateSequence.get()) {
+                if (id != null)
+                    chunkBuffers.remove(id);
+                return;
+            }
 
             cleanupExpiredChunkBuffers();
             if (id == null || id.isBlank() || id.length() > 128
@@ -1232,6 +1279,8 @@ public class GameClient extends Application {
         // 使用 switch 语句根据消息类型进行分发处理
         switch (type) {
             case "map_data": // 如果是地图数据
+                if (!hasCurrentSession(json))
+                    break;
                 // [新] 计时 [M4] Map Data
                 long mapStartTime = System.nanoTime();
                 if (json != null) {
@@ -1265,10 +1314,18 @@ public class GameClient extends Application {
                 break;
 
             case "small_update":
+                if (!acceptStatePacket(json))
+                    break;
                 long smallUpStartTime = System.nanoTime();
-                this.latestGameState = json;
-
-                final JsonObject finalJsonSmall = json;
+                final JsonObject finalJsonSmall = json.deepCopy();
+                JsonObject fullSnapshot = latestFullGameState;
+                if (fullSnapshot != null) {
+                    if (fullSnapshot.has("smokePuffs"))
+                        finalJsonSmall.add("smokePuffs", fullSnapshot.get("smokePuffs").deepCopy());
+                    if (fullSnapshot.has("firePatches"))
+                        finalJsonSmall.add("firePatches", fullSnapshot.get("firePatches").deepCopy());
+                }
+                this.latestGameState = finalJsonSmall;
                 // [修复] 提交到专用线程池，而不是 new Thread
                 stateUpdateExecutor.submit(() -> {
                     updateStateFromSmall(finalJsonSmall);
@@ -1278,10 +1335,12 @@ public class GameClient extends Application {
                 break;
 
             case "full_update":
+                if (!acceptStatePacket(json))
+                    break;
                 long fullUpStartTime = System.nanoTime();
-                this.latestGameState = json;
-
-                final JsonObject finalJsonFull = json;
+                final JsonObject finalJsonFull = json.deepCopy();
+                this.latestFullGameState = finalJsonFull;
+                this.latestGameState = finalJsonFull;
                 // [修复] 同样提交到该线程池，保证状态更新的串行安全
                 stateUpdateExecutor.submit(() -> {
                     updateStateFromFull(finalJsonFull);
@@ -1291,6 +1350,21 @@ public class GameClient extends Application {
                 break;
 
             case "initialInfo": // 如果是服务器发送的初始信息
+                if (getInt(json, "protocolVersion") != SUPPORTED_PROTOCOL_VERSION) {
+                    connectionStatusLabel.setText("Protocol version mismatch");
+                    System.err.println("[CLIENT] 不支持服务器协议版本");
+                    break;
+                }
+                String incomingSessionId = getString(json, "sessionId");
+                if (incomingSessionId == null || incomingSessionId.isBlank()) {
+                    System.err.println("[CLIENT] 丢弃缺少 sessionId 的 initialInfo");
+                    break;
+                }
+                if (serverSessionId != null && !serverSessionId.equals(incomingSessionId)) {
+                    lastStateSequence.set(-1);
+                    chunkBuffers.clear();
+                }
+                serverSessionId = incomingSessionId;
                 myPlayerId = getString(json, "playerId"); // 获取并保存我自己的玩家ID
                 if (myPlayerId == null || myPlayerId.isBlank()) {
                     System.err.println("[CLIENT] 丢弃缺少 playerId 的 initialInfo");
@@ -1303,6 +1377,7 @@ public class GameClient extends Application {
                 populateTeamSelection(getString(json, "mode")); // 根据游戏模式填充队伍选择界面
                 sendMessage(createJsonMessage("welcome_ack", "playerId", myPlayerId));
                 startStaticDataRequests();
+                completeReconnect();
                 break;
 
             case "server_info": // [新增] 处理发现的服务器信息
@@ -1312,6 +1387,8 @@ public class GameClient extends Application {
                 break;
 
             case "pong": // 如果是服务器对ping的响应
+                if (!hasCurrentSession(json))
+                    break;
                 ping = (System.nanoTime() - pingStartTime) / 1_000_000;
                 break;
         }
@@ -1423,8 +1500,10 @@ public class GameClient extends Application {
                         if (me != null && me.data != null) {
                             int dmg = getInt(payload, "dmg");
                             if (dmg > 0) {
-                                me.data.addProperty("damageDealt", getInt(me.data, "damageDealt") + dmg);
-                                me.data.addProperty("totalShotsHit", getInt(me.data, "totalShotsHit") + 1);
+                                me.mutateData(snapshot -> {
+                                    snapshot.addProperty("damageDealt", getInt(snapshot, "damageDealt") + dmg);
+                                    snapshot.addProperty("totalShotsHit", getInt(snapshot, "totalShotsHit") + 1);
+                                });
                                 updateLocalScore(me); // 实时更新分数
                             }
                         }
@@ -1479,6 +1558,28 @@ public class GameClient extends Application {
 
         perfTimeMsg_Events += (System.nanoTime() - eventStartTime); // 累加 [M5]
         perfTimeMsgHandling += (System.nanoTime() - msgHandleStartTime); // 累加总耗时
+    }
+
+    private boolean hasCurrentSession(JsonObject json) {
+        return serverSessionId != null
+                && json.has("protocolVersion")
+                && getInt(json, "protocolVersion") == SUPPORTED_PROTOCOL_VERSION
+                && serverSessionId.equals(getString(json, "sessionId"));
+    }
+
+    private boolean acceptStatePacket(JsonObject json) {
+        if (!hasCurrentSession(json) || !json.has("sequence")
+                || !json.get("sequence").isJsonPrimitive()
+                || !json.getAsJsonPrimitive("sequence").isNumber())
+            return false;
+        long incoming = json.get("sequence").getAsLong();
+        long previous = lastStateSequence.get();
+        while (incoming > previous) {
+            if (lastStateSequence.compareAndSet(previous, incoming))
+                return true;
+            previous = lastStateSequence.get();
+        }
+        return false;
     }
 
     // 触发闪光弹效果
@@ -1632,17 +1733,6 @@ public class GameClient extends Application {
 
     // 根据增量的游戏状态更新本地数据
     private void updateStateFromSmall(JsonObject state) {
-        // 在处理小包之前，先把大包（最新完整状态）里的烟雾和火焰数据复制过来
-        // 这样可以确保即使小包里没有这些信息，它们也不会丢失
-        if (latestGameState != null) {
-            if (latestGameState.has("smokePuffs")) {
-                state.add("smokePuffs", latestGameState.get("smokePuffs"));
-            }
-            if (latestGameState.has("firePatches")) {
-                state.add("firePatches", latestGameState.get("firePatches"));
-            }
-        }
-
         // 正常更新玩家的动态数据（位置、角度等）
         if (state.has("players") && !state.get("players").isJsonNull()) {
             state.getAsJsonArray("players").forEach(pEl -> {
@@ -1752,15 +1842,14 @@ public class GameClient extends Application {
             // 如果队伍发生了变化 (例如，从 CT 变到 T) 并且当前是DEMO模式
             if ("DEMOLITION".equals(getString(latestGameState, "mode")) && !currentTeam.equals(lastTeam)) {
 
-                // 2. 强制清空购买菜单中心内容，使其在下次按 B 时重建
-                if (buyMenuPane.getCenter() != null) {
-                    buyMenuPane.setCenter(null);
-                    buyMenuButtons.clear();
-                    undoMenuButtons.clear();
-                }
-
-                // 3. 更新 Map 中记录的最后一次队伍
                 localState.addProperty("lastTeam", currentTeam);
+                Platform.runLater(() -> {
+                    if (buyMenuPane != null && buyMenuPane.getCenter() != null) {
+                        buyMenuPane.setCenter(null);
+                        buyMenuButtons.clear();
+                        undoMenuButtons.clear();
+                    }
+                });
             }
         }
 
@@ -1791,9 +1880,10 @@ public class GameClient extends Application {
             });
         }
 
-        if (buyMenuPane.isVisible()) {
-            updateBuyMenuUI();
-        }
+        Platform.runLater(() -> {
+            if (buyMenuPane != null && buyMenuPane.isVisible())
+                updateBuyMenuUI();
+        });
     }
 
     // 发送消息到服务器
@@ -2846,6 +2936,7 @@ public class GameClient extends Application {
         // 创建一个 JSON 对象用于存储输入信息
         JsonObject input = new JsonObject();
         input.addProperty("type", "playerInput"); // 消息类型
+        addProtocolMetadata(input);
         input.addProperty("angle", angle); // 朝向角度
         // 只有当我活着的时候，开火状态才为true
         input.addProperty("shooting", isShooting && getBool(me.data, "isAlive"));
@@ -5419,6 +5510,7 @@ public class GameClient extends Application {
                         Point2D mouseWorld = camera.screenToWorld(mouseX, mouseY);
                         JsonObject message = new JsonObject();
                         message.addProperty("type", "requestPing");
+                        addProtocolMetadata(message);
                         JsonObject positionJson = new JsonObject();
                         positionJson.addProperty("x", mouseWorld.getX());
                         positionJson.addProperty("y", mouseWorld.getY());
@@ -5803,9 +5895,16 @@ public class GameClient extends Application {
     private String createJsonMessage(String type, String... keyVals) {
         JsonObject obj = new JsonObject();
         obj.addProperty("type", type);
+        addProtocolMetadata(obj);
         for (int i = 0; i < keyVals.length; i += 2)
             obj.addProperty(keyVals[i], keyVals[i + 1]);
         return gson.toJson(obj);
+    }
+
+    private void addProtocolMetadata(JsonObject obj) {
+        obj.addProperty("protocolVersion", SUPPORTED_PROTOCOL_VERSION);
+        if (serverSessionId != null)
+            obj.addProperty("sessionId", serverSessionId);
     }
 
     /**
@@ -6590,18 +6689,18 @@ public class GameClient extends Application {
 
                 // 3. 更新杀手统计
                 if (killer != null && killer.data != null) {
-                    int k = getInt(killer.data, "kills") + 1;
-                    killer.data.addProperty("kills", k);
-                    if (isHeadshot) {
-                        killer.data.addProperty("totalHeadshots", getInt(killer.data, "totalHeadshots") + 1);
-                    }
+                    killer.mutateData(snapshot -> {
+                        snapshot.addProperty("kills", getInt(snapshot, "kills") + 1);
+                        if (isHeadshot)
+                            snapshot.addProperty("totalHeadshots", getInt(snapshot, "totalHeadshots") + 1);
+                    });
                     // 同步更新 Score (公式: dmg + k*50 + hs*20 - d*50)
                     updateLocalScore(killer);
                 }
 
                 // 4. 更新受害者统计
                 if (victim != null && victim.data != null) {
-                    victim.data.addProperty("deaths", getInt(victim.data, "deaths") + 1);
+                    victim.mutateData(snapshot -> snapshot.addProperty("deaths", getInt(snapshot, "deaths") + 1));
                     updateLocalScore(victim);
                 }
 
@@ -7115,14 +7214,14 @@ public class GameClient extends Application {
      */
     private static class ClientPlayer {
         String id;
-        double renderX, renderY;
-        double targetX, targetY;
-        double vx, vy;
-        double angle; // 当前渲染使用的角度
-        double targetAngle; // 服务器发来的目标角度
-        double health, predictedRecoilAngle;
-        boolean isShooting, isReloading;
-        JsonObject data;
+        volatile double renderX, renderY;
+        volatile double targetX, targetY;
+        volatile double vx, vy;
+        volatile double angle; // 当前渲染使用的角度
+        volatile double targetAngle; // 服务器发来的目标角度
+        volatile double health, predictedRecoilAngle;
+        volatile boolean isShooting, isReloading;
+        volatile JsonObject data;
         private boolean isInitialized = false;
         // 用于检测换弹状态是否刚开始
         private boolean wasReloadingLastFrame = false;
@@ -7146,7 +7245,7 @@ public class GameClient extends Application {
          * 添加 synchronized 关键字，确保线程安全
          */
         synchronized void updateFull(JsonObject data) {
-            this.data = data;
+            this.data = data.deepCopy();
             this.targetX = getDouble(data, "x");
             this.targetY = getDouble(data, "y");
             this.vx = getDouble(data, "vx");
@@ -7172,22 +7271,9 @@ public class GameClient extends Application {
             boolean packetHasY = data.has("y") && data.get("y").isJsonPrimitive()
                     && data.getAsJsonPrimitive("y").isNumber();
 
-            // [!! GC 修复 !!]
-            // 我们现在不再创建深拷贝 (deepCopy)，
-            // 因为整个方法是 synchronized 的，所以我们可以安全地
-            // "就地"修改 this.data，而不用担心 'draw' 线程读到一半。
-
-            // 1. 如果 this.data 和 data 不是同一个对象
+            // 发布新的完整 JsonObject，渲染线程不会观察到合并一半的状态。
             if (this.data != data) {
-
-                // [!! 旧的 GC 风暴代码 !!]
-                // JsonObject mergedData = this.data.deepCopy(); // <--- 删除这行
-                // for (Map.Entry<String, JsonElement> entry : data.entrySet()) {
-                // mergedData.add(entry.getKey(), entry.getValue());
-                // }
-                // this.data = mergedData; // <--- 删除这行
-
-                // [!! 核心修复 !!] 属性合并逻辑
+                JsonObject mergedData = this.data == null ? new JsonObject() : this.data.deepCopy();
                 for (Map.Entry<String, JsonElement> entry : data.entrySet()) {
                     String key = entry.getKey();
                     JsonElement value = entry.getValue();
@@ -7199,9 +7285,11 @@ public class GameClient extends Application {
                         continue;
                     }
 
-                    this.data.add(key, value);
+                    mergedData.add(key, value.deepCopy());
                 }
+                this.data = mergedData;
             }
+            JsonObject currentData = this.data;
             // 立即同步关键变量
             // small_update 不带坐标；不能用合并对象中的旧 x/y 反复覆盖预测目标。
             if (packetHasX) {
@@ -7214,24 +7302,24 @@ public class GameClient extends Application {
                 if (Double.isFinite(incomingY))
                     this.targetY = incomingY;
             }
-            this.vx = getDouble(this.data, "vx");
-            this.vy = getDouble(this.data, "vy");
-            this.health = getDouble(this.data, "health");
-            this.isShooting = getBool(this.data, "isShooting");
-            boolean currentIsReloading = getBool(this.data, "isReloading");
+            this.vx = getDouble(currentData, "vx");
+            this.vy = getDouble(currentData, "vy");
+            this.health = getDouble(currentData, "health");
+            this.isShooting = getBool(currentData, "isShooting");
+            boolean currentIsReloading = getBool(currentData, "isReloading");
 
             // [修复] 处理角度同步。
-            double serverAngle = getDouble(this.data, "angle");
+            double serverAngle = getDouble(currentData, "angle");
             if (clientInstance.myPlayerId != null && clientInstance.myPlayerId.equals(this.id)) {
                 this.targetAngle = serverAngle;
             } else {
                 this.targetAngle = serverAngle;
             }
             if (currentIsReloading && !this.wasReloadingLastFrame) {
-                String weaponKey = getString(this.data, "weaponKey");
+                String weaponKey = getString(currentData, "weaponKey");
                 if (weaponKey != null && !weaponKey.isEmpty()) {
                     String reloadSoundKey = weaponKey + "_reload";
-                    Point2D playerPos = new Point2D(getDouble(this.data, "x"), getDouble(this.data, "y"));
+                    Point2D playerPos = new Point2D(getDouble(currentData, "x"), getDouble(currentData, "y"));
                     Platform.runLater(() -> {
                         this.clientInstance.playSound(reloadSoundKey, playerPos);
                     });
@@ -7240,10 +7328,26 @@ public class GameClient extends Application {
             this.isReloading = currentIsReloading;
             this.wasReloadingLastFrame = currentIsReloading;
 
-            this.predictedRecoilAngle = getDouble(this.data, "predictedRecoilAngle");
+            this.predictedRecoilAngle = getDouble(currentData, "predictedRecoilAngle");
         }
 
-        void updateRenderPosition(double deltaTime) {
+        synchronized void mutateData(Consumer<JsonObject> mutation) {
+            JsonObject updated = data == null ? new JsonObject() : data.deepCopy();
+            mutation.accept(updated);
+            data = updated;
+        }
+
+        synchronized void recomputeScore() {
+            JsonObject updated = data == null ? new JsonObject() : data.deepCopy();
+            int score = getInt(updated, "damageDealt")
+                    + getInt(updated, "kills") * 50
+                    + getInt(updated, "totalHeadshots") * 20
+                    - getInt(updated, "deaths") * 50;
+            updated.addProperty("score", score);
+            data = updated;
+        }
+
+        synchronized void updateRenderPosition(double deltaTime) {
             if (health > 0) {
                 // [修复] 将服务器的速度 (每tick位移) 转换为每秒位移，再乘以实际帧间隔 deltaTime
                 double speedMultiplier = deltaTime * 120.0;
@@ -7599,14 +7703,7 @@ public class GameClient extends Application {
     private void updateLocalScore(cs2d.client.GameClient.ClientPlayer p) {
         if (p == null || p.data == null)
             return;
-        int dmg = getInt(p.data, "damageDealt");
-        int k = getInt(p.data, "kills");
-        int hs = getInt(p.data, "totalHeadshots");
-        int d = getInt(p.data, "deaths");
-
-        // 规则：伤害1+1，击杀1+50，爆头+20，死亡-50
-        int score = dmg + (k * 50) + (hs * 20) - (d * 50);
-        p.data.addProperty("score", score);
+        p.recomputeScore();
     }
 
     private void updateHUDLabels(StackPane interactionBarContainer, Pane interactionProgressBar) {
@@ -7667,9 +7764,6 @@ public class GameClient extends Application {
             if (controlledBot != null) {
                 // 将人机的数据复制到 me.data 上，确保 isInteracting 等状态同步，
                 // 且 isAlive 同步是为了在 Bot 死亡时能正确进入观战逻辑。
-                me.data.addProperty("isInteracting", getBool(controlledBot.data, "isInteracting"));
-                me.data.addProperty("hasBomb", getBool(controlledBot.data, "hasBomb"));
-                me.data.addProperty("isAlive", getBool(controlledBot.data, "isAlive"));
                 // 返回 Bot 的数据作为 HUD 的数据源
                 return controlledBot.data;
             }
@@ -8460,10 +8554,10 @@ public class GameClient extends Application {
 
     private static class ClientGrenade {
         String id;
-        double renderX, renderY; // 当前帧的渲染位置（平滑）
-        double targetX, targetY; // 服务器发来的目标位置
-        double vx, vy; // 服务器发来的速度
-        JsonObject data; // 存储原始JSON数据
+        volatile double renderX, renderY; // 当前帧的渲染位置（平滑）
+        volatile double targetX, targetY; // 服务器发来的目标位置
+        volatile double vx, vy; // 服务器发来的速度
+        volatile JsonObject data; // 存储原始JSON数据
         private boolean isInitialized = false;
 
         private final cs2d.client.GameClient clientInstance;
@@ -8480,8 +8574,8 @@ public class GameClient extends Application {
             }
         }
 
-        void update(JsonObject data) {
-            this.data = data;
+        synchronized void update(JsonObject data) {
+            this.data = data.deepCopy();
             this.targetX = getDouble(data, "x");
             this.targetY = getDouble(data, "y");
             this.vx = getDouble(data, "vx");
@@ -8489,7 +8583,7 @@ public class GameClient extends Application {
         }
 
         // [核心] 每帧调用，让渲染位置平滑地追赶目标位置
-        void updateRenderPosition(double deltaTime) {
+        synchronized void updateRenderPosition(double deltaTime) {
             // [修复] 时间无关的平滑插值 (Time-Independent Lerp)
             double baseLerp = 0.3; // 60Hz 时的标准平滑度
             double actualLerp = 1.0 - Math.pow(1.0 - baseLerp, deltaTime * 60.0);
