@@ -493,7 +493,11 @@ public class GameClient extends Application {
     // 存储所有客户端玩家的信息
     private final ConcurrentHashMap<String, cs2d.client.GameClient.ClientPlayer> clientPlayers = new ConcurrentHashMap<>();
     // 存储地上掉落的物品信息
-    private final ConcurrentHashMap<String, JsonObject> droppedItems = new ConcurrentHashMap<>();
+    /**
+     * 地面物品使用不可变快照。状态线程构建完成后一次替换，避免渲染线程观察到
+     * clear() 与逐项 put() 之间的短暂空集合。
+     */
+    private volatile Map<String, JsonObject> droppedItems = Map.of();
     // 存储视觉特效（如爆炸、枪火）的列表
     private final List<JsonObject> visualEffects = new CopyOnWriteArrayList<>();
     // 存储所有僵尸的信息
@@ -818,7 +822,7 @@ public class GameClient extends Application {
             // 清理核心数据结构，防止内存泄漏和状态干扰
             clientPlayers.clear();
             clientZombies.clear();
-            droppedItems.clear();
+            droppedItems = Map.of();
             visualEffects.clear();
             smokePuffs.clear();
             firePatches.clear();
@@ -1107,7 +1111,7 @@ public class GameClient extends Application {
             // --- 彻底清理所有游戏状态 ---
             clientPlayers.clear();
             clientZombies.clear();
-            droppedItems.clear();
+            droppedItems = Map.of();
             visualEffects.clear();
             smokePuffs.clear();
             firePatches.clear();
@@ -1579,6 +1583,23 @@ public class GameClient extends Application {
         return merged;
     }
 
+    /** 构建完成后整体发布，渲染线程不会看见半更新的地面物品集合。 */
+    static Map<String, JsonObject> createDroppedItemSnapshot(JsonArray items) {
+        if (items == null || items.isEmpty())
+            return Map.of();
+
+        Map<String, JsonObject> snapshot = new LinkedHashMap<>();
+        items.forEach(element -> {
+            if (!element.isJsonObject())
+                return;
+            JsonObject item = element.getAsJsonObject();
+            String id = getString(item, "id");
+            if (id != null && !id.isBlank())
+                snapshot.put(id, item);
+        });
+        return Map.copyOf(snapshot);
+    }
+
     // 触发闪光弹效果
     // private void triggerFlashbangEffect(long duration) {
     // this.flashBangAlpha = 1.0; // 屏幕瞬间变白（透明度设为1）
@@ -1650,11 +1671,7 @@ public class GameClient extends Application {
 
         // 更新地上掉落的物品信息
         if (state.has("droppedItems")) {
-            droppedItems.clear(); // 清空旧数据
-            state.getAsJsonArray("droppedItems").forEach(iEl -> {
-                JsonObject iData = iEl.getAsJsonObject();
-                droppedItems.put(getString(iData, "id"), iData); // 添加新数据
-            });
+            droppedItems = createDroppedItemSnapshot(state.getAsJsonArray("droppedItems"));
         }
 
         // 更新飞行中的手榴弹
@@ -2209,6 +2226,8 @@ public class GameClient extends Application {
         long fovStartTime = System.nanoTime();
         // [注意] updateCamera 已经在 AnimationTimer.handle 中先被调用了，这里无需重复调用
         calculateFOVIfNeeded(); // 这个方法负责计算 fovPoints
+        // 本帧所有可见性判定与迷雾绘制共用同一个不可变快照，避免后台FOV在半帧中切换。
+        List<Point2D> frameFovPoints = this.fovPoints;
         long fovEndTime = System.nanoTime();
         perfTimeFovCalc += (fovEndTime - fovStartTime); // 累加 [1]
 
@@ -2226,7 +2245,7 @@ public class GameClient extends Application {
 
         // 3a. 绘制世界物体 (障碍物 + 实体)
         // [注意] drawWorldObjects() 方法现在会 *内部* 累加 [2a] 和 [2b]
-        drawWorldObjects();
+        drawWorldObjects(frameFovPoints);
 
         // 3c. 绘制特效 (VFX)
         long vfxStartTime = System.nanoTime();
@@ -2271,7 +2290,7 @@ public class GameClient extends Application {
         // --- 4. 计时迷雾绘制 ---
         long fogStartTime = System.nanoTime();
         gc.save();
-        drawFog(); // 绘制战争迷雾
+        drawFog(frameFovPoints); // 绘制战争迷雾
 
         gc.restore();
         long fogEndTime = System.nanoTime();
@@ -2420,7 +2439,7 @@ public class GameClient extends Application {
      * 绘制所有世界物体
      * 此版本从 Quadtree 查询 StaticObstacle 对象。
      */
-    private void drawWorldObjects() {
+    private void drawWorldObjects(List<Point2D> frameFovPoints) {
         // --- A. 计算相机视野的世界坐标范围 ---
         Point2D topLeftWorld = camera.screenToWorld(0, 0);
         Point2D bottomRightWorld = camera.screenToWorld(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -2474,7 +2493,7 @@ public class GameClient extends Application {
             if (itemX + 10 > minX && itemX - 10 < maxX &&
                     itemY + 10 > minY && itemY - 10 < maxY) {
                 // 2. [新增] 视野多边形剔除: 只有玩家视野内才显示 (像人一样)
-                if (isCircleVisibleInPolygon(new Point2D(itemX, itemY), 10, fovPoints)) {
+                if (isCircleVisibleInPolygon(new Point2D(itemX, itemY), 10, frameFovPoints)) {
                     drawDroppedItem(item);
                 }
             }
@@ -2490,7 +2509,7 @@ public class GameClient extends Application {
             if (bombX + 7.5 > minX && bombX - 7.5 < maxX &&
                     bombY + 7.5 > minY && bombY - 7.5 < maxY) {
                 // [新增] 只有在玩家视野内才显示 C4 (像人一样)
-                if (isCircleVisibleInPolygon(new Point2D(bombX, bombY), 7.5, fovPoints)) {
+                if (isCircleVisibleInPolygon(new Point2D(bombX, bombY), 7.5, frameFovPoints)) {
                     drawPlantedBomb(getDouble(latestGameState, "bombTimer"));
                 }
             }
@@ -7774,10 +7793,7 @@ public class GameClient extends Application {
 
     // 绘制战争迷雾
     // 绘制战争迷雾
-    private void drawFog() {
-        // [新] 1. 立即获取 volatile 变量的本地引用
-        // 这确保我们从头到尾使用的都是 *同一个* List 对象
-        List<Point2D> currentFovPoints = this.fovPoints;
+    private void drawFog(List<Point2D> currentFovPoints) {
 
         // if (fovPoints.isEmpty()) { // [旧]
         if (currentFovPoints.isEmpty()) { // [新]

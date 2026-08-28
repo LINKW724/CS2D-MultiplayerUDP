@@ -1,6 +1,7 @@
 package cs2d.client;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +13,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import javafx.geometry.Point2D;
 import javafx.geometry.Rectangle2D;
@@ -19,9 +21,29 @@ import javafx.geometry.Rectangle2D;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameClientProtocolTest {
+    @Test
+    void droppedItemsArePublishedAsOneCompleteImmutableSnapshot() {
+        JsonArray incoming = new JsonArray();
+        JsonObject first = new JsonObject();
+        first.addProperty("id", "weapon-1");
+        first.addProperty("name", "AK47");
+        incoming.add(first);
+
+        Map<String, JsonObject> snapshot = GameClient.createDroppedItemSnapshot(incoming);
+        JsonObject second = new JsonObject();
+        second.addProperty("id", "weapon-2");
+        incoming.add(second);
+
+        assertEquals(1, snapshot.size());
+        assertEquals("AK47", snapshot.get("weapon-1").get("name").getAsString());
+        assertFalse(snapshot.containsKey("weapon-2"));
+        assertThrows(UnsupportedOperationException.class, snapshot::clear);
+    }
+
     @Test
     void fovOptimizationPreservesRayPrecisionAndIntersectionGeometry() {
         assertEquals(424, GameClient.FOV_RAY_COUNT);
