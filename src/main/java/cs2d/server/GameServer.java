@@ -379,7 +379,7 @@ public class GameServer {
                 enqueueGameCommand(() -> gameState.playerDropC4(playerId));
                 break;
             case "switchToSlot":
-                int slot = requireInt(json, "slot", 0, 16);
+                int slot = requireCompatibleInt(json, "slot", 0, 16);
                 enqueueGameCommand(() -> gameState.playerSwitchSlot(playerId, slot));
                 break;
             case "requestPing":
@@ -489,6 +489,35 @@ public class GameServer {
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
             throw new IllegalArgumentException("字段 " + field + " 必须是整数");
         int result = value.getAsInt();
+        if (result < min || result > max)
+            throw new IllegalArgumentException("字段 " + field + " 超出范围");
+        return result;
+    }
+
+    /**
+     * 槽位号早期客户端按 JSON 字符串发送；新协议使用数字。迁移期间只兼容纯整数字符串，
+     * 仍然拒绝小数、指数、空值和越界数据。
+     */
+    static int requireCompatibleInt(JsonObject json, String field, int min, int max) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonPrimitive())
+            throw new IllegalArgumentException("字段 " + field + " 必须是整数");
+        var primitive = value.getAsJsonPrimitive();
+        int result;
+        if (primitive.isNumber()) {
+            double numericValue = primitive.getAsDouble();
+            if (!Double.isFinite(numericValue) || numericValue != Math.rint(numericValue))
+                throw new IllegalArgumentException("字段 " + field + " 必须是整数");
+            result = primitive.getAsInt();
+        } else if (primitive.isString() && primitive.getAsString().matches("-?\\d+")) {
+            try {
+                result = Integer.parseInt(primitive.getAsString());
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("字段 " + field + " 必须是整数", e);
+            }
+        } else {
+            throw new IllegalArgumentException("字段 " + field + " 必须是整数");
+        }
         if (result < min || result > max)
             throw new IllegalArgumentException("字段 " + field + " 超出范围");
         return result;

@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class NetworkProtocolTest {
     private final Gson gson = new Gson();
@@ -40,5 +41,20 @@ class NetworkProtocolTest {
         assertEquals(350, GameState.calculatePurchaseCost(Item.KEVLAR_HELMET, true, false));
         assertEquals(1000, GameState.calculatePurchaseCost(Item.KEVLAR_HELMET, false, false));
         assertEquals(1000, GameState.calculatePurchaseCost(Item.KEVLAR_HELMET, true, true));
+    }
+
+    @Test
+    void slotProtocolAcceptsNumericAndLegacyStringIntegers() {
+        JsonObject numeric = new JsonObject();
+        numeric.addProperty("slot", 2);
+        JsonObject legacy = new JsonObject();
+        legacy.addProperty("slot", "3");
+        JsonObject decimal = new JsonObject();
+        decimal.addProperty("slot", 2.5);
+
+        assertEquals(2, GameServer.requireCompatibleInt(numeric, "slot", 1, 10));
+        assertEquals(3, GameServer.requireCompatibleInt(legacy, "slot", 1, 10));
+        assertThrows(IllegalArgumentException.class,
+                () -> GameServer.requireCompatibleInt(decimal, "slot", 1, 10));
     }
 }
