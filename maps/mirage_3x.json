@@ -1,0 +1,7156 @@
+{
+  "width": 4392,
+  "height": 3840,
+  "obstacles": [
+    {
+      "type": "RECTANGLE",
+      "x": 2340.0,
+      "y": 120.0,
+      "width": 360.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2700.0,
+      "y": 132.0,
+      "width": 840.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 996.0,
+      "y": 144.0,
+      "width": 312.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2340.0,
+      "y": 144.0,
+      "width": 12.0,
+      "height": 276.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2460.0,
+      "y": 144.0,
+      "width": 12.0,
+      "height": 216.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 984.0,
+      "y": 156.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2352.0,
+      "y": 156.0,
+      "width": 12.0,
+      "height": 252.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 156.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3516.0,
+      "y": 156.0,
+      "width": 24.0,
+      "height": 156.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 336.0,
+      "y": 168.0,
+      "width": 648.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 996.0,
+      "y": 168.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1284.0,
+      "y": 168.0,
+      "width": 24.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 324.0,
+      "y": 180.0,
+      "width": 12.0,
+      "height": 312.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 336.0,
+      "y": 192.0,
+      "width": 12.0,
+      "height": 300.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 360.0,
+      "y": 192.0,
+      "width": 24.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 840.0,
+      "y": 192.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1308.0,
+      "y": 192.0,
+      "width": 528.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 348.0,
+      "y": 204.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 384.0,
+      "y": 204.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 828.0,
+      "y": 216.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1812.0,
+      "y": 216.0,
+      "width": 24.0,
+      "height": 192.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 840.0,
+      "y": 228.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 840.0,
+      "y": 240.0,
+      "width": 24.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 252.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 348.0,
+      "y": 264.0,
+      "width": 12.0,
+      "height": 168.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 360.0,
+      "y": 276.0,
+      "width": 72.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1308.0,
+      "y": 276.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3000.0,
+      "y": 276.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 432.0,
+      "y": 288.0,
+      "width": 72.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2700.0,
+      "y": 288.0,
+      "width": 288.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3012.0,
+      "y": 288.0,
+      "width": 408.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3492.0,
+      "y": 288.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 504.0,
+      "y": 300.0,
+      "width": 60.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2676.0,
+      "y": 300.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3480.0,
+      "y": 300.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2664.0,
+      "y": 312.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2700.0,
+      "y": 312.0,
+      "width": 12.0,
+      "height": 420.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3492.0,
+      "y": 312.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2472.0,
+      "y": 324.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2652.0,
+      "y": 324.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2688.0,
+      "y": 324.0,
+      "width": 12.0,
+      "height": 408.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 840.0,
+      "y": 336.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2640.0,
+      "y": 336.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 336.0,
+      "width": 444.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3504.0,
+      "y": 336.0,
+      "width": 540.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 504.0,
+      "y": 348.0,
+      "width": 48.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 828.0,
+      "y": 348.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 852.0,
+      "y": 348.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 360.0,
+      "width": 24.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3312.0,
+      "y": 360.0,
+      "width": 24.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4020.0,
+      "y": 360.0,
+      "width": 24.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1284.0,
+      "y": 372.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 876.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 912.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 960.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 996.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1032.0,
+      "y": 384.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1080.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1128.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1164.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1200.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1236.0,
+      "y": 384.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1308.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1332.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1368.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1572.0,
+      "y": 384.0,
+      "width": 12.0,
+      "height": 348.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 432.0,
+      "y": 396.0,
+      "width": 60.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 696.0,
+      "y": 396.0,
+      "width": 132.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 888.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 924.0,
+      "y": 396.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 972.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1008.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1056.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1092.0,
+      "y": 396.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1140.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1176.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1212.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1260.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1344.0,
+      "y": 396.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1380.0,
+      "y": 396.0,
+      "width": 192.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 396.0,
+      "width": 12.0,
+      "height": 336.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1836.0,
+      "y": 396.0,
+      "width": 504.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1248.0,
+      "y": 408.0,
+      "width": 24.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 360.0,
+      "y": 420.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 468.0,
+      "y": 420.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 372.0,
+      "y": 468.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 396.0,
+      "y": 468.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3000.0,
+      "y": 468.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 108.0,
+      "y": 480.0,
+      "width": 216.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 348.0,
+      "y": 480.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 384.0,
+      "y": 480.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3036.0,
+      "y": 480.0,
+      "width": 24.0,
+      "height": 300.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1260.0,
+      "y": 492.0,
+      "width": 312.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4044.0,
+      "y": 492.0,
+      "width": 240.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 96.0,
+      "y": 504.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4260.0,
+      "y": 504.0,
+      "width": 24.0,
+      "height": 456.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 84.0,
+      "y": 516.0,
+      "width": 12.0,
+      "height": 456.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 72.0,
+      "y": 528.0,
+      "width": 12.0,
+      "height": 444.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1800.0,
+      "y": 528.0,
+      "width": 12.0,
+      "height": 204.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2340.0,
+      "y": 540.0,
+      "width": 120.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2472.0,
+      "y": 540.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1812.0,
+      "y": 552.0,
+      "width": 528.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2484.0,
+      "y": 552.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 528.0,
+      "y": 576.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 564.0,
+      "y": 576.0,
+      "width": 12.0,
+      "height": 156.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 636.0,
+      "y": 576.0,
+      "width": 12.0,
+      "height": 156.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 816.0,
+      "y": 576.0,
+      "width": 48.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 912.0,
+      "y": 576.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 540.0,
+      "y": 588.0,
+      "width": 24.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 576.0,
+      "y": 588.0,
+      "width": 60.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 648.0,
+      "y": 588.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 804.0,
+      "y": 588.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 864.0,
+      "y": 588.0,
+      "width": 48.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 924.0,
+      "y": 588.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 660.0,
+      "y": 612.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 792.0,
+      "y": 612.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3432.0,
+      "y": 612.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3516.0,
+      "y": 612.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3384.0,
+      "y": 624.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3444.0,
+      "y": 624.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3528.0,
+      "y": 624.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3372.0,
+      "y": 636.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3540.0,
+      "y": 636.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3360.0,
+      "y": 648.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3564.0,
+      "y": 648.0,
+      "width": 264.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3348.0,
+      "y": 660.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3828.0,
+      "y": 660.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 312.0,
+      "y": 672.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1596.0,
+      "y": 672.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3324.0,
+      "y": 672.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3840.0,
+      "y": 672.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 324.0,
+      "y": 684.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 684.0,
+      "width": 60.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1608.0,
+      "y": 684.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3312.0,
+      "y": 684.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3852.0,
+      "y": 684.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1260.0,
+      "y": 696.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1332.0,
+      "y": 696.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1620.0,
+      "y": 696.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3300.0,
+      "y": 696.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3864.0,
+      "y": 696.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 708.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1356.0,
+      "y": 708.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1632.0,
+      "y": 708.0,
+      "width": 168.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1881.0,
+      "y": 708.0,
+      "width": 828.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3288.0,
+      "y": 708.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3876.0,
+      "y": 708.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 852.0,
+      "y": 720.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3276.0,
+      "y": 720.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3888.0,
+      "y": 720.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2088.0,
+      "y": 732.0,
+      "width": 24.0,
+      "height": 516.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3264.0,
+      "y": 732.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3900.0,
+      "y": 732.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1344.0,
+      "y": 744.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3264.0,
+      "y": 744.0,
+      "width": 24.0,
+      "height": 480.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3912.0,
+      "y": 744.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1320.0,
+      "y": 756.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 756.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3924.0,
+      "y": 756.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1284.0,
+      "y": 768.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3936.0,
+      "y": 768.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 780.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3948.0,
+      "y": 780.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 792.0,
+      "width": 24.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3960.0,
+      "y": 792.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3000.0,
+      "y": 816.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3036.0,
+      "y": 816.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3972.0,
+      "y": 816.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 792.0,
+      "y": 828.0,
+      "width": 120.0,
+      "height": 180.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3012.0,
+      "y": 828.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3060.0,
+      "y": 828.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3984.0,
+      "y": 828.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3072.0,
+      "y": 840.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 528.0,
+      "y": 888.0,
+      "width": 24.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 912.0,
+      "y": 888.0,
+      "width": 24.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 888.0,
+      "width": 84.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 756.0,
+      "y": 900.0,
+      "width": 36.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3948.0,
+      "y": 900.0,
+      "width": 24.0,
+      "height": 1188.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 912.0,
+      "width": 12.0,
+      "height": 204.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3048.0,
+      "y": 912.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3996.0,
+      "y": 912.0,
+      "width": 84.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4284.0,
+      "y": 936.0,
+      "width": 60.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 156.0,
+      "y": 948.0,
+      "width": 168.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 96.0,
+      "y": 960.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 324.0,
+      "y": 960.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 972.0,
+      "width": 612.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4272.0,
+      "y": 972.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 336.0,
+      "y": 984.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1224.0,
+      "y": 984.0,
+      "width": 48.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1884.0,
+      "y": 984.0,
+      "width": 84.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3012.0,
+      "y": 984.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 552.0,
+      "y": 996.0,
+      "width": 108.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 996.0,
+      "width": 12.0,
+      "height": 360.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1872.0,
+      "y": 996.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 804.0,
+      "y": 1008.0,
+      "width": 108.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4284.0,
+      "y": 1008.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4332.0,
+      "y": 1008.0,
+      "width": 12.0,
+      "height": 492.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1236.0,
+      "y": 1044.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1860.0,
+      "y": 1044.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1260.0,
+      "y": 1056.0,
+      "width": 12.0,
+      "height": 300.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 324.0,
+      "y": 1080.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1896.0,
+      "y": 1080.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 312.0,
+      "y": 1092.0,
+      "width": 12.0,
+      "height": 252.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1572.0,
+      "y": 1092.0,
+      "width": 300.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 1092.0,
+      "width": 12.0,
+      "height": 240.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 300.0,
+      "y": 1104.0,
+      "width": 12.0,
+      "height": 240.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 336.0,
+      "y": 1116.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1572.0,
+      "y": 1116.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3000.0,
+      "y": 1116.0,
+      "width": 12.0,
+      "height": 192.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 348.0,
+      "y": 1128.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1572.0,
+      "y": 1176.0,
+      "width": 12.0,
+      "height": 432.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1188.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1860.0,
+      "y": 1200.0,
+      "width": 24.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3288.0,
+      "y": 1212.0,
+      "width": 108.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1236.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3372.0,
+      "y": 1236.0,
+      "width": 24.0,
+      "height": 828.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2100.0,
+      "y": 1248.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2124.0,
+      "y": 1260.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1272.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2112.0,
+      "y": 1272.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1860.0,
+      "y": 1284.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2136.0,
+      "y": 1284.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1692.0,
+      "y": 1296.0,
+      "width": 168.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1308.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1704.0,
+      "y": 1308.0,
+      "width": 156.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2148.0,
+      "y": 1308.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 1308.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 324.0,
+      "y": 1320.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1704.0,
+      "y": 1320.0,
+      "width": 24.0,
+      "height": 312.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2952.0,
+      "y": 1320.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 372.0,
+      "y": 1332.0,
+      "width": 12.0,
+      "height": 480.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2928.0,
+      "y": 1332.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 360.0,
+      "y": 1344.0,
+      "width": 12.0,
+      "height": 468.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2160.0,
+      "y": 1344.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2904.0,
+      "y": 1344.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3324.0,
+      "y": 1344.0,
+      "width": 48.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 465.0,
+      "y": 1362.0,
+      "width": 24.0,
+      "height": 192.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 888.0,
+      "y": 1356.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1356.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2172.0,
+      "y": 1356.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2880.0,
+      "y": 1356.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2856.0,
+      "y": 1368.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 900.0,
+      "y": 1380.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2184.0,
+      "y": 1380.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2832.0,
+      "y": 1380.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 636.0,
+      "y": 1392.0,
+      "width": 168.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 888.0,
+      "y": 1392.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1392.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2364.0,
+      "y": 1392.0,
+      "width": 468.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4320.0,
+      "y": 1392.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2196.0,
+      "y": 1404.0,
+      "width": 228.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2436.0,
+      "y": 1404.0,
+      "width": 396.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2340.0,
+      "y": 1416.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 912.0,
+      "y": 1440.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1440.0,
+      "width": 12.0,
+      "height": 180.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 924.0,
+      "y": 1464.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1884.0,
+      "y": 1464.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 636.0,
+      "y": 1476.0,
+      "width": 24.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4284.0,
+      "y": 1476.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4128.0,
+      "y": 1488.0,
+      "width": 12.0,
+      "height": 936.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 936.0,
+      "y": 1500.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4272.0,
+      "y": 1500.0,
+      "width": 24.0,
+      "height": 924.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 1512.0,
+      "width": 60.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1596.0,
+      "y": 1512.0,
+      "width": 108.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 948.0,
+      "y": 1524.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1596.0,
+      "y": 1536.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 492.0,
+      "y": 1548.0,
+      "width": 144.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1884.0,
+      "y": 1548.0,
+      "width": 48.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 516.0,
+      "y": 1560.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 600.0,
+      "y": 1560.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 960.0,
+      "y": 1560.0,
+      "width": 300.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1260.0,
+      "y": 1572.0,
+      "width": 12.0,
+      "height": 264.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 996.0,
+      "y": 1584.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1248.0,
+      "y": 1584.0,
+      "width": 12.0,
+      "height": 252.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1608.0,
+      "y": 1584.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3144.0,
+      "y": 1584.0,
+      "width": 36.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3132.0,
+      "y": 1596.0,
+      "width": 12.0,
+      "height": 288.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3180.0,
+      "y": 1596.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1008.0,
+      "y": 1608.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2819.0,
+      "y": 1585.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3120.0,
+      "y": 1608.0,
+      "width": 12.0,
+      "height": 276.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3192.0,
+      "y": 1608.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 1620.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3108.0,
+      "y": 1620.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 1632.0,
+      "width": 24.0,
+      "height": 240.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3204.0,
+      "y": 1632.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1008.0,
+      "y": 1644.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3096.0,
+      "y": 1680.0,
+      "width": 24.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3084.0,
+      "y": 1692.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3144.0,
+      "y": 1692.0,
+      "width": 24.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3072.0,
+      "y": 1704.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3168.0,
+      "y": 1716.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 516.0,
+      "y": 1728.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 600.0,
+      "y": 1728.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3048.0,
+      "y": 1728.0,
+      "width": 24.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3180.0,
+      "y": 1728.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 504.0,
+      "y": 1740.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 552.0,
+      "y": 1740.0,
+      "width": 24.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 624.0,
+      "y": 1740.0,
+      "width": 24.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 672.0,
+      "y": 1740.0,
+      "width": 144.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3036.0,
+      "y": 1740.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 528.0,
+      "y": 1752.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 576.0,
+      "y": 1752.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 612.0,
+      "y": 1752.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 648.0,
+      "y": 1752.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 816.0,
+      "y": 1752.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1728.0,
+      "y": 1752.0,
+      "width": 24.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3012.0,
+      "y": 1752.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 672.0,
+      "y": 1764.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1092.0,
+      "y": 1776.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3024.0,
+      "y": 1776.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 384.0,
+      "y": 1788.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 420.0,
+      "y": 1788.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 456.0,
+      "y": 1788.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 828.0,
+      "y": 1788.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 876.0,
+      "y": 1788.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 912.0,
+      "y": 1788.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 960.0,
+      "y": 1788.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 996.0,
+      "y": 1788.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1032.0,
+      "y": 1788.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1080.0,
+      "y": 1788.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1116.0,
+      "y": 1788.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3144.0,
+      "y": 1788.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3180.0,
+      "y": 1788.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 396.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 432.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 852.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 888.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 936.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1056.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1104.0,
+      "y": 1800.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1140.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1704.0,
+      "y": 1800.0,
+      "width": 12.0,
+      "height": 504.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3156.0,
+      "y": 1800.0,
+      "width": 24.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4140.0,
+      "y": 1800.0,
+      "width": 12.0,
+      "height": 684.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1044.0,
+      "y": 1812.0,
+      "width": 12.0,
+      "height": 1008.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1128.0,
+      "y": 1812.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1284.0,
+      "y": 1812.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1332.0,
+      "y": 1812.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3108.0,
+      "y": 1812.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1056.0,
+      "y": 1824.0,
+      "width": 12.0,
+      "height": 984.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1308.0,
+      "y": 1824.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1344.0,
+      "y": 1824.0,
+      "width": 24.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1536.0,
+      "y": 1860.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 1872.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1368.0,
+      "y": 1896.0,
+      "width": 96.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1728.0,
+      "y": 1896.0,
+      "width": 360.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1356.0,
+      "y": 1908.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2088.0,
+      "y": 1908.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2220.0,
+      "y": 1908.0,
+      "width": 216.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 1920.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1992.0,
+      "y": 1920.0,
+      "width": 12.0,
+      "height": 276.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2016.0,
+      "y": 1920.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2064.0,
+      "y": 1920.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2220.0,
+      "y": 1920.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2424.0,
+      "y": 1920.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 1932.0,
+      "width": 24.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1548.0,
+      "y": 1932.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2004.0,
+      "y": 1932.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2028.0,
+      "y": 1932.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2244.0,
+      "y": 1932.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2436.0,
+      "y": 1932.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2220.0,
+      "y": 1956.0,
+      "width": 12.0,
+      "height": 288.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2232.0,
+      "y": 1968.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2904.0,
+      "y": 1980.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2928.0,
+      "y": 1980.0,
+      "width": 48.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2916.0,
+      "y": 1992.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 1992.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1440.0,
+      "y": 2004.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1452.0,
+      "y": 2016.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1452.0,
+      "y": 2028.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2256.0,
+      "y": 2040.0,
+      "width": 72.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2448.0,
+      "y": 2040.0,
+      "width": 456.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 2040.0,
+      "width": 384.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2328.0,
+      "y": 2052.0,
+      "width": 12.0,
+      "height": 312.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2316.0,
+      "y": 2064.0,
+      "width": 12.0,
+      "height": 336.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3936.0,
+      "y": 2076.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1440.0,
+      "y": 2113.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3924.0,
+      "y": 2088.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3912.0,
+      "y": 2100.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1440.0,
+      "y": 2112.0,
+      "width": 12.0,
+      "height": 204.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1476.0,
+      "y": 2112.0,
+      "width": 12.0,
+      "height": 192.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3540.0,
+      "y": 2112.0,
+      "width": 372.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3540.0,
+      "y": 2124.0,
+      "width": 24.0,
+      "height": 168.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2004.0,
+      "y": 2172.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2040.0,
+      "y": 2184.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2028.0,
+      "y": 2196.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1116.0,
+      "y": 2208.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1452.0,
+      "y": 2208.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3384.0,
+      "y": 2208.0,
+      "width": 156.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1980.0,
+      "y": 2220.0,
+      "width": 48.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3384.0,
+      "y": 2220.0,
+      "width": 24.0,
+      "height": 420.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1128.0,
+      "y": 2232.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1380.0,
+      "y": 2232.0,
+      "width": 60.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2040.0,
+      "y": 2232.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1368.0,
+      "y": 2244.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4008.0,
+      "y": 2256.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2040.0,
+      "y": 2268.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1116.0,
+      "y": 2280.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1488.0,
+      "y": 2280.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1656.0,
+      "y": 2280.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4008.0,
+      "y": 2280.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1068.0,
+      "y": 2292.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1452.0,
+      "y": 2292.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1524.0,
+      "y": 2292.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1644.0,
+      "y": 2292.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1980.0,
+      "y": 2292.0,
+      "width": 24.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 2304.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1332.0,
+      "y": 2304.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 2304.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1656.0,
+      "y": 2304.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3420.0,
+      "y": 2304.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3624.0,
+      "y": 2304.0,
+      "width": 384.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 2316.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1500.0,
+      "y": 2316.0,
+      "width": 12.0,
+      "height": 360.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1668.0,
+      "y": 2316.0,
+      "width": 60.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 2328.0,
+      "width": 12.0,
+      "height": 336.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3612.0,
+      "y": 2328.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1704.0,
+      "y": 2340.0,
+      "width": 24.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2004.0,
+      "y": 2340.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3408.0,
+      "y": 2340.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 2352.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2016.0,
+      "y": 2352.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2232.0,
+      "y": 2352.0,
+      "width": 84.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2064.0,
+      "y": 2364.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2220.0,
+      "y": 2364.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1728.0,
+      "y": 2376.0,
+      "width": 120.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1896.0,
+      "y": 2376.0,
+      "width": 168.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2328.0,
+      "y": 2376.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2364.0,
+      "y": 2388.0,
+      "width": 12.0,
+      "height": 240.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1836.0,
+      "y": 2400.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1896.0,
+      "y": 2400.0,
+      "width": 24.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2352.0,
+      "y": 2400.0,
+      "width": 12.0,
+      "height": 228.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3708.0,
+      "y": 2400.0,
+      "width": 420.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1824.0,
+      "y": 2412.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3696.0,
+      "y": 2412.0,
+      "width": 12.0,
+      "height": 456.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4152.0,
+      "y": 2412.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3708.0,
+      "y": 2424.0,
+      "width": 12.0,
+      "height": 444.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4152.0,
+      "y": 2424.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4236.0,
+      "y": 2424.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4272.0,
+      "y": 2424.0,
+      "width": 12.0,
+      "height": 192.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1848.0,
+      "y": 2436.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4260.0,
+      "y": 2436.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4248.0,
+      "y": 2448.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3744.0,
+      "y": 2460.0,
+      "width": 396.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3744.0,
+      "y": 2472.0,
+      "width": 336.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4092.0,
+      "y": 2472.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3744.0,
+      "y": 2484.0,
+      "width": 24.0,
+      "height": 588.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2664.0,
+      "y": 2496.0,
+      "width": 684.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2664.0,
+      "y": 2520.0,
+      "width": 120.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3324.0,
+      "y": 2520.0,
+      "width": 24.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1596.0,
+      "y": 2580.0,
+      "width": 84.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1584.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1680.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2664.0,
+      "y": 2592.0,
+      "width": 84.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3156.0,
+      "y": 2592.0,
+      "width": 168.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3912.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3948.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3984.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4068.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4104.0,
+      "y": 2592.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4152.0,
+      "y": 2592.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1596.0,
+      "y": 2604.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1668.0,
+      "y": 2604.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2376.0,
+      "y": 2604.0,
+      "width": 288.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3900.0,
+      "y": 2604.0,
+      "width": 12.0,
+      "height": 276.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3924.0,
+      "y": 2604.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3960.0,
+      "y": 2604.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3996.0,
+      "y": 2604.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4080.0,
+      "y": 2604.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4128.0,
+      "y": 2604.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 4164.0,
+      "y": 2604.0,
+      "width": 108.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2664.0,
+      "y": 2616.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2688.0,
+      "y": 2616.0,
+      "width": 60.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2424.0,
+      "y": 2628.0,
+      "width": 24.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2592.0,
+      "y": 2628.0,
+      "width": 72.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2676.0,
+      "y": 2628.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3348.0,
+      "y": 2628.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1284.0,
+      "y": 2640.0,
+      "width": 156.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1512.0,
+      "y": 2640.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1440.0,
+      "y": 2652.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1524.0,
+      "y": 2652.0,
+      "width": 60.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1692.0,
+      "y": 2652.0,
+      "width": 288.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1428.0,
+      "y": 2664.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1980.0,
+      "y": 2664.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2004.0,
+      "y": 2676.0,
+      "width": 12.0,
+      "height": 312.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2016.0,
+      "y": 2700.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3912.0,
+      "y": 2700.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3084.0,
+      "y": 2712.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3048.0,
+      "y": 2724.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3096.0,
+      "y": 2724.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2292.0,
+      "y": 2736.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3132.0,
+      "y": 2736.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3912.0,
+      "y": 2736.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3048.0,
+      "y": 2748.0,
+      "width": 24.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3120.0,
+      "y": 2748.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1368.0,
+      "y": 2760.0,
+      "width": 60.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1356.0,
+      "y": 2772.0,
+      "width": 12.0,
+      "height": 456.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3132.0,
+      "y": 2772.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3912.0,
+      "y": 2772.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1368.0,
+      "y": 2784.0,
+      "width": 12.0,
+      "height": 456.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1032.0,
+      "y": 2796.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1020.0,
+      "y": 2808.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1968.0,
+      "y": 2808.0,
+      "width": 36.0,
+      "height": 180.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1008.0,
+      "y": 2820.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 996.0,
+      "y": 2832.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2016.0,
+      "y": 2832.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3168.0,
+      "y": 2832.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3204.0,
+      "y": 2832.0,
+      "width": 204.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 648.0,
+      "y": 2844.0,
+      "width": 348.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3144.0,
+      "y": 2844.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3408.0,
+      "y": 2844.0,
+      "width": 216.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3636.0,
+      "y": 2844.0,
+      "width": 60.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2928.0,
+      "y": 2856.0,
+      "width": 120.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 648.0,
+      "y": 2868.0,
+      "width": 24.0,
+      "height": 312.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2820.0,
+      "y": 2868.0,
+      "width": 108.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3924.0,
+      "y": 2868.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3948.0,
+      "y": 2880.0,
+      "width": 24.0,
+      "height": 156.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2784.0,
+      "y": 2892.0,
+      "width": 36.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2808.0,
+      "y": 2952.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2820.0,
+      "y": 2964.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2916.0,
+      "y": 2964.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1968.0,
+      "y": 2988.0,
+      "width": 24.0,
+      "height": 240.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1992.0,
+      "y": 3000.0,
+      "width": 36.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2928.0,
+      "y": 3000.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2940.0,
+      "y": 3012.0,
+      "width": 96.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3936.0,
+      "y": 3024.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1992.0,
+      "y": 3036.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3012.0,
+      "y": 3036.0,
+      "width": 24.0,
+      "height": 192.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3924.0,
+      "y": 3036.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1992.0,
+      "y": 3060.0,
+      "width": 24.0,
+      "height": 264.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3096.0,
+      "y": 3060.0,
+      "width": 648.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3948.0,
+      "y": 3060.0,
+      "width": 24.0,
+      "height": 228.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2016.0,
+      "y": 3072.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3096.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 216.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3252.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3336.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3420.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3540.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3624.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3708.0,
+      "y": 3072.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2292.0,
+      "y": 3120.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2208.0,
+      "y": 3132.0,
+      "width": 84.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2304.0,
+      "y": 3132.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2544.0,
+      "y": 3144.0,
+      "width": 36.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2160.0,
+      "y": 3156.0,
+      "width": 36.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2532.0,
+      "y": 3156.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2580.0,
+      "y": 3156.0,
+      "width": 12.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 672.0,
+      "y": 3168.0,
+      "width": 384.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2148.0,
+      "y": 3168.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2196.0,
+      "y": 3168.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2520.0,
+      "y": 3168.0,
+      "width": 12.0,
+      "height": 132.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2592.0,
+      "y": 3168.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1056.0,
+      "y": 3180.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2124.0,
+      "y": 3180.0,
+      "width": 24.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2484.0,
+      "y": 3180.0,
+      "width": 36.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2604.0,
+      "y": 3180.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2112.0,
+      "y": 3192.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2448.0,
+      "y": 3192.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2616.0,
+      "y": 3192.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1068.0,
+      "y": 3204.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2100.0,
+      "y": 3204.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 3204.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1380.0,
+      "y": 3216.0,
+      "width": 72.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2460.0,
+      "y": 3216.0,
+      "width": 24.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2556.0,
+      "y": 3216.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2952.0,
+      "y": 3216.0,
+      "width": 24.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2988.0,
+      "y": 3216.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1080.0,
+      "y": 3228.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2544.0,
+      "y": 3228.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3000.0,
+      "y": 3228.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1428.0,
+      "y": 3240.0,
+      "width": 24.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2208.0,
+      "y": 3240.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1092.0,
+      "y": 3252.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2208.0,
+      "y": 3252.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2472.0,
+      "y": 3252.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2556.0,
+      "y": 3252.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2136.0,
+      "y": 3264.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3120.0,
+      "y": 3264.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3228.0,
+      "y": 3264.0,
+      "width": 72.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3420.0,
+      "y": 3264.0,
+      "width": 72.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3600.0,
+      "y": 3264.0,
+      "width": 72.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3936.0,
+      "y": 3264.0,
+      "width": 12.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1104.0,
+      "y": 3276.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3132.0,
+      "y": 3276.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3300.0,
+      "y": 3276.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3492.0,
+      "y": 3276.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3672.0,
+      "y": 3276.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3924.0,
+      "y": 3276.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2160.0,
+      "y": 3288.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3228.0,
+      "y": 3288.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3288.0,
+      "y": 3288.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3420.0,
+      "y": 3288.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3480.0,
+      "y": 3288.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3600.0,
+      "y": 3288.0,
+      "width": 24.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3660.0,
+      "y": 3288.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1116.0,
+      "y": 3300.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1452.0,
+      "y": 3312.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1788.0,
+      "y": 3312.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1980.0,
+      "y": 3312.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3132.0,
+      "y": 3312.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1128.0,
+      "y": 3324.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1464.0,
+      "y": 3324.0,
+      "width": 324.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1800.0,
+      "y": 3324.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1968.0,
+      "y": 3324.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2748.0,
+      "y": 3324.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2808.0,
+      "y": 3324.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3096.0,
+      "y": 3324.0,
+      "width": 24.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3252.0,
+      "y": 3324.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3444.0,
+      "y": 3324.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3624.0,
+      "y": 3324.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3948.0,
+      "y": 3324.0,
+      "width": 12.0,
+      "height": 228.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1140.0,
+      "y": 3336.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1752.0,
+      "y": 3336.0,
+      "width": 36.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1956.0,
+      "y": 3336.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2832.0,
+      "y": 3336.0,
+      "width": 12.0,
+      "height": 216.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3960.0,
+      "y": 3336.0,
+      "width": 12.0,
+      "height": 216.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1932.0,
+      "y": 3348.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2580.0,
+      "y": 3348.0,
+      "width": 12.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2748.0,
+      "y": 3348.0,
+      "width": 24.0,
+      "height": 228.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2820.0,
+      "y": 3348.0,
+      "width": 12.0,
+      "height": 204.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1812.0,
+      "y": 3360.0,
+      "width": 120.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2520.0,
+      "y": 3360.0,
+      "width": 60.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2592.0,
+      "y": 3360.0,
+      "width": 12.0,
+      "height": 108.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2964.0,
+      "y": 3360.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1152.0,
+      "y": 3372.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2496.0,
+      "y": 3372.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2952.0,
+      "y": 3372.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1812.0,
+      "y": 3384.0,
+      "width": 108.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2976.0,
+      "y": 3384.0,
+      "width": 120.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1164.0,
+      "y": 3396.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2508.0,
+      "y": 3396.0,
+      "width": 12.0,
+      "height": 180.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2604.0,
+      "y": 3396.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1176.0,
+      "y": 3420.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2496.0,
+      "y": 3432.0,
+      "width": 12.0,
+      "height": 144.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1188.0,
+      "y": 3444.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2472.0,
+      "y": 3444.0,
+      "width": 24.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2460.0,
+      "y": 3456.0,
+      "width": 12.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1200.0,
+      "y": 3468.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2436.0,
+      "y": 3468.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2448.0,
+      "y": 3480.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2520.0,
+      "y": 3480.0,
+      "width": 36.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3600.0,
+      "y": 3480.0,
+      "width": 72.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1212.0,
+      "y": 3492.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3672.0,
+      "y": 3492.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2556.0,
+      "y": 3504.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3084.0,
+      "y": 3504.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3228.0,
+      "y": 3504.0,
+      "width": 396.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3660.0,
+      "y": 3504.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1224.0,
+      "y": 3516.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2400.0,
+      "y": 3516.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3072.0,
+      "y": 3516.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3228.0,
+      "y": 3516.0,
+      "width": 384.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2376.0,
+      "y": 3528.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2412.0,
+      "y": 3528.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2844.0,
+      "y": 3528.0,
+      "width": 228.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3084.0,
+      "y": 3528.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3120.0,
+      "y": 3528.0,
+      "width": 120.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3684.0,
+      "y": 3528.0,
+      "width": 264.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1236.0,
+      "y": 3540.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2424.0,
+      "y": 3540.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2484.0,
+      "y": 3540.0,
+      "width": 12.0,
+      "height": 36.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1248.0,
+      "y": 3552.0,
+      "width": 12.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": 3552.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1920.0,
+      "y": 3552.0,
+      "width": 36.0,
+      "height": 168.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2352.0,
+      "y": 3552.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2436.0,
+      "y": 3552.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2520.0,
+      "y": 3552.0,
+      "width": 228.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1308.0,
+      "y": 3564.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1872.0,
+      "y": 3564.0,
+      "width": 48.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1956.0,
+      "y": 3564.0,
+      "width": 12.0,
+      "height": 156.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2328.0,
+      "y": 3564.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1356.0,
+      "y": 3576.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2304.0,
+      "y": 3576.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1380.0,
+      "y": 3588.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2268.0,
+      "y": 3588.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1416.0,
+      "y": 3600.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2244.0,
+      "y": 3600.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1452.0,
+      "y": 3612.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2220.0,
+      "y": 3612.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1488.0,
+      "y": 3624.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1968.0,
+      "y": 3624.0,
+      "width": 24.0,
+      "height": 120.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2196.0,
+      "y": 3624.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1524.0,
+      "y": 3636.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1884.0,
+      "y": 3636.0,
+      "width": 36.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2160.0,
+      "y": 3636.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1560.0,
+      "y": 3648.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1908.0,
+      "y": 3648.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2148.0,
+      "y": 3648.0,
+      "width": 48.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1596.0,
+      "y": 3660.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2112.0,
+      "y": 3660.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1632.0,
+      "y": 3672.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2088.0,
+      "y": 3672.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1668.0,
+      "y": 3684.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1992.0,
+      "y": 3684.0,
+      "width": 12.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2052.0,
+      "y": 3684.0,
+      "width": 72.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1704.0,
+      "y": 3696.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2028.0,
+      "y": 3696.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1740.0,
+      "y": 3708.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2004.0,
+      "y": 3708.0,
+      "width": 60.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1776.0,
+      "y": 3720.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2004.0,
+      "y": 3720.0,
+      "width": 24.0,
+      "height": 12.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1800.0,
+      "y": 3732.0,
+      "width": 36.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1944.0,
+      "y": 3732.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1836.0,
+      "y": 3744.0,
+      "width": 48.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1932.0,
+      "y": 3744.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1884.0,
+      "y": 3756.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1944.0,
+      "y": 3756.0,
+      "width": 12.0,
+      "height": 48.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1908.0,
+      "y": 3768.0,
+      "width": 24.0,
+      "height": 24.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 654.0,
+      "y": 195.0,
+      "width": 27.0,
+      "height": 102.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1263.0,
+      "y": 402.0,
+      "width": 318.0,
+      "height": 96.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1275.0,
+      "y": 702.0,
+      "width": 78.0,
+      "height": 63.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1866.0,
+      "y": 1419.0,
+      "width": 15.0,
+      "height": 183.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1644.0,
+      "y": 1149.0,
+      "width": 87.0,
+      "height": 57.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1707.0,
+      "y": 1752.0,
+      "width": 24.0,
+      "height": 162.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1020.0,
+      "y": 1596.0,
+      "width": 15.0,
+      "height": 99.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 885.0,
+      "y": 1338.0,
+      "width": 399.0,
+      "height": 21.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 462.0,
+      "y": 1341.0,
+      "width": 339.0,
+      "height": 51.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 477.0,
+      "y": 1377.0,
+      "width": 177.0,
+      "height": 177.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 909.0,
+      "y": 1347.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        909.0,
+        912.0,
+        963.0,
+        1263.0,
+        1263.0,
+        1350.0,
+        1383.0,
+        1515.0,
+        1521.0,
+        1590.0,
+        1599.0,
+        1518.0,
+        1521.0,
+        1581.0,
+        1584.0,
+        1875.0,
+        1881.0,
+        1284.0,
+        1275.0,
+        909.0,
+        909.0
+      ],
+      "yPoints": [
+        1347.0,
+        1452.0,
+        1575.0,
+        1575.0,
+        1824.0,
+        1824.0,
+        1974.0,
+        2010.0,
+        1929.0,
+        1920.0,
+        1866.0,
+        1860.0,
+        1524.0,
+        1515.0,
+        1104.0,
+        1098.0,
+        981.0,
+        993.0,
+        1350.0,
+        1350.0,
+        1350.0
+      ]
+    },
+    {
+      "type": "POLYGON",
+      "x": 2100.0,
+      "y": 720.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        2100.0,
+        2106.0,
+        2193.0,
+        2829.0,
+        3006.0,
+        2988.0,
+        2979.0,
+        3066.0,
+        3063.0,
+        2988.0,
+        2988.0,
+        3051.0,
+        3048.0,
+        2979.0,
+        2985.0,
+        3414.0,
+        3417.0,
+        2709.0,
+        2703.0,
+        2100.0,
+        2100.0
+      ],
+      "yPoints": [
+        720.0,
+        1236.0,
+        1404.0,
+        1395.0,
+        1293.0,
+        1095.0,
+        903.0,
+        897.0,
+        846.0,
+        828.0,
+        777.0,
+        756.0,
+        480.0,
+        468.0,
+        345.0,
+        351.0,
+        300.0,
+        306.0,
+        720.0,
+        723.0,
+        723.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3498.0,
+      "y": 360.0,
+      "width": 15.0,
+      "height": 33.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3405.0,
+      "y": 459.0,
+      "width": 111.0,
+      "height": 18.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 2226.0,
+      "y": 1914.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        2226.0,
+        2442.0,
+        2442.0,
+        3387.0,
+        3384.0,
+        3264.0,
+        3273.0,
+        3420.0,
+        3558.0,
+        3555.0,
+        3819.0,
+        3993.0,
+        3957.0,
+        3960.0,
+        3924.0,
+        3552.0,
+        3552.0,
+        3384.0,
+        3402.0,
+        3333.0,
+        3336.0,
+        2703.0,
+        2652.0,
+        2370.0,
+        2352.0,
+        2325.0,
+        2238.0,
+        2223.0,
+        2223.0
+      ],
+      "yPoints": [
+        1914.0,
+        1914.0,
+        2055.0,
+        2049.0,
+        1233.0,
+        1209.0,
+        738.0,
+        633.0,
+        636.0,
+        660.0,
+        663.0,
+        852.0,
+        915.0,
+        2076.0,
+        2109.0,
+        2124.0,
+        2220.0,
+        2220.0,
+        2616.0,
+        2637.0,
+        2511.0,
+        2511.0,
+        2640.0,
+        2610.0,
+        2385.0,
+        2046.0,
+        2028.0,
+        1920.0,
+        1920.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3441.0,
+      "y": 2304.0,
+      "width": 51.0,
+      "height": 18.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1236.0,
+      "y": 3555.0,
+      "width": 54.0,
+      "height": 15.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1296.0,
+      "y": 2303.0,
+      "width": 49.0,
+      "height": 13.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 1277.0,
+      "y": 2309.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        1277.0,
+        1280.0,
+        1438.0,
+        1441.0,
+        1367.0,
+        1374.0,
+        1435.0,
+        1445.0,
+        1796.0,
+        1935.0,
+        1993.0,
+        1970.0,
+        2012.0,
+        1977.0,
+        1680.0,
+        1674.0,
+        1593.0,
+        1593.0,
+        1516.0,
+        1516.0,
+        1277.0,
+        1277.0
+      ],
+      "yPoints": [
+        2309.0,
+        2654.0,
+        2658.0,
+        2767.0,
+        2774.0,
+        3212.0,
+        3222.0,
+        3312.0,
+        3335.0,
+        3396.0,
+        3306.0,
+        2906.0,
+        2774.0,
+        2664.0,
+        2658.0,
+        2600.0,
+        2596.0,
+        2670.0,
+        2670.0,
+        2296.0,
+        2316.0,
+        2316.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2554.0,
+      "y": 1893.0,
+      "width": 349.0,
+      "height": 23.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1935.0,
+      "y": 1587.0,
+      "width": 84.0,
+      "height": 16.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2141.0,
+      "y": 1587.0,
+      "width": 81.0,
+      "height": 9.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2348.0,
+      "y": 1587.0,
+      "width": 471.0,
+      "height": 13.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2332.0,
+      "y": 2751.0,
+      "width": 51.0,
+      "height": 16.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2258.0,
+      "y": 2535.0,
+      "width": 12.0,
+      "height": 168.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2767.0,
+      "y": 3316.0,
+      "width": 55.0,
+      "height": 32.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 451.0,
+      "y": 1793.0,
+      "width": 78.0,
+      "height": 16.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3610.0,
+      "y": 2310.0,
+      "width": 16.0,
+      "height": 413.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 2968.0,
+      "y": 3385.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        2968.0,
+        3102.0,
+        3111.0,
+        3128.0,
+        3105.0,
+        3100.0,
+        3761.0,
+        3758.0,
+        4147.0,
+        4147.0,
+        3700.0,
+        3711.0,
+        3640.0,
+        3401.0,
+        3183.0,
+        3123.0,
+        3128.0,
+        3046.0,
+        3052.0,
+        2923.0,
+        2925.0,
+        3032.0,
+        3022.0,
+        2964.0,
+        2970.0,
+        2970.0
+      ],
+      "yPoints": [
+        3385.0,
+        3391.0,
+        3334.0,
+        3274.0,
+        3268.0,
+        3065.0,
+        3071.0,
+        2470.0,
+        2470.0,
+        2408.0,
+        2423.0,
+        2856.0,
+        2844.0,
+        2849.0,
+        2835.0,
+        2841.0,
+        2731.0,
+        2734.0,
+        2864.0,
+        2879.0,
+        3019.0,
+        3031.0,
+        3217.0,
+        3232.0,
+        3382.0,
+        3382.0
+      ]
+    },
+    {
+      "type": "POLYGON",
+      "x": 1713.0,
+      "y": 1915.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        1713.0,
+        2068.0,
+        2063.0,
+        2006.0,
+        2000.0,
+        2040.0,
+        1981.0,
+        2072.0,
+        2072.0,
+        1902.0,
+        1909.0,
+        1840.0,
+        1836.0,
+        1718.0,
+        1713.0,
+        1715.0,
+        1715.0
+      ],
+      "yPoints": [
+        1915.0,
+        1915.0,
+        1938.0,
+        1931.0,
+        2175.0,
+        2215.0,
+        2347.0,
+        2361.0,
+        2379.0,
+        2397.0,
+        2447.0,
+        2440.0,
+        2379.0,
+        2381.0,
+        2320.0,
+        1915.0,
+        1915.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 825.0,
+      "y": 1792.0,
+      "width": 232.0,
+      "height": 41.0
+    }
+  ],
+  "ctSpawnAreas": [
+    {
+      "x": 825,
+      "y": 2889,
+      "width": 417,
+      "height": 270
+    }
+  ],
+  "tSpawnAreas": [
+    {
+      "x": 4008,
+      "y": 1029,
+      "width": 285,
+      "height": 369
+    }
+  ],
+  "bombSiteA": {
+    "x": 2100,
+    "y": 3117,
+    "width": 444,
+    "height": 399
+  },
+  "bombSiteB": {
+    "x": 555,
+    "y": 654,
+    "width": 324,
+    "height": 339
+  },
+  "waypoints": [
+    {
+      "position": {
+        "x": 4196.0,
+        "y": 1196.0
+      },
+      "neighborIndices": [
+        1,
+        17,
+        18,
+        77
+      ],
+      "neighborCosts": [
+        126.14277624977183,
+        1352.0624985554477,
+        655.3052723731131,
+        584.7195909151668
+      ]
+    },
+    {
+      "position": {
+        "x": 4070.0,
+        "y": 1190.0
+      },
+      "neighborIndices": [
+        0,
+        2,
+        77
+      ],
+      "neighborCosts": [
+        126.14277624977183,
+        1000.420411627032,
+        586.0827586612662
+      ]
+    },
+    {
+      "position": {
+        "x": 4041.0,
+        "y": 2190.0
+      },
+      "neighborIndices": [
+        1,
+        3,
+        77
+      ],
+      "neighborCosts": [
+        1000.420411627032,
+        463.1911052686569,
+        1583.0224256150007
+      ]
+    },
+    {
+      "position": {
+        "x": 3580.0,
+        "y": 2235.0
+      },
+      "neighborIndices": [
+        2,
+        4
+      ],
+      "neighborCosts": [
+        463.1911052686569,
+        523.0086041357255
+      ]
+    },
+    {
+      "position": {
+        "x": 3577.0,
+        "y": 2758.0
+      },
+      "neighborIndices": [
+        3,
+        5
+      ],
+      "neighborCosts": [
+        523.0086041357255,
+        498.61608477866014
+      ]
+    },
+    {
+      "position": {
+        "x": 3090.0,
+        "y": 2651.0
+      },
+      "neighborIndices": [
+        4,
+        6,
+        7,
+        8
+      ],
+      "neighborCosts": [
+        498.61608477866014,
+        766.8493985131631,
+        989.7282455300546,
+        548.8843229679638
+      ]
+    },
+    {
+      "position": {
+        "x": 2383.0,
+        "y": 2948.0
+      },
+      "neighborIndices": [
+        5,
+        7,
+        8,
+        9,
+        19,
+        27,
+        28
+      ],
+      "neighborCosts": [
+        766.8493985131631,
+        242.52834885843757,
+        252.1983346495373,
+        517.150848399188,
+        455.3295509847785,
+        489.90815465758476,
+        361.1384775955063
+      ]
+    },
+    {
+      "position": {
+        "x": 2141.0,
+        "y": 2932.0
+      },
+      "neighborIndices": [
+        5,
+        6,
+        8,
+        9,
+        19,
+        29,
+        30,
+        32
+      ],
+      "neighborCosts": [
+        989.7282455300546,
+        242.52834885843757,
+        494.68373735145167,
+        753.3531708302554,
+        374.0655022853618,
+        513.4247754053168,
+        649.0377492873585,
+        1229.0
+      ]
+    },
+    {
+      "position": {
+        "x": 2635.0,
+        "y": 2958.0
+      },
+      "neighborIndices": [
+        5,
+        6,
+        7,
+        9,
+        20,
+        21
+      ],
+      "neighborCosts": [
+        548.8843229679638,
+        252.1983346495373,
+        494.68373735145167,
+        286.56761854752534,
+        982.9837231612739,
+        1141.5638396515544
+      ]
+    },
+    {
+      "position": {
+        "x": 2870.0,
+        "y": 3122.0
+      },
+      "neighborIndices": [
+        6,
+        7,
+        8,
+        10,
+        20
+      ],
+      "neighborCosts": [
+        517.150848399188,
+        753.3531708302554,
+        286.56761854752534,
+        316.8359196808342,
+        1267.0659019956302
+      ]
+    },
+    {
+      "position": {
+        "x": 2893.0,
+        "y": 3438.0
+      },
+      "neighborIndices": [
+        9,
+        11,
+        14,
+        29
+      ],
+      "neighborCosts": [
+        316.8359196808342,
+        332.0,
+        936.771049936963,
+        839.0
+      ]
+    },
+    {
+      "position": {
+        "x": 3225.0,
+        "y": 3438.0
+      },
+      "neighborIndices": [
+        10,
+        12,
+        14,
+        29
+      ],
+      "neighborCosts": [
+        332.0,
+        260.86394921491166,
+        605.1941837129633,
+        1171.0
+      ]
+    },
+    {
+      "position": {
+        "x": 3170.0,
+        "y": 3183.0
+      },
+      "neighborIndices": [
+        11,
+        13
+      ],
+      "neighborCosts": [
+        260.86394921491166,
+        620.0
+      ]
+    },
+    {
+      "position": {
+        "x": 3790.0,
+        "y": 3183.0
+      },
+      "neighborIndices": [
+        12,
+        14,
+        15,
+        16
+      ],
+      "neighborCosts": [
+        620.0,
+        220.47675614449702,
+        354.6857764275303,
+        623.2214694633041
+      ]
+    },
+    {
+      "position": {
+        "x": 3829.0,
+        "y": 3400.0
+      },
+      "neighborIndices": [
+        10,
+        11,
+        13,
+        15,
+        16
+      ],
+      "neighborCosts": [
+        936.771049936963,
+        605.1941837129633,
+        220.47675614449702,
+        568.1267464219582,
+        839.0
+      ]
+    },
+    {
+      "position": {
+        "x": 3841.0,
+        "y": 2832.0
+      },
+      "neighborIndices": [
+        13,
+        14,
+        16
+      ],
+      "neighborCosts": [
+        354.6857764275303,
+        568.1267464219582,
+        271.26555254952666
+      ]
+    },
+    {
+      "position": {
+        "x": 3829.0,
+        "y": 2561.0
+      },
+      "neighborIndices": [
+        13,
+        14,
+        15,
+        17
+      ],
+      "neighborCosts": [
+        623.2214694633041,
+        839.0,
+        271.26555254952666,
+        380.2223033963158
+      ]
+    },
+    {
+      "position": {
+        "x": 4209.0,
+        "y": 2548.0
+      },
+      "neighborIndices": [
+        0,
+        16,
+        18,
+        77
+      ],
+      "neighborCosts": [
+        1352.0624985554477,
+        380.2223033963158,
+        697.0351497593217,
+        1936.4555249217576
+      ]
+    },
+    {
+      "position": {
+        "x": 4216.0,
+        "y": 1851.0
+      },
+      "neighborIndices": [
+        0,
+        17,
+        77
+      ],
+      "neighborCosts": [
+        655.3052723731131,
+        697.0351497593217,
+        1239.9685479882141
+      ]
+    },
+    {
+      "position": {
+        "x": 2148.0,
+        "y": 2558.0
+      },
+      "neighborIndices": [
+        6,
+        7,
+        20,
+        21,
+        28,
+        29,
+        30,
+        31,
+        32
+      ],
+      "neighborCosts": [
+        455.3295509847785,
+        374.0655022853618,
+        395.64125164092786,
+        552.0588736720025,
+        789.9531631685514,
+        885.0062146674452,
+        275.0,
+        568.1663488803257,
+        855.0286544905966
+      ]
+    },
+    {
+      "position": {
+        "x": 1754.0,
+        "y": 2522.0
+      },
+      "neighborIndices": [
+        8,
+        9,
+        19,
+        21
+      ],
+      "neighborCosts": [
+        982.9837231612739,
+        1267.0659019956302,
+        395.64125164092786,
+        159.70284906663375
+      ]
+    },
+    {
+      "position": {
+        "x": 1603.0,
+        "y": 2470.0
+      },
+      "neighborIndices": [
+        8,
+        19,
+        20,
+        22,
+        35,
+        36
+      ],
+      "neighborCosts": [
+        1141.5638396515544,
+        552.0588736720025,
+        159.70284906663375,
+        403.3174928018868,
+        790.7749363757048,
+        580.2154772151464
+      ]
+    },
+    {
+      "position": {
+        "x": 1587.0,
+        "y": 2067.0
+      },
+      "neighborIndices": [
+        21,
+        23,
+        36
+      ],
+      "neighborCosts": [
+        403.3174928018868,
+        362.1380952067871,
+        190.2761151589973
+      ]
+    },
+    {
+      "position": {
+        "x": 1225.0,
+        "y": 2077.0
+      },
+      "neighborIndices": [
+        22,
+        24,
+        78
+      ],
+      "neighborCosts": [
+        362.1380952067871,
+        962.5725946649427,
+        342.527371169079
+      ]
+    },
+    {
+      "position": {
+        "x": 1170.0,
+        "y": 3038.0
+      },
+      "neighborIndices": [
+        23,
+        25,
+        26,
+        78
+      ],
+      "neighborCosts": [
+        962.5725946649427,
+        345.2448406565984,
+        554.477231272845,
+        1303.4972190227334
+      ]
+    },
+    {
+      "position": {
+        "x": 825.0,
+        "y": 3025.0
+      },
+      "neighborIndices": [
+        24
+      ],
+      "neighborCosts": [
+        345.2448406565984
+      ]
+    },
+    {
+      "position": {
+        "x": 1451.0,
+        "y": 3516.0
+      },
+      "neighborIndices": [
+        24,
+        27,
+        29
+      ],
+      "neighborCosts": [
+        554.477231272845,
+        843.4986662704334,
+        608.0238482164988
+      ]
+    },
+    {
+      "position": {
+        "x": 2290.0,
+        "y": 3429.0
+      },
+      "neighborIndices": [
+        6,
+        26,
+        28,
+        29
+      ],
+      "neighborCosts": [
+        489.90815465758476,
+        843.4986662704334,
+        158.14234094637652,
+        236.17154782064668
+      ]
+    },
+    {
+      "position": {
+        "x": 2393.0,
+        "y": 3309.0
+      },
+      "neighborIndices": [
+        6,
+        19,
+        27,
+        29,
+        30,
+        31
+      ],
+      "neighborCosts": [
+        361.1384775955063,
+        789.9531631685514,
+        158.14234094637652,
+        362.714763967501,
+        1054.846434321129,
+        1355.501752119856
+      ]
+    },
+    {
+      "position": {
+        "x": 2054.0,
+        "y": 3438.0
+      },
+      "neighborIndices": [
+        7,
+        10,
+        11,
+        19,
+        26,
+        27,
+        28,
+        30,
+        32
+      ],
+      "neighborCosts": [
+        513.4247754053168,
+        839.0,
+        1171.0,
+        885.0062146674452,
+        608.0238482164988,
+        236.17154782064668,
+        362.714763967501,
+        1158.8187951530645,
+        1737.1798985712446
+      ]
+    },
+    {
+      "position": {
+        "x": 2148.0,
+        "y": 2283.0
+      },
+      "neighborIndices": [
+        7,
+        19,
+        28,
+        29,
+        31,
+        32,
+        46
+      ],
+      "neighborCosts": [
+        649.0377492873585,
+        275.0,
+        1054.846434321129,
+        1158.8187951530645,
+        302.5524747874325,
+        580.0422398412032,
+        1430.827033571843
+      ]
+    },
+    {
+      "position": {
+        "x": 2041.0,
+        "y": 2000.0
+      },
+      "neighborIndices": [
+        19,
+        28,
+        30
+      ],
+      "neighborCosts": [
+        568.1663488803257,
+        1355.501752119856,
+        302.5524747874325
+      ]
+    },
+    {
+      "position": {
+        "x": 2141.0,
+        "y": 1703.0
+      },
+      "neighborIndices": [
+        7,
+        19,
+        29,
+        30,
+        33,
+        34,
+        35,
+        38,
+        39,
+        41,
+        43,
+        45,
+        46
+      ],
+      "neighborCosts": [
+        1229.0,
+        855.0286544905966,
+        1737.1798985712446,
+        580.0422398412032,
+        380.9580029347067,
+        342.2309161954834,
+        503.52557035368125,
+        355.4602650086223,
+        224.20749318432692,
+        762.9469182059785,
+        1183.446238745132,
+        506.6162255593478,
+        853.7616763476796
+      ]
+    },
+    {
+      "position": {
+        "x": 1793.0,
+        "y": 1858.0
+      },
+      "neighborIndices": [
+        32,
+        34,
+        37,
+        41,
+        42,
+        43
+      ],
+      "neighborCosts": [
+        380.9580029347067,
+        184.13310403075272,
+        497.00905424348156,
+        1116.1491835771776,
+        1550.6553453298384,
+        1504.4786472396343
+      ]
+    },
+    {
+      "position": {
+        "x": 1800.0,
+        "y": 1674.0
+      },
+      "neighborIndices": [
+        32,
+        33,
+        35,
+        37,
+        39,
+        41
+      ],
+      "neighborCosts": [
+        342.2309161954834,
+        184.13310403075272,
+        162.11107303327555,
+        313.0255580619576,
+        513.522151420949,
+        1105.0330311805164
+      ]
+    },
+    {
+      "position": {
+        "x": 1638.0,
+        "y": 1680.0
+      },
+      "neighborIndices": [
+        21,
+        32,
+        34,
+        36,
+        41
+      ],
+      "neighborCosts": [
+        790.7749363757048,
+        503.52557035368125,
+        162.11107303327555,
+        214.5809870421888,
+        1266.4698969971612
+      ]
+    },
+    {
+      "position": {
+        "x": 1664.0,
+        "y": 1893.0
+      },
+      "neighborIndices": [
+        21,
+        22,
+        35,
+        37
+      ],
+      "neighborCosts": [
+        580.2154772151464,
+        190.2761151589973,
+        214.5809870421888,
+        548.1313711146262
+      ]
+    },
+    {
+      "position": {
+        "x": 1796.0,
+        "y": 1361.0
+      },
+      "neighborIndices": [
+        33,
+        34,
+        36,
+        38,
+        39,
+        40,
+        44
+      ],
+      "neighborCosts": [
+        497.00905424348156,
+        313.0255580619576,
+        548.1313711146262,
+        229.0785891348207,
+        531.4132102234569,
+        1254.5489229201069,
+        1481.7455921986068
+      ]
+    },
+    {
+      "position": {
+        "x": 2025.0,
+        "y": 1367.0
+      },
+      "neighborIndices": [
+        32,
+        37,
+        39,
+        45,
+        46
+      ],
+      "neighborCosts": [
+        355.4602650086223,
+        229.0785891348207,
+        322.051238159396,
+        810.8884016928594,
+        509.03536222938385
+      ]
+    },
+    {
+      "position": {
+        "x": 2296.0,
+        "y": 1541.0
+      },
+      "neighborIndices": [
+        32,
+        34,
+        37,
+        38,
+        40,
+        42,
+        45
+      ],
+      "neighborCosts": [
+        224.20749318432692,
+        513.522151420949,
+        531.4132102234569,
+        322.051238159396,
+        742.0060646652424,
+        1013.0399794677404,
+        505.332563763706
+      ]
+    },
+    {
+      "position": {
+        "x": 3038.0,
+        "y": 1538.0
+      },
+      "neighborIndices": [
+        37,
+        39,
+        41,
+        42,
+        75,
+        76
+      ],
+      "neighborCosts": [
+        1254.5489229201069,
+        742.0060646652424,
+        243.79089400549807,
+        271.0664125265246,
+        737.6347334555227,
+        289.9137802864845
+      ]
+    },
+    {
+      "position": {
+        "x": 2903.0,
+        "y": 1741.0
+      },
+      "neighborIndices": [
+        32,
+        33,
+        34,
+        35,
+        40,
+        44,
+        76
+      ],
+      "neighborCosts": [
+        762.9469182059785,
+        1116.1491835771776,
+        1105.0330311805164,
+        1266.4698969971612,
+        243.79089400549807,
+        335.93600581063055,
+        530.3960784168752
+      ]
+    },
+    {
+      "position": {
+        "x": 3309.0,
+        "y": 1532.0
+      },
+      "neighborIndices": [
+        33,
+        39,
+        40,
+        43,
+        75,
+        76
+      ],
+      "neighborCosts": [
+        1550.6553453298384,
+        1013.0399794677404,
+        271.0664125265246,
+        442.28949795354623,
+        747.9812831882895,
+        313.765836253726
+      ]
+    },
+    {
+      "position": {
+        "x": 3293.0,
+        "y": 1974.0
+      },
+      "neighborIndices": [
+        32,
+        33,
+        42,
+        44,
+        45,
+        75,
+        76
+      ],
+      "neighborCosts": [
+        1183.446238745132,
+        1504.4786472396343,
+        442.28949795354623,
+        148.0,
+        716.1180070351534,
+        1179.4575024137157,
+        723.1548935048424
+      ]
+    },
+    {
+      "position": {
+        "x": 3145.0,
+        "y": 1974.0
+      },
+      "neighborIndices": [
+        37,
+        41,
+        43,
+        45
+      ],
+      "neighborCosts": [
+        1481.7455921986068,
+        335.93600581063055,
+        148.0,
+        568.1487481285161
+      ]
+    },
+    {
+      "position": {
+        "x": 2577.0,
+        "y": 1961.0
+      },
+      "neighborIndices": [
+        32,
+        38,
+        39,
+        43,
+        44
+      ],
+      "neighborCosts": [
+        506.6162255593478,
+        810.8884016928594,
+        505.332563763706,
+        716.1180070351534,
+        568.1487481285161
+      ]
+    },
+    {
+      "position": {
+        "x": 2019.0,
+        "y": 858.0
+      },
+      "neighborIndices": [
+        30,
+        32,
+        38,
+        47,
+        48,
+        51,
+        52,
+        53
+      ],
+      "neighborCosts": [
+        1430.827033571843,
+        853.7616763476796,
+        509.03536222938385,
+        171.0263137648707,
+        545.2348118013009,
+        868.4843118905487,
+        1028.9606406466673,
+        1315.314791219197
+      ]
+    },
+    {
+      "position": {
+        "x": 1848.0,
+        "y": 861.0
+      },
+      "neighborIndices": [
+        46,
+        48,
+        50,
+        51,
+        52,
+        53,
+        67
+      ],
+      "neighborCosts": [
+        171.0263137648707,
+        374.22586762542215,
+        746.1313557276627,
+        697.4847668587465,
+        858.8282715421052,
+        1144.8689881379441,
+        216.0208323287363
+      ]
+    },
+    {
+      "position": {
+        "x": 1474.0,
+        "y": 874.0
+      },
+      "neighborIndices": [
+        46,
+        47,
+        49,
+        51,
+        52,
+        53,
+        60
+      ],
+      "neighborCosts": [
+        545.2348118013009,
+        374.22586762542215,
+        281.30055101261354,
+        323.2615040489665,
+        490.09896959695806,
+        773.7312194812873,
+        463.74561992540697
+      ]
+    },
+    {
+      "position": {
+        "x": 1487.0,
+        "y": 593.0
+      },
+      "neighborIndices": [
+        48,
+        50,
+        52,
+        53,
+        54
+      ],
+      "neighborCosts": [
+        281.30055101261354,
+        333.0540496676178,
+        528.2092388438506,
+        803.0753389315352,
+        766.3765393068867
+      ]
+    },
+    {
+      "position": {
+        "x": 1154.0,
+        "y": 587.0
+      },
+      "neighborIndices": [
+        47,
+        49,
+        51,
+        52,
+        54,
+        59,
+        60,
+        80
+      ],
+      "neighborCosts": [
+        746.1313557276627,
+        333.0540496676178,
+        300.01499962501873,
+        251.3364279208249,
+        438.2624784304493,
+        709.2820313528322,
+        459.8706339830801,
+        731.3617435988842
+      ]
+    },
+    {
+      "position": {
+        "x": 1151.0,
+        "y": 887.0
+      },
+      "neighborIndices": [
+        46,
+        47,
+        48,
+        50,
+        52,
+        58,
+        59,
+        60,
+        80
+      ],
+      "neighborCosts": [
+        868.4843118905487,
+        697.4847668587465,
+        323.2615040489665,
+        300.01499962501873,
+        190.8219064992277,
+        579.1312459192649,
+        409.6461888019953,
+        183.83144453547658,
+        475.83715701907937
+      ]
+    },
+    {
+      "position": {
+        "x": 993.0,
+        "y": 780.0
+      },
+      "neighborIndices": [
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        53,
+        59,
+        60
+      ],
+      "neighborCosts": [
+        1028.9606406466673,
+        858.8282715421052,
+        490.09896959695806,
+        528.2092388438506,
+        251.3364279208249,
+        190.8219064992277,
+        287.0,
+        546.8244690940595,
+        255.98632775990205
+      ]
+    },
+    {
+      "position": {
+        "x": 706.0,
+        "y": 780.0
+      },
+      "neighborIndices": [
+        46,
+        47,
+        48,
+        49,
+        52,
+        54,
+        57,
+        58,
+        79
+      ],
+      "neighborCosts": [
+        1315.314791219197,
+        1144.8689881379441,
+        773.7312194812873,
+        803.0753389315352,
+        287.0,
+        300.8803749000589,
+        327.812446377498,
+        474.00949357581436,
+        956.1694410511141
+      ]
+    },
+    {
+      "position": {
+        "x": 729.0,
+        "y": 480.0
+      },
+      "neighborIndices": [
+        49,
+        50,
+        53,
+        55,
+        56,
+        58,
+        61
+      ],
+      "neighborCosts": [
+        766.3765393068867,
+        438.2624784304493,
+        300.8803749000589,
+        324.82148943689054,
+        588.4020734157893,
+        774.4365693844784,
+        178.75122377203465
+      ]
+    },
+    {
+      "position": {
+        "x": 419.0,
+        "y": 577.0
+      },
+      "neighborIndices": [
+        54,
+        56,
+        57,
+        61,
+        80,
+        81
+      ],
+      "neighborCosts": [
+        324.82148943689054,
+        267.88430338487547,
+        348.0703951789063,
+        275.0363612324741,
+        792.6695402246764,
+        1026.1247487513397
+      ]
+    },
+    {
+      "position": {
+        "x": 190.0,
+        "y": 716.0
+      },
+      "neighborIndices": [
+        54,
+        55,
+        57,
+        58
+      ],
+      "neighborCosts": [
+        588.4020734157893,
+        267.88430338487547,
+        304.90162347878703,
+        743.3794455054565
+      ]
+    },
+    {
+      "position": {
+        "x": 412.0,
+        "y": 925.0
+      },
+      "neighborIndices": [
+        53,
+        55,
+        56,
+        58,
+        61,
+        81
+      ],
+      "neighborCosts": [
+        327.812446377498,
+        348.0703951789063,
+        304.90162347878703,
+        439.22886972511265,
+        589.4760385291331,
+        678.3900058226094
+      ]
+    },
+    {
+      "position": {
+        "x": 703.0,
+        "y": 1254.0
+      },
+      "neighborIndices": [
+        51,
+        53,
+        54,
+        56,
+        57,
+        59,
+        60,
+        80
+      ],
+      "neighborCosts": [
+        579.1312459192649,
+        474.00949357581436,
+        774.4365693844784,
+        743.3794455054565,
+        439.22886972511265,
+        472.8689036086006,
+        401.8818234257429,
+        138.13037319865606
+      ]
+    },
+    {
+      "position": {
+        "x": 1174.0,
+        "y": 1296.0
+      },
+      "neighborIndices": [
+        50,
+        51,
+        52,
+        58,
+        60,
+        80
+      ],
+      "neighborCosts": [
+        709.2820313528322,
+        409.6461888019953,
+        546.8244690940595,
+        472.8689036086006,
+        296.97137909232936,
+        336.44167399417097
+      ]
+    },
+    {
+      "position": {
+        "x": 1038.0,
+        "y": 1032.0
+      },
+      "neighborIndices": [
+        48,
+        50,
+        51,
+        52,
+        58,
+        59,
+        80
+      ],
+      "neighborCosts": [
+        463.74561992540697,
+        459.8706339830801,
+        183.83144453547658,
+        255.98632775990205,
+        401.8818234257429,
+        296.97137909232936,
+        292.3439754809392
+      ]
+    },
+    {
+      "position": {
+        "x": 593.0,
+        "y": 364.0
+      },
+      "neighborIndices": [
+        54,
+        55,
+        57,
+        62
+      ],
+      "neighborCosts": [
+        178.75122377203465,
+        275.0363612324741,
+        589.4760385291331,
+        257.30915257720625
+      ]
+    },
+    {
+      "position": {
+        "x": 845.0,
+        "y": 312.0
+      },
+      "neighborIndices": [
+        61,
+        63
+      ],
+      "neighborCosts": [
+        257.30915257720625,
+        858.098479196881
+      ]
+    },
+    {
+      "position": {
+        "x": 1703.0,
+        "y": 325.0
+      },
+      "neighborIndices": [
+        62,
+        64
+      ],
+      "neighborCosts": [
+        858.098479196881,
+        149.0
+      ]
+    },
+    {
+      "position": {
+        "x": 1703.0,
+        "y": 474.0
+      },
+      "neighborIndices": [
+        63,
+        65
+      ],
+      "neighborCosts": [
+        149.0,
+        867.0
+      ]
+    },
+    {
+      "position": {
+        "x": 2570.0,
+        "y": 474.0
+      },
+      "neighborIndices": [
+        64,
+        66,
+        68
+      ],
+      "neighborCosts": [
+        867.0,
+        172.53985046939155,
+        233.01931250435015
+      ]
+    },
+    {
+      "position": {
+        "x": 2593.0,
+        "y": 645.0
+      },
+      "neighborIndices": [
+        65,
+        67,
+        68
+      ],
+      "neighborCosts": [
+        172.53985046939155,
+        748.0,
+        404.8357691706601
+      ]
+    },
+    {
+      "position": {
+        "x": 1845.0,
+        "y": 645.0
+      },
+      "neighborIndices": [
+        47,
+        66
+      ],
+      "neighborCosts": [
+        216.0208323287363,
+        748.0
+      ]
+    },
+    {
+      "position": {
+        "x": 2567.0,
+        "y": 241.0
+      },
+      "neighborIndices": [
+        65,
+        66,
+        69,
+        70
+      ],
+      "neighborCosts": [
+        233.01931250435015,
+        404.8357691706601,
+        878.478798833529,
+        423.7381266773147
+      ]
+    },
+    {
+      "position": {
+        "x": 3445.0,
+        "y": 212.0
+      },
+      "neighborIndices": [
+        68,
+        70,
+        71
+      ],
+      "neighborCosts": [
+        878.478798833529,
+        455.0175820778797,
+        207.0869382650678
+      ]
+    },
+    {
+      "position": {
+        "x": 2990.0,
+        "y": 216.0
+      },
+      "neighborIndices": [
+        68,
+        69
+      ],
+      "neighborCosts": [
+        423.7381266773147,
+        455.0175820778797
+      ]
+    },
+    {
+      "position": {
+        "x": 3451.0,
+        "y": 419.0
+      },
+      "neighborIndices": [
+        69,
+        72,
+        73,
+        77
+      ],
+      "neighborCosts": [
+        207.0869382650678,
+        419.4305663634924,
+        99.31767214348109,
+        741.5557969566416
+      ]
+    },
+    {
+      "position": {
+        "x": 3870.0,
+        "y": 438.0
+      },
+      "neighborIndices": [
+        71,
+        74,
+        77
+      ],
+      "neighborCosts": [
+        419.4305663634924,
+        529.7697613114588,
+        344.2165016381405
+      ]
+    },
+    {
+      "position": {
+        "x": 3361.0,
+        "y": 461.0
+      },
+      "neighborIndices": [
+        71,
+        74,
+        75
+      ],
+      "neighborCosts": [
+        99.31767214348109,
+        97.25224933131366,
+        415.7511274789282
+      ]
+    },
+    {
+      "position": {
+        "x": 3354.0,
+        "y": 558.0
+      },
+      "neighborIndices": [
+        72,
+        73,
+        75,
+        77
+      ],
+      "neighborCosts": [
+        529.7697613114588,
+        97.25224933131366,
+        334.8566857627304,
+        814.7913843432563
+      ]
+    },
+    {
+      "position": {
+        "x": 3129.0,
+        "y": 806.0
+      },
+      "neighborIndices": [
+        40,
+        42,
+        43,
+        73,
+        74,
+        76
+      ],
+      "neighborCosts": [
+        737.6347334555227,
+        747.9812831882895,
+        1179.4575024137157,
+        415.7511274789282,
+        334.8566857627304,
+        461.15615576505104
+      ]
+    },
+    {
+      "position": {
+        "x": 3141.0,
+        "y": 1267.0
+      },
+      "neighborIndices": [
+        40,
+        41,
+        42,
+        43,
+        75
+      ],
+      "neighborCosts": [
+        289.9137802864845,
+        530.3960784168752,
+        313.765836253726,
+        723.1548935048424,
+        461.15615576505104
+      ]
+    },
+    {
+      "position": {
+        "x": 4167.0,
+        "y": 612.0
+      },
+      "neighborIndices": [
+        0,
+        1,
+        2,
+        17,
+        18,
+        71,
+        72,
+        74
+      ],
+      "neighborCosts": [
+        584.7195909151668,
+        586.0827586612662,
+        1583.0224256150007,
+        1936.4555249217576,
+        1239.9685479882141,
+        741.5557969566416,
+        344.2165016381405,
+        814.7913843432563
+      ]
+    },
+    {
+      "position": {
+        "x": 1206.0,
+        "y": 1735.0
+      },
+      "neighborIndices": [
+        23,
+        24,
+        79,
+        81
+      ],
+      "neighborCosts": [
+        342.527371169079,
+        1303.4972190227334,
+        336.25139404915484,
+        782.218000304263
+      ]
+    },
+    {
+      "position": {
+        "x": 870.0,
+        "y": 1722.0
+      },
+      "neighborIndices": [
+        53,
+        78,
+        80,
+        81
+      ],
+      "neighborCosts": [
+        956.1694410511141,
+        336.25139404915484,
+        474.8863021819012,
+        450.98336998164353
+      ]
+    },
+    {
+      "position": {
+        "x": 841.0,
+        "y": 1248.0
+      },
+      "neighborIndices": [
+        50,
+        51,
+        55,
+        58,
+        59,
+        60,
+        79
+      ],
+      "neighborCosts": [
+        731.3617435988842,
+        475.83715701907937,
+        792.6695402246764,
+        138.13037319865606,
+        336.44167399417097,
+        292.3439754809392,
+        474.8863021819012
+      ]
+    },
+    {
+      "position": {
+        "x": 435.0,
+        "y": 1603.0
+      },
+      "neighborIndices": [
+        55,
+        57,
+        78,
+        79
+      ],
+      "neighborCosts": [
+        1026.1247487513397,
+        678.3900058226094,
+        782.218000304263,
+        450.98336998164353
+      ]
+    }
+  ]
+}

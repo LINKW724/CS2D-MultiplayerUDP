@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS2D Online</title>
+    <!-- 引入Tailwind CSS框架，用于快速构建UI界面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 引入一个具有科技感的字体 'Orbitron' */
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+        /* 全局样式定义 */
+        body { font-family: 'Orbitron', sans-serif; overflow: hidden; background-color: #1a202c; }
+        /* 游戏画布样式 */
+        canvas { background-color: #2d3748; cursor: crosshair; border: 2px solid #4a5568; }
+        /* HUD (Head-Up Display) 元素的文本阴影，增加可读性 */
+        .hud-element { text-shadow: 1px 1px 3px rgba(0,0,0,0.7); }
+        /* 武器选择/购买网格布局 */
+        .weapon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.75rem; }
+        /* 购买按钮样式 */
+        .buy-btn {
+            background-color: #4a5568;
+            padding: 0.5rem;
+            border-radius: 0.375rem;
+            transition: all 0.2s;
+            border: 2px solid #2d3748; /* 边框颜色，增加可见性 */
+            cursor: pointer;
+        }
+        /* 鼠标悬停在可用按钮上时的样式 */
+        .buy-btn:hover:not(:disabled) { background-color: #2d3748; border-color: #63b3ed; }
+        /* 全屏面板样式（如购买菜单、计分板），半透明背景带模糊效果 */
+        .fullscreen-panel { background-color: rgba(26, 32, 44, 0.95); backdrop-filter: blur(5px); }
+        /* 加入游戏按钮的悬停效果 */
+        .join-btn { transition: all 0.2s; }
+        .join-btn:hover { transform: scale(1.05); }
+        /* 计分板样式 */
+        #scoreboard { color: #e2e8f0; }
+        #scoreboard table { width: 100%; border-collapse: collapse; }
+        #scoreboard th, #scoreboard td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid #4a5568; white-space: nowrap; }
+        #scoreboard th { border-bottom-width: 2px; }
+        /* 计分板各列宽度定义 */
+        #scoreboard .col-name { width: 34%; }
+        #scoreboard .col-weapon { width: 15%; }
+        #scoreboard .col-k, #scoreboard .col-d, #scoreboard .col-dmg, #scoreboard .col-acc, #scoreboard .col-hs, #scoreboard .col-ping { width: 8%; text-align: right; }
+        /* 队伍颜色 */
+        #scoreboard .team-ct { color: #63b3ed; }
+        #scoreboard .team-t { color: #f56565; }
+        /* 高亮本地玩家所在行 */
+        #scoreboard .local-player-row { background-color: rgba(255, 255, 255, 0.1); }
+        /* 名字选择按钮样式 */
+        .name-btn { background-color: #2d3748; border: 1px solid #4a5568; padding: 0.5rem 1rem; }
+        .name-btn:hover { background-color: #4a5568; }
+        /* 禁用的按钮样式 */
+        .buy-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        /* 交互进度条（安包/拆包）样式 */
+        .interaction-bar-container { position: absolute; bottom: 25%; left: 50%; transform: translateX(-50%); width: 200px; height: 20px; background-color: rgba(0,0,0,0.5); border: 1px solid #fff; border-radius: 5px; display: none; }
+        .interaction-bar-progress { width: 0%; height: 100%; background-color: #63b3ed; border-radius: 4px; }
+    </style>
+</head>
+<body class="w-screen h-screen flex items-center justify-center text-white p-4">
+
+<!-- 游戏大厅界面 -->
+<div id="lobby" class="w-full max-w-4xl h-full max-h-[90vh] bg-gray-800 p-8 rounded-lg shadow-2xl border border-gray-700 flex flex-col">
+    <div class="text-center">
+        <h1 class="text-5xl font-bold mb-2 text-blue-400 tracking-widest">CS2D ONLINE</h1>
+        <!-- 连接状态显示 -->
+        <p id="connection-status" class="text-lg text-yellow-400">正在连接服务器...</p>
+    </div>
+    <!-- 名字选择界面 -->
+    <div id="name-selection" class="hidden flex-col items-center justify-center mt-6">
+        <h2 class="text-3xl font-bold text-yellow-400 mb-4">选择你的名字</h2>
+        <div class="w-full max-w-lg">
+            <input id="name-input" type="text" placeholder="输入你的名字" class="w-full p-3 bg-gray-700 border border-gray-600 rounded-md text-center text-xl mb-4">
+            <div class="grid grid-cols-2 gap-2 mb-4">
+                <!-- 预设名字按钮 -->
+                <button id="random-name-btn" class="w-full join-btn name-btn rounded-md">随机英文名</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="LinkWheat">LinkWheat</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="LinkBeiye">LinkBeiye</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="LinkBarley">LinkBarley</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="LinkBeyond">LinkBeyond</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="霖客掰耳鲤">霖客掰耳鲤</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="逼养的">逼养的</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="鼠鼠">鼠鼠</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="Player">Player</button>
+                <button class="w-full join-btn name-btn rounded-md" data-name="Guest">Guest</button>
+            </div>
+        </div>
+    </div>
+    <!-- 队伍/武器选择界面 -->
+    <div id="lobby-content" class="mt-4 flex-grow overflow-y-auto hidden">
+        <h2 id="lobby-title" class="text-3xl font-bold text-center text-yellow-400"></h2>
+        <div id="lobby-choices" class="mt-6"></div>
+    </div>
+</div>
+
+<!-- 游戏主容器，默认隐藏 -->
+<div id="game-container" class="hidden relative w-full h-full max-w-[1600px] max-h-[900px] mx-auto">
+    <!-- 游戏画布 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- TDM模式的武器选择菜单 -->
+    <div id="tdm-weapon-selector" class="absolute inset-0 p-8 items-center justify-center hidden fullscreen-panel flex-col z-10">
+        <h2 id="weapon-selector-title" class="text-4xl font-bold text-center text-yellow-400 mb-4">选择你的武器</h2>
+        <div id="tdm-weapon-grid" class="w-full max-w-6xl h-[70%] overflow-y-auto space-y-4 mb-4 p-4"></div>
+    </div>
+
+    <!-- 爆破模式的购买菜单 -->
+    <div id="buy-menu" class="absolute inset-0 p-8 items-center justify-center hidden fullscreen-panel flex-col z-10">
+        <h2 class="text-4xl font-bold text-center text-yellow-400 mb-4">购买菜单 (按 B 关闭)</h2>
+        <div id="buy-menu-content" class="w-full max-w-6xl h-[80%] overflow-y-auto space-y-6 p-4">
+        </div>
+        <p class="mt-4 text-lg">按 [B] 键打开/关闭购买菜单</p>
+    </div>
+
+    <!-- 计分板 (Tab键显示) -->
+    <div id="scoreboard" class="absolute inset-0 p-8 items-center justify-center hidden fullscreen-panel z-20">
+        <div class="w-full max-w-6xl">
+            <h2 class="text-4xl font-bold text-center text-yellow-400 mb-6">计分板</h2>
+            <div id="scoreboard-teams" class="space-y-6"></div>
+        </div>
+    </div>
+
+    <!-- 交互进度条 (安包/拆包) -->
+    <div id="interaction-bar-container" class="interaction-bar-container">
+        <div id="interaction-bar-progress" class="interaction-bar-progress"></div>
+    </div>
+
+    <!-- 游戏内的HUD界面，覆盖在Canvas之上 -->
+    <div id="hud" class="absolute top-0 left-0 w-full h-full pointer-events-none p-5">
+        <!-- 顶部信息区: 分数、时间、波数等 -->
+        <div class="flex justify-between items-start text-2xl">
+            <!-- 队伍分数 (TDM, DEMO) -->
+            <div id="team-scores">
+                <p id="ct-score" class="text-cyan-400 hud-element"></p>
+                <p id="t-score" class="text-red-500 hud-element"></p>
+            </div>
+            <!-- 僵尸信息 (ZOMBIE) -->
+            <div id="zombie-info" class="text-center">
+                <p id="wave-counter" class="text-orange-400 hud-element"></p>
+                <p id="zombie-counter" class="text-red-500 hud-element"></p>
+            </div>
+            <!-- 回合信息、计时器 -->
+            <div class="text-right">
+                <div id="round-counter" class="text-white hud-element"></div>
+                <p id="game-timer" class="text-white hud-element"></p>
+                <p id="tps-counter" class="text-xs text-gray-400 hud-element"></p>
+            </div>
+        </div>
+
+        <!-- 屏幕中央的大型提示信息 -->
+        <div id="wave-announcement" class="absolute top-1/4 left-1/2 -translate-x-1/2 text-5xl font-bold text-yellow-300 hud-element hidden"></div>
+        <div id="round-end-announcement" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center hidden">
+            <h2 id="round-winner-text" class="text-6xl font-bold"></h2>
+            <p id="round-win-reason-text" class="text-2xl mt-2"></p>
+        </div>
+
+        <!-- 左下角玩家状态区 -->
+        <div class="absolute bottom-5 left-5 text-2xl">
+            <!-- 连败经济补偿指示器 -->
+            <div id="loss-bonus-container" class="flex items-center text-base text-gray-400 mb-2"></div>
+            <!-- 玩家金钱 -->
+            <p id="player-money" class="text-green-400 hud-element hidden">$800</p>
+            <!-- 玩家HP -->
+            <p id="player-hp" class="text-green-400 hud-element"></p>
+            <!-- 玩家护甲 -->
+            <p id="player-armor" class="text-blue-300 hud-element"></p>
+            <!-- 玩家武器 -->
+            <p id="player-weapon" class="text-gray-300 hud-element"></p>
+            <!-- 玩家弹药 -->
+            <p id="player-ammo" class="text-white hud-element"></p>
+            <!-- 玩家装备图标 -->
+            <div id="player-equipment" class="flex gap-2 mt-2 items-center"></div>
+            <!-- 游戏提示信息 -->
+            <p id="change-weapon-prompt" class="text-sm text-gray-400 mt-2 hidden">[B] - 更换武器</p>
+            <p id="buy-prompt" class="text-sm text-gray-400 mt-2 hidden">[B] - 打开购买菜单</p>
+        </div>
+
+        <!-- 游戏结束画面 -->
+        <div id="game-over" class="absolute inset-0 bg-black bg-opacity-70 flex-col items-center justify-center hidden z-20">
+            <h2 id="game-over-title" class="text-7xl font-bold mb-4"></h2>
+            <button onclick="location.reload()" class="mt-8 px-8 py-4 bg-blue-600 text-white font-bold rounded-lg text-2xl">返回大厅</button>
+        </div>
+    </div>
+</div>
+<!-- 引入主要的JavaScript逻辑文件 -->
+<script src="script.js" defer></script>
+</body>
+</html>

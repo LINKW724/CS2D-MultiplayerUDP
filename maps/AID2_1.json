@@ -1,0 +1,465 @@
+{
+  "width": 3200,
+  "height": 3200,
+  "obstacles": [
+    {
+      "type": "RECTANGLE",
+      "x": 2508.0,
+      "y": 2764.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1950.0,
+      "y": 2800.0,
+      "width": 400.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1908.0,
+      "y": 2600.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1950.0,
+      "y": 3160.0,
+      "width": 440.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2350.0,
+      "y": 2300.0,
+      "width": 40.0,
+      "height": 500.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2350.0,
+      "y": 2300.0,
+      "width": 550.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2860.0,
+      "y": 1800.0,
+      "width": 40.0,
+      "height": 540.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2350.0,
+      "y": 1800.0,
+      "width": 550.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2350.0,
+      "y": 1300.0,
+      "width": 40.0,
+      "height": 500.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1950.0,
+      "y": 1300.0,
+      "width": 400.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1950.0,
+      "y": 900.0,
+      "width": 400.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2350.0,
+      "y": 900.0,
+      "width": 850.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 3160.0,
+      "y": 0.0,
+      "width": 40.0,
+      "height": 940.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1158.0,
+      "y": 2577.0,
+      "width": 400.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1651.0,
+      "y": 254.0,
+      "width": 1100.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2006.0,
+      "y": 346.0,
+      "width": 40.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1464.0,
+      "y": 394.0,
+      "width": 540.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1600.0,
+      "y": 550.0,
+      "width": 40.0,
+      "height": 450.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 953.0,
+      "y": 864.0,
+      "width": 540.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1143.0,
+      "y": 1001.0,
+      "width": 40.0,
+      "height": 350.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 400.0,
+      "y": 1260.0,
+      "width": 740.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 400.0,
+      "y": 900.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 400.0,
+      "y": 900.0,
+      "width": 250.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 753.0,
+      "y": 391.0,
+      "width": 40.0,
+      "height": 500.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 112.0,
+      "y": 139.0,
+      "width": 650.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1150.0,
+      "y": 0.0,
+      "width": 40.0,
+      "height": 550.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1150.0,
+      "y": 0.0,
+      "width": 800.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1950.0,
+      "y": 0.0,
+      "width": 40.0,
+      "height": 200.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1600.0,
+      "y": 1500.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 865.0,
+      "y": 1456.0,
+      "width": 500.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1367.0,
+      "y": 1319.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 690.0,
+      "y": 1902.0,
+      "width": 740.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 369.0,
+      "y": 1817.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 0.0,
+      "y": 2220.0,
+      "width": 440.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1600.0,
+      "y": 1860.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1600.0,
+      "y": 2220.0,
+      "width": 400.0,
+      "height": 40.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1960.0,
+      "y": 1860.0,
+      "width": 40.0,
+      "height": 400.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2081.0,
+      "y": 1011.0,
+      "width": 200.0,
+      "height": 200.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2598.0,
+      "y": 551.0,
+      "width": 100.0,
+      "height": 100.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2896.0,
+      "y": 701.0,
+      "width": 100.0,
+      "height": 100.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1400.0,
+      "y": 700.0,
+      "width": 100.0,
+      "height": 100.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1350.0,
+      "y": 1050.0,
+      "width": 100.0,
+      "height": 100.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 850.0,
+      "y": 1050.0,
+      "width": 100.0,
+      "height": 100.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 850.0,
+      "y": 700.0,
+      "width": 100.0,
+      "height": 100.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 500.0,
+      "y": 600.0,
+      "width": 80.0,
+      "height": 80.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 850.0,
+      "y": 200.0,
+      "width": 150.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 843.0,
+      "y": 2170.0,
+      "width": 150.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 288.0,
+      "y": 1428.0,
+      "width": 150.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1008.0,
+      "y": 1567.0,
+      "width": 150.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1700.0,
+      "y": 2500.0,
+      "width": 150.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2600.0,
+      "y": 2500.0,
+      "width": 150.0,
+      "height": 150.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        1600.0,
+        1850.0,
+        1850.0,
+        1600.0
+      ],
+      "yPoints": [
+        1300.0,
+        1300.0,
+        1500.0,
+        1500.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 2635.0,
+      "y": 773.0,
+      "width": 48.0,
+      "height": 17.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1146.0,
+      "y": 1942.0,
+      "width": 10.0,
+      "height": 656.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 807.0,
+      "y": 3106.0,
+      "width": 520.0,
+      "height": 92.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1902.0,
+      "y": 3084.0,
+      "width": 22.0,
+      "height": 114.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 500.0,
+      "y": 2832.0,
+      "width": 106.0,
+      "height": 367.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 777.0,
+      "y": 2858.0,
+      "width": 178.0,
+      "height": 114.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 880.0,
+      "y": 2835.0,
+      "width": 276.0,
+      "height": 21.0
+    }
+  ],
+  "ctSpawnAreas": [
+    {
+      "x": 50,
+      "y": 2300,
+      "width": 300,
+      "height": 850
+    },
+    {
+      "x": 63,
+      "y": 1371,
+      "width": 419,
+      "height": 513
+    }
+  ],
+  "tSpawnAreas": [
+    {
+      "x": 2400,
+      "y": 2399,
+      "width": 750,
+      "height": 750
+    }
+  ],
+  "bombSiteA": {
+    "x": 2400,
+    "y": 450,
+    "width": 700,
+    "height": 400
+  },
+  "bombSiteB": {
+    "x": 52,
+    "y": 450,
+    "width": 550,
+    "height": 400
+  }
+}

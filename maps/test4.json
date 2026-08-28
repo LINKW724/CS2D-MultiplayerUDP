@@ -1,0 +1,139 @@
+{
+  "width": 1600,
+  "height": 900,
+  "obstacles": [
+    {
+      "type": "RECTANGLE",
+      "x": 325.0,
+      "y": 64.0,
+      "width": 0.0,
+      "height": 0.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 220.0,
+      "y": -1.0,
+      "width": 84.0,
+      "height": 322.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 227.0,
+      "y": 520.0,
+      "width": 100.0,
+      "height": 364.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 617.0,
+      "y": 377.0,
+      "width": 0.0,
+      "height": 0.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 770.0,
+      "y": 426.0,
+      "width": 0.0,
+      "height": 0.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        608.0,
+        600.0,
+        996.0,
+        1009.0,
+        607.0
+      ],
+      "yPoints": [
+        528.0,
+        546.0,
+        780.0,
+        752.0,
+        528.0
+      ]
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        617.0,
+        608.0,
+        1057.0,
+        1065.0,
+        623.0
+      ],
+      "yPoints": [
+        324.0,
+        298.0,
+        137.0,
+        182.0,
+        318.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1158.0,
+      "y": 62.0,
+      "width": 11.0,
+      "height": 788.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 465.0,
+      "y": 61.0,
+      "width": 24.0,
+      "height": 777.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1260.0,
+      "y": 0.0,
+      "width": 87.0,
+      "height": 335.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1266.0,
+      "y": 489.0,
+      "width": 98.0,
+      "height": 399.0
+    }
+  ],
+  "ctSpawnAreas": [
+    {
+      "x": 64,
+      "y": 18,
+      "width": 184,
+      "height": 862
+    }
+  ],
+  "tSpawnAreas": [
+    {
+      "x": 1296,
+      "y": 8,
+      "width": 239,
+      "height": 877
+    }
+  ],
+  "bombSiteA": {
+    "x": 770,
+    "y": 47,
+    "width": 198,
+    "height": 172
+  },
+  "bombSiteB": {
+    "x": 683,
+    "y": 669,
+    "width": 337,
+    "height": 153
+  }
+}

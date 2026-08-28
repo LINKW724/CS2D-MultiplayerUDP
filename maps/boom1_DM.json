@@ -1,0 +1,287 @@
+{
+  "width": 1600,
+  "height": 900,
+  "obstacles": [
+    {
+      "type": "RECTANGLE",
+      "x": 1272.0,
+      "y": -2.0,
+      "width": 65.0,
+      "height": 230.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1276.0,
+      "y": 391.0,
+      "width": 68.0,
+      "height": 225.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 970.0,
+      "y": 432.0,
+      "width": 302.0,
+      "height": 130.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 682.0,
+      "y": 198.0,
+      "width": 32.0,
+      "height": 310.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 754.0,
+      "y": 688.0,
+      "width": 248.0,
+      "height": 46.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1005.0,
+      "y": 615.0,
+      "width": 37.0,
+      "height": 150.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 251.0,
+      "y": 66.0,
+      "width": 34.0,
+      "height": 135.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 250.0,
+      "y": 347.0,
+      "width": 50.0,
+      "height": 271.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 247.0,
+      "y": 709.0,
+      "width": 44.0,
+      "height": 147.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 765.0,
+      "y": 106.0,
+      "width": 35.0,
+      "height": 32.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 760.0,
+      "y": 43.0,
+      "width": 36.0,
+      "height": 35.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 612.0,
+      "y": 551.0,
+      "width": 38.0,
+      "height": 37.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 897.0,
+      "y": 784.0,
+      "width": 35.0,
+      "height": 39.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 776.0,
+      "y": 842.0,
+      "width": 36.0,
+      "height": 41.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 870.0,
+      "y": 136.0,
+      "width": 77.0,
+      "height": 225.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 602.0,
+      "y": 1.0,
+      "width": 467.0,
+      "height": 41.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        307.0,
+        431.0,
+        449.0,
+        306.0,
+        304.0
+      ],
+      "yPoints": [
+        409.0,
+        316.0,
+        503.0,
+        510.0,
+        408.0
+      ]
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        1104.0,
+        1285.0,
+        1316.0,
+        1140.0,
+        1104.0
+      ],
+      "yPoints": [
+        684.0,
+        838.0,
+        802.0,
+        658.0,
+        680.0
+      ]
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        498.0,
+        631.0,
+        636.0,
+        486.0,
+        497.0
+      ],
+      "yPoints": [
+        336.0,
+        332.0,
+        392.0,
+        386.0,
+        335.0
+      ]
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 341.0,
+      "y": 744.0,
+      "width": 151.0,
+      "height": 54.0
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        517.0,
+        596.0,
+        612.0,
+        534.0,
+        516.0
+      ],
+      "yPoints": [
+        656.0,
+        798.0,
+        782.0,
+        638.0,
+        653.0
+      ]
+    },
+    {
+      "type": "POLYGON",
+      "x": 0.0,
+      "y": 0.0,
+      "width": 0.0,
+      "height": 0.0,
+      "xPoints": [
+        610.0,
+        713.0,
+        712.0,
+        596.0
+      ],
+      "yPoints": [
+        780.0,
+        790.0,
+        809.0,
+        798.0
+      ]
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 533.0,
+      "y": 54.0,
+      "width": 24.0,
+      "height": 27.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 540.0,
+      "y": 141.0,
+      "width": 26.0,
+      "height": 26.0
+    },
+    {
+      "type": "ELLIPSE",
+      "x": 1096.0,
+      "y": 267.0,
+      "width": 64.0,
+      "height": 60.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 269.0,
+      "y": 427.0,
+      "width": 111.0,
+      "height": 72.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 1232.0,
+      "y": 449.0,
+      "width": 74.0,
+      "height": 95.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 971.0,
+      "y": 689.0,
+      "width": 60.0,
+      "height": 40.0
+    }
+  ],
+  "ctSpawnAreas": [
+    {
+      "x": 28,
+      "y": 17,
+      "width": 1550,
+      "height": 857
+    }
+  ],
+  "tSpawnAreas": [
+    {
+      "x": 26,
+      "y": 13,
+      "width": 1545,
+      "height": 857
+    }
+  ],
+  "waypoints": []
+}

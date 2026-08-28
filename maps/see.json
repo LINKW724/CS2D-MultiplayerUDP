@@ -1,0 +1,65 @@
+{
+  "width": 1600,
+  "height": 900,
+  "obstacles": [
+    {
+      "type": "RECTANGLE",
+      "x": 604.0,
+      "y": 270.0,
+      "width": 330.0,
+      "height": 57.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 870.0,
+      "y": 252.0,
+      "width": 128.0,
+      "height": 360.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 540.0,
+      "y": 533.0,
+      "width": 470.0,
+      "height": 84.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 504.0,
+      "y": 220.0,
+      "width": 166.0,
+      "height": 353.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 670.0,
+      "y": 411.0,
+      "width": 89.0,
+      "height": 9.0
+    },
+    {
+      "type": "RECTANGLE",
+      "x": 762.0,
+      "y": 411.0,
+      "width": 110.0,
+      "height": 9.0
+    }
+  ],
+  "ctSpawnAreas": [
+    {
+      "x": 680,
+      "y": 329,
+      "width": 166,
+      "height": 73
+    }
+  ],
+  "tSpawnAreas": [
+    {
+      "x": 680,
+      "y": 437,
+      "width": 166,
+      "height": 68
+    }
+  ],
+  "waypoints": []
+}

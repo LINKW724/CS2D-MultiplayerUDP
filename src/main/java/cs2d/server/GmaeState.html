@@ -1,0 +1,1502 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GameState.java - 开发者 API 文档</title>
+    <style>
+        /* 基础样式 (来自 GameClient.html) */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            background-color: #f8f9fa;
+            color: #212529;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            display: flex;
+        }
+        /* 目录 (TOC) */
+        .toc {
+            width: 320px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            overflow-y: auto;
+            background-color: #e9ecef;
+            border-right: 1px solid #dee2e6;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .toc h3 {
+            margin-top: 0;
+            color: #007bff;
+            border-bottom: 1px solid #ced4da;
+            padding-bottom: 5px;
+        }
+        .toc ul {
+            list-style-type: none;
+            padding-left: 0;
+            margin-bottom: 15px;
+        }
+        .toc li {
+            margin-bottom: 2px;
+        }
+        .toc a {
+            text-decoration: none;
+            color: #495057;
+            display: block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+        .toc a:hover {
+            background-color: #dee2e6;
+            color: #0056b3;
+        }
+        /* 主要内容区 */
+        .content {
+            margin-left: 340px; /* toc width + 20px padding */
+            padding: 20px 40px;
+            width: calc(100% - 340px);
+            box-sizing: border-box;
+        }
+        /* 标题 */
+        h1 {
+            color: #007bff;
+            border-bottom: 2px solid #dee2e6;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #007bff;
+            margin-top: 40px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 5px;
+        }
+        h3 {
+            color: #17a2b8;
+            margin-top: 30px;
+        }
+        /* 文档区块 */
+        .doc-section {
+            background-color: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        /* 提取的注释 */
+        .comment {
+            display: block;
+            font-style: italic;
+            color: #495057;
+            margin-bottom: 10px;
+            border-left: 3px solid #17a2b8;
+            padding-left: 10px;
+            background-color: #f8f9fa;
+        }
+        /* 字段和方法签名 */
+        .field-def, .method-sig {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 1.1em;
+            color: #c7254e;
+            background-color: #f7f7f9;
+            padding: 5px 10px;
+            border-radius: 4px;
+            display: block;
+            margin-top: 5px;
+            white-space: pre-wrap; /* 保证签名换行正确 */
+        }
+        /* 源码折叠 */
+        pre {
+            background-color: #f7f7f9;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            overflow-x: auto;
+        }
+        code {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 0.95em;
+            color: #333;
+        }
+        /* 源码高亮 (简单模拟) */
+        pre .code-comment { color: #008000; font-style: italic; }
+        pre .code-keyword { color: #0000ff; font-weight: bold; }
+        pre .code-string { color: #a31515; }
+        pre .code-type { color: #267f99; }
+        pre .code-literal { color: #098658; }
+
+        details {
+            margin-top: 15px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            background: #fff;
+        }
+        summary {
+            cursor: pointer;
+            padding: 10px;
+            background-color: #e9ecef;
+            font-weight: bold;
+        }
+        summary:hover {
+            background-color: #dee2e6;
+        }
+        .imports-list {
+            column-count: 3;
+            column-gap: 20px;
+            padding: 10px 20px;
+        }
+        .imports-list li {
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav class="toc">
+            <h3>目录</h3>
+            <ul>
+                <li><a href="#class-overview">类概览: GameState</a></li>
+                <li><a href="#imports">导入 (Imports)</a></li>
+            </ul>
+
+            <h3>成员变量 (字段)</h3>
+            <ul>
+                <li><a href="#field-constants">游戏核心常量</a></li>
+                <li><a href="#field-footstep">脚步声</a></li>
+                <li><a href="#field-state">游戏状态变量</a></li>
+                <li><a href="#field-killfeed">击杀信息</a></li>
+                <li><a href="#field-ai-buffers">AI 缓冲区</a></li>
+                <li><a href="#field-damage-log">伤害日志</a></li>
+                <li><a href="#field-map-data">地图数据</a></li>
+                <li><a href="#field-tdm">TDM模式变量</a></li>
+                <li><a href="#field-zombie">僵尸模式变量</a></li>
+                <li><a href="#field-demo">爆破模式变量</a></li>
+                <li><a href="#field-performance">性能日志</a></li>
+                <li><a href="#field-spatial">空间网格/Quadtree</a></li>
+                <li><a href="#field-fire">火焰区域</a></li>
+                <li><a href="#field-bounds-check">边界检查</a></li>
+                <li><a href="#field-ai-freeze">AI 冻结</a></li>
+                <li><a href="#field-ai-threading">AI 线程池</a></li>
+            </ul>
+
+            <h3>内部类 &amp; 记录</h3>
+            <ul>
+                <li><a href="#enum-RoundPhase">Enum: RoundPhase</a></li>
+                <li><a href="#record-FlashEvent">Record: FlashEvent</a></li>
+                <li><a href="#record-HeadshotEvent">Record: HeadshotEvent</a></li>
+                <li><a href="#class-SmokePuff">Class: SmokePuff</a></li>
+                <li><a href="#class-ThrownGrenade">Class: ThrownGrenade</a></li>
+                <li><a href="#class-DroppedItem">Class: DroppedItem</a></li>
+                <li><a href="#class-PingMarker">Class: PingMarker</a></li>
+                <li><a href="#record-FootstepRevealEvent">Record: FootstepRevealEvent</a></li>
+                <li><a href="#class-PlayerDeath">Class: PlayerDeath</a></li>
+                <li><a href="#record-WeaponUIData">Record: WeaponUIData</a></li>
+                <li><a href="#record-ItemUIData">Record: ItemUIData</a></li>
+                <li><a href="#record-KillFeedInfo">Record: KillFeedInfo</a></li>
+                <li><a href="#record-TargetedDamageEvent">Record: TargetedDamageEvent</a></li>
+                <li><a href="#class-FirePatch">Class: FirePatch</a></li>
+                <li><a href="#record-CollisionResult">Record: CollisionResult</a></li>
+                <li><a href="#record-AI_Action">Record: AI_Action</a></li>
+            </ul>
+
+            <h3>构造函数</h3>
+            <ul>
+                <li><a href="#constructor-GameState">GameState(...)</a></li>
+            </ul>
+
+            <h3>公共方法 (Public)</h3>
+            <ul>
+                <li><a href="#method-isPointInObstacle-point">isPointInObstacle(Point2D.Double)</a></li>
+                <li><a href="#method-getQuadtreeRootNode">getQuadtreeRootNode()</a></li>
+                <li><a href="#method-getObstacleWrappers">getObstacleWrappers()</a></li>
+                <li><a href="#method-getTScore">getTScore()</a></li>
+                <li><a href="#method-getCTScore">getCTScore()</a></li>
+                <li><a href="#method-playerDropC4">playerDropC4(String)</a></li>
+                <li><a href="#method-update">update()</a></li>
+                <li><a href="#method-getPerfTimeAiInputPrep">getPerfTimeAiInputPrep()</a></li>
+                <li><a href="#method-getPerfTimePhysics">getPerfTimePhysics()</a></li>
+                <li><a href="#method-getPerfTimeGameLogic">getPerfTimeGameLogic()</a></li>
+                <li><a href="#method-getPerfTimeTotal">getPerfTimeTotal()</a></li>
+                <li><a href="#method-addPlayer">addPlayer(String, String, String)</a></li>
+                <li><a href="#method-playerChooseWeapon">playerChooseWeapon(String, String)</a></li>
+                <li><a href="#method-getTSpawnAreas">getTSpawnAreas()</a></li>
+                <li><a href="#method-getCtSpawnAreas">getCtSpawnAreas()</a></li>
+                <li><a href="#method-convertWrapperToShape">convertWrapperToShape(ShapeWrapper) (static)</a></li>
+                <li><a href="#method-playerRequestPing">playerRequestPing(String, Point2D.Double)</a></li>
+                <li><a href="#method-playerBuyItem">playerBuyItem(String, String)</a></li>
+                <li><a href="#method-getAndClearAiSoundEvents">getAndClearAiSoundEvents()</a></li>
+                <li><a href="#method-throwGrenade">throwGrenade(Player)</a></li>
+                <li><a href="#method-getPlayerById">getPlayerById(String)</a></li>
+                <li><a href="#method-moveWithCollision">moveWithCollision(Player, double, double)</a></li>
+                <li><a href="#method-removePlayer">removePlayer(String)</a></li>
+                <li><a href="#method-playerDropWeapon">playerDropWeapon(String)</a></li>
+                <li><a href="#method-playerSelectsNextWeapon">playerSelectsNextWeapon(String, String)</a></li>
+                <li><a href="#method-playerRequestReload">playerRequestReload(String)</a></li>
+                <li><a href="#method-playerSwitchSlot">playerSwitchSlot(String, int)</a></li>
+                <li><a href="#method-requestShoot">requestShoot(Player)</a></li>
+                <li><a href="#method-addSoundEvent-3args">addSoundEvent(SoundType, String, double, double)</a></li>
+                <li><a href="#method-addSoundEvent-5args">addSoundEvent(SoundType, String, double, double, String)</a></li>
+                <li><a href="#method-getLineShapeIntersections">getLineShapeIntersections(Line2D.Double, Shape) (static)</a></li>
+                <li><a href="#method-getLineLineIntersectionPoint">getLineLineIntersectionPoint(Line2D.Double, Line2D.Double) (static)</a></li>
+                <li><a href="#method-getGameMode">getGameMode()</a></li>
+                <li><a href="#method-requestMelee">requestMelee(Player, Player, int)</a></li>
+                <li><a href="#method-getBombSiteA">getBombSiteA()</a></li>
+                <li><a href="#method-getBombSiteB">getBombSiteB()</a></li>
+                <li><a href="#method-isBombPlanted">isBombPlanted()</a></li>
+                <li><a href="#method-getBombPosition">getBombPosition()</a></li>
+                <li><a href="#method-getRoundPhase">getRoundPhase()</a></li>
+                <li><a href="#method-getDroppedBomb">getDroppedBomb()</a></li>
+                <li><a href="#method-getPlayers">getPlayers()</a></li>
+                <li><a href="#method-getDroppedItems">getDroppedItems()</a></li>
+                <li><a href="#method-getMapDataJson">getMapDataJson()</a></li>
+                <li><a href="#method-getFullUpdateJson">getFullUpdateJson()</a></li>
+                <li><a href="#method-getSmallUpdateJson">getSmallUpdateJson()</a></li>
+                <li><a href="#method-updatePlayerInput">updatePlayerInput(String, JsonObject)</a></li>
+                <li><a href="#method-broadcastGlobalVoice">broadcastGlobalVoice(String)</a></li>
+                <li><a href="#method-playerStartInteraction">playerStartInteraction(String)</a></li>
+                <li><a href="#method-playerStopInteraction">playerStopInteraction(String)</a></li>
+                <li><a href="#method-playerUndoPurchase">playerUndoPurchase(String, String)</a></li>
+                <li><a href="#method-playerPickupDroppedWeapon">playerPickupDroppedWeapon(String, String)</a></li>
+                <li><a href="#method-getRecentDeaths">getRecentDeaths(int)</a></li>
+                <li><a href="#method-isInBounds">isInBounds(Point2D.Double)</a></li>
+                <li><a href="#method-getSpatialGrid">getSpatialGrid()</a></li>
+                <li><a href="#method-getGridCellSize">getGridCellSize()</a></li>
+                <li><a href="#method-getGridWidth">getGridWidth()</a></li>
+                <li><a href="#method-getGridHeight">getGridHeight()</a></li>
+                <li><a href="#method-manuallyAddAiPlayer">manuallyAddAiPlayer(Team)</a></li>
+                <li><a href="#method-executeCommand">executeCommand(String)</a></li>
+                <li><a href="#method-removeBotByTeam">removeBotByTeam(Team)</a></li>
+                <li><a href="#method-killAllBots">killAllBots()</a></li>
+                <li><a href="#method-getFirePatches">getFirePatches()</a></li>
+                <li><a href="#method-getCharacterCount">getCharacterCount()</a></li>
+                <li><a href="#method-playerRequestControlBot">playerRequestControlBot(String, JsonObject)</a></li>
+                <li><a href="#method-getRoundTimeRemaining">getRoundTimeRemaining()</a></li>
+                <li><a href="#method-getAllCharacters">getAllCharacters()</a></li>
+                <li><a href="#method-hasWaypointGraph">hasWaypointGraph()</a></li>
+                <li><a href="#method-getWaypointGraph">getWaypointGraph()</a></li>
+                <li><a href="#method-getObstacles">getObstacles()</a></li>
+                <li><a href="#method-getSoundEvents">getSoundEvents()</a></li>
+                <li><a href="#method-clearSoundEvents">clearSoundEvents()</a></li>
+                <li><a href="#method-commandAiMoveTo">commandAiMoveTo(String, double, double)</a></li>
+                <li><a href="#method-getIsAiFrozen">getIsAiFrozen()</a></li>
+                <li><a href="#method-toggleAiFreeze">toggleAiFreeze()</a></li>
+                <li><a href="#method-isAiFrozen">isAiFrozen()</a></li>
+                <li><a href="#method-shutdown-gamestate">shutdown()</a></li>
+            </ul>
+        </nav>
+
+        <main class="content">
+            <h1>GameState.java - 开发者 API 文档</h1>
+
+            <div class="doc-section" id="class-overview">
+                <h2>类概览: GameState</h2>
+                <span class="comment">// 文件: GameState.java</span>
+                <span class="comment">// 描述: 游戏核心状态管理类，包含所有游戏实体、逻辑和规则。</span>
+                <span class="method-sig">public class GameState</span>
+                <p><strong>包:</strong> <code>cs2d.server</code></p>
+                <p>
+                    游戏的核心状态管理类，由 `GameServer` 持有和驱动。它包含了游戏世界中的所有实体（玩家、僵尸、掉落物、投掷物等）、地图信息（障碍物、出生点）、游戏规则和逻辑（碰撞检测、伤害计算、回合管理、模式特定逻辑）。
+                    此类是线程安全的，使用了 `CopyOnWriteArrayList` 和 `ConcurrentHashMap` 来处理并发访问，并由 `GameServer` 的 `gameLoop` 线程单线程更新。
+                </p>
+            </div>
+
+            <div class="doc-section" id="imports">
+                <h2>导入 (Imports)</h2>
+                <details>
+                    <summary>点击展开/折叠导入列表</summary>
+                    <ul class="imports-list">
+                        <li>com.google.gson.JsonArray</li>
+                        <li>com.google.gson.JsonObject</li>
+                        <li>cs2d.AIControl.A.PathfindingModule</li>
+                        <li>cs2d.playerAndAi.Player</li>
+                        <li>cs2d.playerAndAi.Waypoint</li>
+                        <li>cs2d.playerAndAi.Weapon</li>
+                        <li>cs2d.playerAndAi.doublePlayer.WaypointNode</li>
+                        <li>javafx.application.Platform</li>
+                        <li>java.awt.*</li>
+                        <li>java.awt.geom.*</li>
+                        <li>java.time.LocalDateTime</li>
+                        <li>java.util.*</li>
+                        <li>java.util.concurrent.*</li>
+                        <li>java.util.function.Consumer</li>
+                        <li>java.util.stream.Collectors</li>
+                        <li>java.util.stream.Stream</li>
+                        <li>cs2d.AIControl.B.PerceptionModule.TIMESTAMP_FORMATTER</li>
+                        <li>cs2d.playerAndAi.Player.*</li>
+                    </ul>
+                </details>
+            </div>
+
+            <h2 id="fields">成员变量 (字段)</h2>
+
+            <div class="doc-section" id="field-constants">
+                <h3>游戏核心常量</h3>
+                <span class="comment">//从服务器拿来TPS</span>
+                <span class="field-def">public static final double SERVER_TICKRATE = GameServer.TPS;</span>
+                <span class="comment">//重生时间 3s</span>
+                <span class="field-def">private static final long SPAWN_PROTECTION_MS = 3000L;</span>
+                <span class="comment">// 摩擦力系数，越高摩擦力越小</span>
+                <span class="field-def">private static final double FRICTION = 0.95;</span>
+                <span class="comment">//人物移速</span>
+                <span class="field-def">private static final double BASE_SPEED = 1.5;</span>
+                <span class="comment">//人物移动加速度</span>
+                <span class="field-def">private static final double ACCELERATION = 0.3;</span>
+                <span class="comment">//穿透系数 2.0</span>
+                <span class="field-def">private static final double PENETRATION_MULTIPLIER = 2.0;</span>
+                <span class="comment">//团队战 10min</span>
+                <span class="field-def">private static final int TDM_GAME_DURATION_SECONDS = 600;</span>
+                <span class="field-def">private static final long ZOMBIE_WAVE_SPAWN_DURATION_MS = 10000L;</span>
+                <span class="comment">//开始时间为10秒</span>
+                <span class="field-def">private static final long DEMO_FREEZE_TIME_MS = 10000L;</span>
+                <span class="field-def">public static final int DEMO_WIN_SCORE = 13;</span>
+                <span class="field-def">public static final int DEMO_MAX_ROUNDS = 24;</span>
+                <span class="comment">// 1分55秒</span>
+                <span class="field-def">private static final long DEMO_ROUND_TIME_MS = 115000L;</span>
+                <span class="field-def">private static final long DEMO_BOMB_TIME_MS = 40000L;</span>
+                <span class="field-def">private static final long DEMO_PLANT_TIME_MS = 3200L;</span>
+                <span class="field-def">private static final long DEMO_DEFUSE_TIME_MS = 10000L;</span>
+                <span class="field-def">private static final long DEMO_DEFUSE_WITH_KIT_TIME_MS = 5000L;</span>
+                <span class="comment">// 碰撞后速度衰减系数</span>
+                <span class="field-def">public static final double GRENADE_BOUNCE_FRICTION = -0.85;</span>
+                <span class="comment">// 烟雾颗粒的初始扩散速度</span>
+                <span class="field-def">private static final double SMOKE_PUFF_INITIAL_SPEED = 25.0;</span>
+                <span class="comment">// Quadtree: 每个节点分裂前最多容纳的对象数 (根据需要调整)</span>
+                <span class="field-def">private static final int QUADTREE_MAX_OBJECTS = 8;</span>
+                <span class="comment">// Quadtree: 树的最大深度 (根据需要调整)</span>
+                <span class="field-def">private static final int QUADTREE_MAX_DEPTH = 10;</span>
+                <span class="comment">//烟雾总共持续10秒</span>
+                <span class="field-def">private static final long SMOKE_DURATION_MS = 10000L;</span>
+                <span class="comment">//烟雾弹的烟雾的摩擦力</span>
+                <span class="field-def">private static final double SMOKE_FRICTION = 0.2;</span>
+                <span class="comment">// 这里修改 火焰伤害  /燃烧弹</span>
+                <span class="field-def">private static final double EXPLOSIVE_ARMOR_PENETRATION = 0.7;</span>
+            </div>
+
+            <div class="doc-section" id="field-footstep">
+                <h3>脚步声</h3>
+                <span class="comment">// 0.2秒间隔</span>
+                <span class="field-def">private static final long FOOTSTEP_INTERVAL_MS = 200L;</span>
+                <span class="comment">//脚步声范围(不能超过1050 = 7 * 150)格子定义好了</span>
+                <span class="field-def">public static final double FOOTSTEP_RADIUS = 1000;</span>
+                <span class="comment">// 使用平方距离进行比较，避免开方运算，效率更高</span>
+                <span class="field-def">private static final double FOOTSTEP_RADIUS_SQ = FOOTSTEP_RADIUS * FOOTSTEP_RADIUS;</span>
+                <span class="comment">// 列表 存储 脚步声 事件</span>
+                <span class="field-def">private final List&lt;FootstepRevealEvent&gt; footstepRevealEvents = new CopyOnWriteArrayList&lt;&gt;();</span>
+            </div>
+
+            <div class="doc-section" id="field-state">
+                <h3>游戏状态变量</h3>
+                <span class="comment">// 地图宽度</span>
+                <span class="field-def">public int width;</span>
+                <span class="comment">// 地图高度</span>
+                <span class="field-def">public int height;</span>
+                <span class="comment">// 当前游戏模式（例如团队死斗、爆破）。</span>
+                <span class="field-def">private final GameMode gameMode;</span>
+                <span class="comment">// AI的难度设置。</span>
+                <span class="field-def">private final AIDifficulty aiDifficulty;</span>
+                <span class="comment">// 一个用于记录日志的函数式接口实例。</span>
+                <span class="field-def">private final Consumer&lt;String&gt; logger;</span>
+                <span class="comment">// 游戏开始时AI的数量。</span>
+                <span class="field-def">private final int initialAiCount;</span>
+                <span class="comment">// 存储所有玩家（包括AI）的线程安全列表。</span>
+                <span class="field-def">private final List&lt;Player&gt; players = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储所有僵尸的线程安全列表。</span>
+                <span class="field-def">private final List&lt;Player&gt; zombies = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储地图上所有障碍物（用于碰撞检测）的列表。</span>
+                <span class="field-def">private final List&lt;Shape&gt; obstacles = new ArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储地图上所有的“粗略点”</span>
+                <span class="field-def">private List&lt;WaypointNode&gt; waypointGraph;</span>
+                <span class="comment">// 存储障碍物的数据包装对象，方便序列化。</span>
+                <span class="field-def">private final List&lt;MapData.ShapeWrapper&gt; obstacleWrappers = new ArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储视觉效果（如枪口火焰、弹道）的线程安全列表。</span>
+                <span class="field-def">private final List&lt;VisualEffect&gt; visualEffects = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储需要广播给所有玩家的音效事件。</span>
+                <span class="field-def">private final List&lt;SoundEvent&gt; soundEvents = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储只发送给特定玩家的音效事件（如爆头提示）。</span>
+                <span class="field-def">private final List&lt;HeadshotEvent&gt; privateSoundEvents = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 游戏开始时的时间戳。</span>
+                <span class="field-def">private long gameStartTime;</span>
+                <span class="comment">// 标记游戏是否已经结束。</span>
+                <span class="field-def">private boolean isGameOver = false;</span>
+                <span class="comment">// 存储玩家受到的不足1点的伤害，累积后再计算。</span>
+                <span class="field-def">private final Map&lt;String, Double&gt; playerDamageBuffer = new ConcurrentHashMap&lt;&gt;();</span>
+                <span class="comment">// 用于生成随机数的实例。</span>
+                <span class="field-def">private final Random rand = new Random();</span>
+                <span class="comment">// 存储最近发生的玩家死亡事件的线程安全列表。</span>
+                <span class="field-def">private final List&lt;PlayerDeath&gt; recentDeaths = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 用于存储所有在飞行中的手榴弹</span>
+                <span class="field-def">private final List&lt;ThrownGrenade&gt; thrownGrenades = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 用于存储所有烟雾弹生成的烟雾颗粒</span>
+                <span class="field-def">private final List&lt;SmokePuff&gt; smokePuffs = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 用于存储需要单独发送给特定玩家的闪光弹效果</span>
+                <span class="field-def">private final List&lt;FlashEvent&gt; flashEvents = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 存储地图上所有掉落物品的线程安全列表。</span>
+                <span class="field-def">private final List&lt;DroppedItem&gt; droppedItems = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="field-def">private final List&lt;PingMarker&gt; pingMarkers = new CopyOnWriteArrayList&lt;&gt;();</span>
+                <span class="comment">// 预计算出生点 (现在 width/height 是正确的)</span>
+                <span class="field-def">private final List&lt;Point2D.Double&gt; precomputedSpawnPoints = new ArrayList&lt;&gt;();</span>
+            </div>
+
+            <div class="doc-section" id="field-killfeed">
+                 <h3>击杀信息</h3>
+                 <span class="comment">// 存储最近击杀信息的队列，使用线程安全的ConcurrentLinkedDeque以避免并发修改异常</span>
+                 <span class="field-def">private final Deque&lt;KillFeedInfo&gt; recentKills = new ConcurrentLinkedDeque&lt;&gt;();</span>
+            </div>
+
+            <div class="doc-section" id="field-ai-buffers">
+                <h3>AI 缓冲区</h3>
+                <span class="comment">// --- 发给 听觉感受器 的 ---</span>
+                <span class="field-def">private final List&lt;SoundEvent&gt; aiSoundEventsBuffer = Collections.synchronizedList(new ArrayList&lt;&gt;());</span>
+                <span class="field-def">private final List&lt;SoundEvent&gt; aiPrivateSoundEventsBuffer = Collections.synchronizedList(new ArrayList&lt;&gt;());</span>
+                <span class="field-def">private final List&lt;FootstepRevealEvent&gt; aiFootstepRevealEventsBuffer = Collections.synchronizedList(new ArrayList&lt;&gt;());</span>
+            </div>
+
+            <div class="doc-section" id="field-damage-log">
+                <h3>伤害日志</h3>
+                <span class="comment">// --- 专门用于伤害日志damageLogEvents的列表 ---</span>
+                <span class="field-def">private final List&lt;TargetedDamageEvent&gt; privateDamageEvents = new CopyOnWriteArrayList&lt;&gt;();</span>
+            </div>
+
+            <div class="doc-section" id="field-map-data">
+                <h3>地图数据</h3>
+                <span class="comment">// CT队伍的出生区域列表。</span>
+                <span class="field-def">private List&lt;Rectangle&gt; ctSpawnAreas;</span>
+                <span class="comment">// T队伍的出生区域列表。</span>
+                <span class="field-def">private List&lt;Rectangle&gt; tSpawnAreas;</span>
+                <span class="comment">// A炸弹点的区域。</span>
+                <span class="field-def">private Rectangle bombSiteA;</span>
+                <span class="comment">// B炸弹点的区域。</span>
+                <span class="field-def">private Rectangle bombSiteB;</span>
+            </div>
+
+            <div class="doc-section" id="field-tdm">
+                 <h3>TDM模式变量</h3>
+                 <span class="comment">// 团队死斗模式中CT队伍的分数。</span>
+                 <span class="field-def">private int teamCTScore_TDM = 0;</span>
+                 <span class="comment">// 团队死斗模式中T队伍的分数。</span>
+                 <span class="field-def">private int teamTScore_TDM = 0;</span>
+            </div>
+
+            <div class="doc-section" id="field-zombie">
+                <h3>僵尸模式变量</h3>
+                <span class="comment">// 当前是第几波僵尸。</span>
+                <span class="field-def">private int currentWave = 0;</span>
+                <span class="comment">// 当前波次还需要生成的僵尸数量。</span>
+                <span class="field-def">private int zombiesToSpawn = 0;</span>
+                <span class="comment">// 上一个僵尸生成的时间戳。</span>
+                <span class="field-def">private long lastZombieSpawnTime = 0;</span>
+                <span class="comment">// 生成僵尸之间的时间间隔（毫秒）。</span>
+                <span class="field-def">private long zombieSpawnInterval = 500;</span>
+                <span class="comment">// 标记当前是否正在等待下一波僵尸。</span>
+                <span class="field-def">private boolean waitingForNextWave = true;</span>
+                <span class="comment">// 下一波僵尸开始的时间戳。</span>
+                <span class="field-def">private long nextWaveStartTime = 0;</span>
+                <span class="comment">// 上一回合CT方击杀T方的人数 (这个变量名似乎有误，应为CT击杀僵尸或T方击杀CT)。</span>
+                <span class="field-def">private int tKillsLastRound = 0;</span>
+                <span class="comment">// 记录上次在僵尸模式发放道具的时间</span>
+                <span class="field-def">private long lastZombieItemDropTime = 0;</span>
+            </div>
+
+            <div class="doc-section" id="field-demo">
+                <h3>爆破模式变量</h3>
+                <span class="comment">// 当前回合所处的阶段，默认为冻结时间。</span>
+                <span class="field-def">private RoundPhase roundPhase = RoundPhase.FREEZE_TIME;</span>
+                <span class="comment">// 当前是第几回合。</span>
+                <span class="field-def">public int currentRound = 0;</span>
+                <span class="comment">// 爆破模式中CT队伍的得分。</span>
+                <span class="field-def">private int teamCTScore_DEMO = 0;</span>
+                <span class="comment">// 爆破模式中T队伍的得分。</span>
+                <span class="field-def">private int teamTScore_DEMO = 0;</span>
+                <span class="comment">// 当前回合开始的时间戳。</span>
+                <span class="field-def">public long roundStartTime = 0;</span>
+                <span class="comment">// 标记炸弹是否已经被安放。</span>
+                <span class="field-def">private boolean bombPlanted = false;</span>
+                <span class="comment">// 炸弹被安放的位置。</span>
+                <span class="field-def">private Point2D.Double bombPosition;</span>
+                <span class="comment">// 炸弹被安放的时间戳。</span>
+                <span class="field-def">private long bombPlantTime = 0;</span>
+                <span class="comment">// 安放炸弹的玩家ID。</span>
+                <span class="field-def">private String bombPlanterId = null;</span>
+                <span class="comment">// 当前回合的胜利方。</span>
+                <span class="field-def">private Player.Team roundWinner = null;</span>
+                <span class="comment">// 当前回合胜利的原因。</span>
+                <span class="field-def">private String roundWinReason = "";</span>
+                <span class="comment">// 当前回合结束的时间戳。</span>
+                <span class="field-def">private long roundEndTime = 0;</span>
+            </div>
+
+            <div class="doc-section" id="field-performance">
+                <h3>性能日志</h3>
+                <span class="comment">// (供 ServerStatusWindow 调用)</span>
+                <span class="field-def">private double perfTimeAiInputPrep = 0.0;</span>
+                <span class="field-def">private double perfTimePhysics = 0.0;</span>
+                <span class="field-def">private double perfTimeGameLogic = 0.0;</span>
+                <span class="field-def">private double perfTimeTotal = 0.0;</span>
+                <span class="comment">// 用于性能分析计数的帧计数器</span>
+                <span class="field-def">private long tickCounter = 0;</span>
+            </div>
+
+            <div class="doc-section" id="field-spatial">
+                <h3>空间网格/Quadtree</h3>
+                 <span class="comment">// 序列化网格</span>
+                 <span class="field-def">private List&lt;Player&gt;[][] spatialGrid;</span>
+                 <span class="comment">// 每个格子的尺寸</span>
+                 <span class="field-def">private int gridCellSize = 150;</span>
+                 <span class="field-def">private int gridWidth;</span>
+                 <span class="field-def">private int gridHeight;</span>
+                 <span class="field-def">private QuadtreeNode quadtreeRootNode;</span>
+            </div>
+
+            <div class="doc-section" id="field-fire">
+                <h3>火焰区域</h3>
+                <span class="field-def">private final List&lt;FirePatch&gt; firePatches = new CopyOnWriteArrayList&lt;&gt;();</span>
+            </div>
+
+            <div class="doc-section" id="field-bounds-check">
+                <h3>边界检查</h3>
+                 <span class="comment">// [BUG修复] 用于定期检查实体边界的计时器</span>
+                 <span class="field-def">private long lastBoundsCheckTime = 0;</span>
+                 <span class="field-def">private static final long BOUNDS_CHECK_INTERVAL_MS = 5000; // 每5秒检查一次</span>
+            </div>
+
+            <div class="doc-section" id="field-ai-freeze">
+                 <h3>AI 冻结</h3>
+                 <span class="comment">// <--- 在这里或附近添加这一行，用于标记AI是否被冻结</span>
+                 <span class="field-def">private boolean isAiFrozen = false;</span>
+            </div>
+
+            <div class="doc-section" id="field-ai-threading">
+                <h3>AI 线程池</h3>
+                <span class="comment">// 一个线程池，我们将把所有AI的决策任务都提交给它来并行处理。</span>
+                <span class="comment">// 这里我们创建了10个线程，与您的提议一致。</span>
+                <span class="field-def">private final ExecutorService aiThreadPool = Executors.newFixedThreadPool(10);</span>
+                <span class="comment">// 一个线程安全的队列，用于存放AI线程计算完成的决策结果。</span>
+                <span class="comment">// AI线程是生产者，主线程是消费者。</span>
+                <span class="field-def">private final ConcurrentLinkedQueue&lt;AI_Action&gt; completedAiActions = new ConcurrentLinkedQueue&lt;&gt;();</span>
+                <span class="comment">// <-- AI输入数据邮箱（线程安全的消息队列），用于异步通信。</span>
+                <span class="field-def">private final ConcurrentHashMap&lt;String, AIService.AIInput&gt; aiInputMailbox;</span>
+            </div>
+
+            <h2 id="inner-classes">内部类 &amp; 记录</h2>
+
+            <div class="doc-section" id="enum-RoundPhase">
+                 <h3>Enum: RoundPhase</h3>
+                 <span class="comment">// 定义一个枚举类型来表示回合的不同阶段。</span>
+                 <span class="field-def">public enum RoundPhase { FREEZE_TIME, IN_PROGRESS, ROUND_OVER }</span>
+                 <p>用于爆破模式，标记当前回合的状态。</p>
+            </div>
+
+            <div class="doc-section" id="record-FlashEvent">
+                <h3>Record: FlashEvent</h3>
+                <span class="comment">/**
+ * 闪光弹效果事件，只发送给被闪到的玩家
+ */</span>
+                <span class="field-def">public record FlashEvent(String playerId, long duration)</span>
+                <p>存储一个闪光弹效果事件，包含目标玩家ID和效果持续时间。</p>
+                <h4>toJson()</h4>
+                <span class="method-sig">public JsonObject toJson()</span>
+                <p>将事件序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="record-HeadshotEvent">
+                 <h3>Record: HeadshotEvent</h3>
+                 <span class="field-def">public record HeadshotEvent(String recipientId, String soundName)</span>
+                 <p>存储一个私有音效事件（如爆头提示音、购买音效），包含目标玩家ID和音效名称。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将事件序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="class-SmokePuff">
+                 <h3>Class: SmokePuff</h3>
+                 <span class="comment">/**
+ * 代表一个烟雾颗粒
+ */</span>
+                 <span class="field-def">public static class SmokePuff</span>
+                 <p>代表烟雾弹产生的一个单独的烟雾颗粒，包含ID、位置、速度、创建时间和半径等信息。</p>
+                 <h4>isExpired()</h4>
+                 <span class="method-sig">public boolean isExpired()</span>
+                 <p>检查烟雾颗粒是否已超过其持续时间。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将烟雾颗粒信息序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="class-ThrownGrenade">
+                 <h3>Class: ThrownGrenade</h3>
+                 <span class="comment">/**
+ * 扔出的 龟内(不是，是投掷物)
+ */</span>
+                 <span class="field-def">public static class ThrownGrenade</span>
+                 <p>代表一个飞行中的投掷物，包含ID、类型、所有者、位置、速度、投掷时间、引爆时间等状态。还包含诱饵弹和烟雾弹的特殊状态。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将投掷物核心状态序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="class-DroppedItem">
+                 <h3>Class: DroppedItem</h3>
+                 <span class="comment">/**
+ * 代表一个掉落在地图上的物品 (武器或C4)
+ */</span>
+                 <span class="field-def">public static class DroppedItem</span>
+                 <p>代表掉落在地上的物品（武器或C4炸弹），包含ID、位置、类型（是否为炸弹）、武器信息（如果是武器）、弹药和掉落时间。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将掉落物品信息序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="class-PingMarker">
+                 <h3>Class: PingMarker</h3>
+                 <span class="field-def">public static class PingMarker</span>
+                 <p>代表玩家在地图上标记的一个点，包含ID、位置、创建时间、所属队伍和持续时间。</p>
+                 <h4>isExpired()</h4>
+                 <span class="method-sig">public boolean isExpired()</span>
+                 <p>检查标记是否已超过其持续时间。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将标记信息序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="record-FootstepRevealEvent">
+                 <h3>Record: FootstepRevealEvent</h3>
+                 <span class="comment">/**
+ * 专门用于位置暴露的事件
+ *
+ * @param revealedPlayerId 暴露者
+ * @param revealedToPlayerId 接收者
+ * @param position 暴露者的位置
+ */</span>
+                 <span class="field-def">public record FootstepRevealEvent(String revealedPlayerId, String revealedToPlayerId, Point2D.Double position)</span>
+                 <p>存储一个因脚步声而暴露位置的事件，包含发出声音的玩家ID、听到声音的玩家ID以及声音发出的位置。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将事件序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="class-PlayerDeath">
+                 <h3>Class: PlayerDeath</h3>
+                 <span class="comment">/**
+ * 用于记录玩家死亡信息的内部类
+ */</span>
+                 <span class="field-def">public static class PlayerDeath</span>
+                 <p>记录一次玩家死亡事件，包含死亡玩家的队伍、位置和时间戳。</p>
+            </div>
+
+            <div class="doc-section" id="record-WeaponUIData">
+                 <h3>Record: WeaponUIData</h3>
+                 <span class="field-def">public record WeaponUIData(String displayName, int cost, String faction)</span>
+                 <p>存储武器的静态UI数据（显示名称、价格、所属阵营）。</p>
+            </div>
+
+            <div class="doc-section" id="record-ItemUIData">
+                 <h3>Record: ItemUIData</h3>
+                 <span class="field-def">public record ItemUIData(String displayName, int cost, int maxQuantity, String team)</span>
+                 <p>存储道具的静态UI数据（显示名称、价格、最大数量、所属队伍）。</p>
+            </div>
+
+            <div class="doc-section" id="record-KillFeedInfo">
+                <h3>Record: KillFeedInfo</h3>
+                <span class="field-def">public record KillFeedInfo(String killerId, String killerName, Player.Team killerTeam, String victimId, String victimName, Player.Team victimTeam, String weapon, boolean isHeadshot, long timestamp)</span>
+                <p>存储一次击杀事件的详细信息，用于显示击杀提示（Kill Feed）。</p>
+            </div>
+
+            <div class="doc-section" id="record-TargetedDamageEvent">
+                <h3>Record: TargetedDamageEvent</h3>
+                 <span class="field-def">private record TargetedDamageEvent(String recipientId, JsonObject payload)</span>
+                 <p>封装一个私有的伤害日志事件，指定接收者ID和具体的伤害信息JSON负载。</p>
+            </div>
+
+            <div class="doc-section" id="class-FirePatch">
+                 <h3>Class: FirePatch</h3>
+                 <span class="comment">/**
+ * 代表一小块燃烧的区域
+ */</span>
+                 <span class="field-def">public static class FirePatch</span>
+                 <p>代表燃烧弹/燃烧瓶产生的一小块火焰区域，包含ID、所有者ID、位置、创建时间、来源道具、持续时间和半径。</p>
+                 <h4>isExpired()</h4>
+                 <span class="method-sig">public boolean isExpired()</span>
+                 <p>检查火焰区域是否已超过其持续时间。</p>
+                 <h4>toJson()</h4>
+                 <span class="method-sig">public JsonObject toJson()</span>
+                 <p>将火焰区域信息序列化为JSON对象。</p>
+            </div>
+
+            <div class="doc-section" id="record-CollisionResult">
+                 <h3>Record: CollisionResult</h3>
+                 <span class="comment">/**
+ * 一个用于封装碰撞检测结果的内部记录类。
+ * 包含了碰撞点、被撞边的法线向量，以及碰撞距离。
+ */</span>
+                 <span class="field-def">public record CollisionResult(Point2D.Double impactPoint, Point2D.Double normal, double distance)</span>
+                 <p>封装连续碰撞检测的结果，包括碰撞点、碰撞表面的法线和碰撞距离。</p>
+            </div>
+
+            <div class="doc-section" id="record-AI_Action">
+                <h3>Record: AI_Action</h3>
+                <span class="comment">/**
+ * 一个轻量级的数据结构，用于封装单个AI在一帧内的决策结果。
+ * AI线程将计算并返回这个对象，而不是直接修改Player对象。
+ */</span>
+                <span class="field-def">private record AI_Action(String aiId, double newAx, double newAy, double newAngle, boolean shouldShoot)</span>
+                <p>用于在AI线程和主游戏循环线程之间传递AI的决策结果，包含AI的ID、加速度、目标角度和是否射击的指令。</p>
+            </div>
+
+            <h2 id="constructor">构造函数</h2>
+
+            <div class="doc-section" id="constructor-GameState">
+                 <h3>GameState(...)</h3>
+                 <span class="method-sig">public GameState(GameMode mode, AIDifficulty difficulty, int aiCount, int startingWave, MapData mapData, Consumer&lt;String&gt; logger, ConcurrentHashMap&lt;String, AIService.AIInput&gt; mailbox)</span>
+                 <p>GameState 的构造函数。</p>
+                 <details>
+                    <summary>查看源码</summary>
+                    <pre><code class="language-java">    <span class="code-keyword">public</span> GameState(<span class="code-type">GameMode</span> mode, <span class="code-type">AIDifficulty</span> difficulty, <span class="code-type">int</span> aiCount, <span class="code-type">int</span> startingWave, <span class="code-type">MapData</span> mapData, Consumer&lt;String&gt; logger, ConcurrentHashMap&lt;String, AIService.AIInput&gt; mailbox) {
+        <span class="code-keyword">this</span>.aiInputMailbox = mailbox;
+        <span class="code-keyword">this</span>.gameMode = mode;
+        <span class="code-keyword">this</span>.aiDifficulty = difficulty;
+        <span class="code-keyword">this</span>.logger = logger;
+        <span class="code-keyword">this</span>.initialAiCount = aiCount;
+
+
+        <span class="code-comment">// 1从 mapData 加载地图尺寸和障碍物</span>
+        <span class="code-keyword">if</span> (mapData != <span class="code-literal">null</span>) {
+            <span class="code-keyword">this</span>.width = mapData.getWidth();
+            <span class="code-keyword">this</span>.height = mapData.getHeight();
+            logger.accept(<span class="code-string">"[GameState Init] 地图尺寸已加载: Width="</span> + <span class="code-keyword">this</span>.width + <span class="code-string">", Height="</span> + <span class="code-keyword">this</span>.height);
+            loadMapFromData(mapData);
+            initializeQuadtree();
+        } <span class="code-keyword">else</span> {
+            <span class="code-comment">// 处理 mapData 为 null 的情况</span>
+            <span class="code-keyword">this</span>.width = 1600; <span class="code-comment">// 后备值</span>
+            <span class="code-keyword">this</span>.height = 900;
+            logger.accept(<span class="code-string">"[GameState Init] WARN: MapData 为 null, 使用默认尺寸 1600x900"</span>);
+            generateRandomMap(); <span class="code-comment">// 生成随机地图</span>
+            initializeQuadtree();
+            <span class="code-keyword">this</span>.waypointGraph = <span class="code-literal">null</span>; <span class="code-comment">// 随机地图没有路径点图</span>
+        }
+
+        <span class="code-comment">//  在确认 this.width 和 this.height 有效之后，再进行路径点烘焙</span>
+        <span class="code-keyword">if</span> (mapData != <span class="code-literal">null</span> && mapData.getWaypoints() != <span class="code-literal">null</span> && !mapData.getWaypoints().isEmpty()) {
+            logger.accept(<span class="code-string">"正在加载 "</span> + mapData.getWaypoints().size() + <span class="code-string">" 个预烘焙的路径点..."</span>);
+            <span class="code-comment">// --- 调用新的加载方法 ---</span>
+            buildRuntimeWaypointGraph(mapData.getWaypoints());
+        } <span class="code-keyword">else</span> {
+            logger.accept(<span class="code-string">"地图不包含路径点，将仅使用网格寻路。"</span>);
+            <span class="code-keyword">this</span>.waypointGraph = <span class="code-literal">null</span>;
+        }
+
+
+        <span class="code-keyword">if</span> (gameMode == GameMode.ZOMBIE_MODE) {
+            <span class="code-keyword">this</span>.currentWave = Math.max(0, startingWave - 1);
+        }
+
+
+
+        <span class="code-comment">// [删除] 移除您在 465-473 行重复的地图加载逻辑</span>
+        <span class="code-comment">// if (mapData != null) { ... }  <-- 这段是重复的，删除它</span>
+
+        <span class="code-comment">// 在 width 和 height 确定之后，再初始化空间网格</span>
+        <span class="code-comment">// (确保 gridCellSize > 0 并且 width/height 有效)</span>
+        <span class="code-keyword">if</span> (<span class="code-keyword">this</span>.width > 0 && <span class="code-keyword">this</span>.height > 0 && gridCellSize > 0) {
+            <span class="code-keyword">this</span>.gridWidth = (<span class="code-type">int</span>) Math.ceil((<span class="code-type">double</span>) <span class="code-keyword">this</span>.width / gridCellSize);
+            <span class="code-keyword">this</span>.gridHeight = (<span class="code-type">int</span>) Math.ceil((<span class="code-type">double</span>) <span class="code-keyword">this</span>.height / gridCellSize);
+
+            <span class="code-comment">// 使用 ArrayList 数组，并在循环中初始化每个格子</span>
+            <span class="code-keyword">this</span>.spatialGrid = <span class="code-keyword">new</span> ArrayList[gridWidth][gridHeight]; <span class="code-comment">// <--- 新的类型安全方式 (编译器可能仍有警告，但这是标准做法)</span>
+            <span class="code-keyword">for</span> (<span class="code-type">int</span> x = 0; x < gridWidth; x++) {
+                <span class="code-keyword">for</span> (<span class="code-type">int</span> y = 0; y < gridHeight; y++) {
+                    spatialGrid[x][y] = <span class="code-keyword">new</span> ArrayList&lt;&gt;(); <span class="code-comment">// <-- 初始化每个格子为一个空的 ArrayList</span>
+                }
+            }
+        } <span class="code-keyword">else</span> {
+            logger.accept(<span class="code-string">"[GameState Init] ERROR: 地图尺寸无效或 gridCellSize 无效 (Width="</span> + <span class="code-keyword">this</span>.width + <span class="code-string">", Height="</span> + <span class="code-keyword">this</span>.height + <span class="code-string">")，无法初始化空间网格！"</span>);
+            <span class="code-comment">// 至少初始化一个空数组防止后续 NullPointerException</span>
+            <span class="code-keyword">this</span>.gridWidth = 0;
+            <span class="code-keyword">this</span>.gridHeight = 0;
+            <span class="code-keyword">this</span>.spatialGrid = (List&lt;Player&gt;[][]) <span class="code-keyword">new</span> List[0][0];
+        }
+
+        <span class="code-comment">// 预计算出生点 (现在 width/height 是正确的)</span>
+        precomputeValidSpawnPoints();
+        <span class="code-comment">// 初始化游戏</span>
+        initGame();
+    }
+</code></pre>
+                 </details>
+            </div>
+
+            <h2 id="methods-public">公共方法 (Public)</h2>
+
+            <div class="doc-section" id="method-isPointInObstacle-point">
+                <h3>isPointInObstacle(Point2D.Double point)</h3>
+                <span class="comment">/**
+ * 辅助方法：检查一个点是否在任何障碍物内部
+ * @Param point 传入平面的一个点
+ */</span>
+                <span class="method-sig">public boolean isPointInObstacle(Point2D.Double point)</span>
+                <p>检查给定的点是否位于任何一个障碍物内部。</p>
+            </div>
+
+            <div class="doc-section" id="method-getQuadtreeRootNode">
+                <h3>getQuadtreeRootNode()</h3>
+                <span class="method-sig">public QuadtreeNode getQuadtreeRootNode()</span>
+                <p>获取用于静态障碍物空间查询的四叉树根节点。</p>
+            </div>
+
+            <div class="doc-section" id="method-getObstacleWrappers">
+                <h3>getObstacleWrappers()</h3>
+                <span class="method-sig">public List&lt;MapData.ShapeWrapper&gt; getObstacleWrappers()</span>
+                <p>获取用于序列化和Quadtree构建的障碍物数据包装对象列表。</p>
+            </div>
+
+            <div class="doc-section" id="method-getTScore">
+                <h3>getTScore()</h3>
+                <span class="comment">/**
+ * 获取T队伍在爆破模式下的得分。
+ */</span>
+                <span class="method-sig">public int getTScore()</span>
+                <p>获取T队伍在爆破模式下的当前得分。</p>
+            </div>
+
+            <div class="doc-section" id="method-getCTScore">
+                <h3>getCTScore()</h3>
+                <span class="comment">/**
+ * 获取CT队伍在爆破模式下的得分。
+ */</span>
+                <span class="method-sig">public int getCTScore()</span>
+                <p>获取CT队伍在爆破模式下的当前得分。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerDropC4">
+                 <h3>playerDropC4(String playerId)</h3>
+                 <span class="comment">/**
+ * 处理玩家主动扔出C4炸药包的逻辑
+ *
+ * @param playerId 发出请求的玩家ID
+ */</span>
+                 <span class="method-sig">public void playerDropC4(String playerId)</span>
+                 <p>处理玩家（必须是T阵营且持有C4）丢弃C4炸弹的逻辑。</p>
+            </div>
+
+            <div class="doc-section" id="method-update">
+                 <h3>update()</h3>
+                 <span class="comment">/**
+ * [最终版] 游戏主循环更新方法。
+ * 此版本已彻底解耦AI计算，只负责应用输入和更新物理状态。
+ */</span>
+                 <span class="method-sig">public void update()</span>
+                 <p>游戏状态的主更新方法，由 `GameServer` 的 `gameLoop` 调用。负责应用AI输入、处理玩家行为（射击、交互、换弹）、更新投掷物和效果、执行物理计算（移动、碰撞解决）、处理游戏模式逻辑等。</p>
+            </div>
+
+            <div class="doc-section" id="method-getPerfTimeAiInputPrep">
+                <h3>getPerfTimeAiInputPrep()</h3>
+                <span class="method-sig">public double getPerfTimeAiInputPrep()</span>
+                <p>获取上一帧在“AI输入准备”阶段花费的时间（毫秒）。</p>
+            </div>
+
+            <div class="doc-section" id="method-getPerfTimePhysics">
+                <h3>getPerfTimePhysics()</h3>
+                <span class="method-sig">public double getPerfTimePhysics()</span>
+                <p>获取上一帧在“物理计算”阶段（移动、网格、碰撞）花费的时间（毫秒）。</p>
+            </div>
+
+            <div class="doc-section" id="method-getPerfTimeGameLogic">
+                <h3>getPerfTimeGameLogic()</h3>
+                <span class="method-sig">public double getPerfTimeGameLogic()</span>
+                <p>获取上一帧在“游戏逻辑”阶段花费的时间（毫秒）。</p>
+            </div>
+
+            <div class="doc-section" id="method-getPerfTimeTotal">
+                <h3>getPerfTimeTotal()</h3>
+                <span class="method-sig">public double getPerfTimeTotal()</span>
+                <p>获取上一帧总共花费的时间（毫秒）。</p>
+            </div>
+
+            <div class="doc-section" id="method-addPlayer">
+                <h3>addPlayer(String playerId, String playerName, String selection)</h3>
+                <span class="method-sig">public void addPlayer(String playerId, String playerName, String selection)</span>
+                <p>添加一个新玩家或处理现有玩家的队伍/武器选择。处理新连接、队伍分配、初始武器设置等。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerChooseWeapon">
+                <h3>playerChooseWeapon(String playerId, String weaponName)</h3>
+                <span class="method-sig">public void playerChooseWeapon(String playerId, String weaponName)</span>
+                <p>处理玩家选择或购买武器的请求，根据游戏模式执行不同的逻辑（TDM选枪、DEMO购买）。</p>
+            </div>
+
+             <div class="doc-section" id="method-getTSpawnAreas">
+                 <h3>getTSpawnAreas()</h3>
+                 <span class="comment">/**
+ * 获取 T 方出生点区域列表
+ */</span>
+                 <span class="method-sig">public List&lt;Rectangle&gt; getTSpawnAreas()</span>
+                 <p>返回T阵营可用的出生区域列表。</p>
+            </div>
+
+             <div class="doc-section" id="method-getCtSpawnAreas">
+                 <h3>getCtSpawnAreas()</h3>
+                 <span class="comment">/**
+ * 获取 CT 方出生点区域列表
+ */</span>
+                 <span class="method-sig">public List&lt;Rectangle&gt; getCtSpawnAreas()</span>
+                 <p>返回CT阵营可用的出生区域列表。</p>
+            </div>
+
+             <div class="doc-section" id="method-convertWrapperToShape">
+                 <h3>convertWrapperToShape(MapData.ShapeWrapper wrapper)</h3>
+                 <span class="method-sig">public static Shape convertWrapperToShape(MapData.ShapeWrapper wrapper)</span>
+                 <p>将用于序列化的 `ShapeWrapper` 对象转换为 Java AWT 的 `Shape` 对象（用于碰撞检测）。</p>
+            </div>
+
+             <div class="doc-section" id="method-playerRequestPing">
+                 <h3>playerRequestPing(String playerId, Point2D.Double position)</h3>
+                 <span class="comment">/**
+ * 处理玩家的标点请求。
+ */</span>
+                 <span class="method-sig">public void playerRequestPing(String playerId, Point2D.Double position)</span>
+                 <p>处理玩家发起的地图标点请求。</p>
+            </div>
+
+             <div class="doc-section" id="method-playerBuyItem">
+                 <h3>playerBuyItem(String playerId, String itemName)</h3>
+                 <span class="method-sig">public void playerBuyItem(String playerId, String itemName)</span>
+                 <p>处理玩家购买道具（手雷、装备）的请求，仅在爆破模式购买时间内有效。</p>
+            </div>
+
+             <div class="doc-section" id="method-getAndClearAiSoundEvents">
+                 <h3>getAndClearAiSoundEvents()</h3>
+                  <span class="comment">/**
+ * 供 AI (PerceptionModule) 调用。
+ * 获取 AI 声音缓冲区中的所有事件，并 *清空* 该缓冲区。
+ * @return 声音事件的副本。
+ */</span>
+                 <span class="method-sig">public List&lt;SoundEvent&gt; getAndClearAiSoundEvents()</span>
+                 <p>供AI感知模块调用，获取并清空当前累积的公共声音事件缓冲区。</p>
+            </div>
+
+             <div class="doc-section" id="method-throwGrenade">
+                 <h3>throwGrenade(Player thrower)</h3>
+                 <span class="comment">/**
+ * 玩家投掷真龟内
+ */</span>
+                 <span class="method-sig">public void throwGrenade(Player thrower)</span>
+                 <p>处理玩家投掷当前选中手雷的逻辑。</p>
+            </div>
+
+             <div class="doc-section" id="method-getPlayerById">
+                 <h3>getPlayerById(String id)</h3>
+                 <span class="method-sig">public Player getPlayerById(String id)</span>
+                 <p>根据玩家ID查找并返回 `Player` 对象（包括玩家和僵尸）。</p>
+            </div>
+
+            <div class="doc-section" id="method-moveWithCollision">
+                <h3>moveWithCollision(Player player, double dx, double dy)</h3>
+                 <span class="comment">/**
+ * [优化]处理玩家移动和碰撞。
+ * 采用了迭代式解决碰撞和穿透的方法，确保了玩家-玩家和玩家-障碍物碰撞的稳定性和分离。
+ */</span>
+                <span class="method-sig">public void moveWithCollision(Player player, double dx, double dy)</span>
+                <p>旧版的移动和碰撞处理方法（已被 `resolveCollisionsAndSliding` 替代部分功能）。使用迭代方法解决玩家与障碍物、玩家与玩家之间的碰撞和穿透。</p>
+            </div>
+
+             <div class="doc-section" id="method-removePlayer">
+                 <h3>removePlayer(String playerId)</h3>
+                 <span class="method-sig">public void removePlayer(String playerId)</span>
+                 <p>根据玩家ID从游戏中移除一个玩家。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerDropWeapon">
+                <h3>playerDropWeapon(String playerId)</h3>
+                 <span class="comment">/**
+ * [v2.8] 处理玩家丢弃武器的请求（完整版，支持夺舍状态）。
+ *
+ * @param playerId 发出请求的玩家ID
+ */</span>
+                <span class="method-sig">public void playerDropWeapon(String playerId)</span>
+                <p>处理玩家（或其控制的Bot）丢弃主武器的请求，仅在爆破模式有效。</p>
+            </div>
+
+             <div class="doc-section" id="method-playerSelectsNextWeapon">
+                 <h3>playerSelectsNextWeapon(String playerId, String weaponName)</h3>
+                 <span class="method-sig">public void playerSelectsNextWeapon(String playerId, String weaponName)</span>
+                 <p>记录玩家为下一条命（TDM模式）选择的武器。</p>
+            </div>
+
+             <div class="doc-section" id="method-playerRequestReload">
+                 <h3>playerRequestReload(String playerId)</h3>
+                 <span class="comment">/**
+ * [v2.8]处理玩家请求换弹，并添加了换弹音效的广播
+ */</span>
+                 <span class="method-sig">public void playerRequestReload(String playerId)</span>
+                 <p>处理玩家（或其控制的Bot）请求换弹的逻辑，并广播换弹音效。</p>
+            </div>
+
+             <div class="doc-section" id="method-playerSwitchSlot">
+                 <h3>playerSwitchSlot(String playerId, int slot)</h3>
+                 <span class="method-sig">public void playerSwitchSlot(String playerId, int slot)</span>
+                 <p>处理玩家（或其控制的Bot）切换武器槽位的请求。</p>
+            </div>
+
+             <div class="doc-section" id="method-requestShoot">
+                 <h3>requestShoot(Player shooter)</h3>
+                  <span class="comment">/** [拆分]
+ * 处理玩家的射击请求。
+ * 包含全自动、半自动和R8左轮蓄力射击的完整逻辑。
+ */</span>
+                 <span class="method-sig">public void requestShoot(Player shooter)</span>
+                 <p>处理玩家射击或投掷手雷的请求，包含全自动、半自动和R8蓄力逻辑。</p>
+            </div>
+
+             <div class="doc-section" id="method-addSoundEvent-3args">
+                 <h3>addSoundEvent(SoundEvent.SoundType type, String weaponName, double x, double y)</h3>
+                 <span class="comment">/**
+ * [重大修改] 添加一个公共声音事件。
+ * 现在会同时添加到客户端列表和 AI 缓冲区。
+ */</span>
+                 <span class="method-sig">public void addSoundEvent(SoundEvent.SoundType type, String weaponName, double x, double y)</span>
+                 <p>添加一个公共声音事件（无来源ID），会同时添加到发送给客户端的列表和AI感知的缓冲区。</p>
+            </div>
+
+            <div class="doc-section" id="method-addSoundEvent-5args">
+                <h3>addSoundEvent(SoundEvent.SoundType type, String soundName, double x, double y, String sourcePlayerId)</h3>
+                 <span class="comment">/**
+ * [重大修改] 添加一个公共声音事件 (带来源 ID)。
+ * 现在会同时添加到客户端列表和 AI 缓冲区。
+ */</span>
+                <span class="method-sig">public void addSoundEvent(SoundEvent.SoundType type, String soundName, double x, double y, String sourcePlayerId)</span>
+                <p>添加一个公共声音事件（带来源ID），会同时添加到发送给客户端的列表和AI感知的缓冲区。</p>
+            </div>
+
+             <div class="doc-section" id="method-getLineShapeIntersections">
+                 <h3>getLineShapeIntersections(Line2D.Double line, Shape shape)</h3>
+                 <span class="method-sig">public static Point2D.Double[] getLineShapeIntersections(Line2D.Double line, Shape shape)</span>
+                 <p>计算一条直线与一个任意形状的所有交点，并返回距离直线起点最近和最远的两个交点。</p>
+            </div>
+
+            <div class="doc-section" id="method-getLineLineIntersectionPoint">
+                 <h3>getLineLineIntersectionPoint(Line2D.Double line1, Line2D.Double line2)</h3>
+                 <span class="method-sig">public static Point2D getLineLineIntersectionPoint(Line2D.Double line1, Line2D.Double line2)</span>
+                 <p>计算两条线段的交点，如果相交则返回交点坐标，否则返回 null。</p>
+            </div>
+
+             <div class="doc-section" id="method-getGameMode">
+                 <h3>getGameMode()</h3>
+                 <span class="method-sig">public GameMode getGameMode()</span>
+                 <p>获取当前的游戏模式。</p>
+            </div>
+
+            <div class="doc-section" id="method-requestMelee">
+                 <h3>requestMelee(Player attacker, Player target, int damage)</h3>
+                 <span class="method-sig">public void requestMelee(Player attacker, Player target, int damage)</span>
+                 <p>处理近战攻击（如刀、僵尸爪）的伤害请求。</p>
+            </div>
+
+             <div class="doc-section" id="method-getBombSiteA">
+                 <h3>getBombSiteA()</h3>
+                 <span class="method-sig">public Rectangle getBombSiteA()</span>
+                 <p>获取A炸弹点的区域。</p>
+            </div>
+
+             <div class="doc-section" id="method-getBombSiteB">
+                 <h3>getBombSiteB()</h3>
+                 <span class="method-sig">public Rectangle getBombSiteB()</span>
+                 <p>获取B炸弹点的区域。</p>
+            </div>
+
+             <div class="doc-section" id="method-isBombPlanted">
+                 <h3>isBombPlanted()</h3>
+                 <span class="method-sig">public boolean isBombPlanted()</span>
+                 <p>检查炸弹当前是否已被安放。</p>
+            </div>
+
+             <div class="doc-section" id="method-getBombPosition">
+                 <h3>getBombPosition()</h3>
+                 <span class="method-sig">public Point2D.Double getBombPosition()</span>
+                 <p>获取已安放炸弹的位置，如果未安放则返回 null。</p>
+            </div>
+
+             <div class="doc-section" id="method-getRoundPhase">
+                 <h3>getRoundPhase()</h3>
+                 <span class="method-sig">public RoundPhase getRoundPhase()</span>
+                 <p>获取爆破模式当前的回合阶段。</p>
+            </div>
+
+             <div class="doc-section" id="method-getDroppedBomb">
+                 <h3>getDroppedBomb()</h3>
+                 <span class="method-sig">public DroppedItem getDroppedBomb()</span>
+                 <p>查找并返回当前掉落在地上的C4炸弹对象，如果不存在则返回 null。</p>
+            </div>
+
+             <div class="doc-section" id="method-getPlayers">
+                 <h3>getPlayers()</h3>
+                 <span class="method-sig">public List&lt;Player&gt; getPlayers()</span>
+                 <p>获取当前所有玩家（包括AI）的列表。</p>
+            </div>
+
+             <div class="doc-section" id="method-getDroppedItems">
+                 <h3>getDroppedItems()</h3>
+                 <span class="method-sig">public List&lt;DroppedItem&gt; getDroppedItems()</span>
+                 <p>获取当前所有掉落物品的列表。</p>
+            </div>
+
+             <div class="doc-section" id="method-getMapDataJson">
+                 <h3>getMapDataJson()</h3>
+                  <span class="comment">/**
+ * [优化] 创建一个只包含静态地图数据的JSON对象。
+ * 这个包只在客户端第一次连接时发送一次。
+ * @return 包含地图数据的JsonObject。
+ */</span>
+                 <span class="method-sig">public JsonObject getMapDataJson()</span>
+                 <p>生成并返回一个包含所有静态地图数据（宽度、高度、障碍物、出生点、炸弹点）的JSON对象。</p>
+            </div>
+
+             <div class="doc-section" id="method-getFullUpdateJson">
+                 <h3>getFullUpdateJson()</h3>
+                 <span class="comment">/**
+ * [网络优化] 创建一个包含所有动态物体绝对位置的完整更新包（大包）。
+ * @return 包含完整游戏状态的JsonObject。
+ */</span>
+                 <span class="method-sig">public JsonObject getFullUpdateJson()</span>
+                 <p>生成并返回一个包含完整游戏状态的“大包”JSON对象，用于完全同步客户端。</p>
+            </div>
+
+             <div class="doc-section" id="method-getSmallUpdateJson">
+                 <h3>getSmallUpdateJson()</h3>
+                 <span class="comment">/**
+ * [网络优化] 创建一个只包含增量变化（主要是速度）的轻量级更新包（小包）。
+ *
+ * @return 包含增量更新的JsonObject。
+ */</span>
+                 <span class="method-sig">public JsonObject getSmallUpdateJson()</span>
+                 <p>生成并返回一个只包含增量变化（如速度、角度、血量）的“小包”JSON对象，用于减少网络带宽。</p>
+            </div>
+
+            <div class="doc-section" id="method-updatePlayerInput">
+                 <h3>updatePlayerInput(String playerId, JsonObject input)</h3>
+                 <span class="method-sig">public void updatePlayerInput(String playerId, JsonObject input)</span>
+                 <p>根据客户端发来的输入JSON对象，更新对应玩家（或其控制的Bot）的输入状态（角度、按键、射击、静步等）。</p>
+            </div>
+
+            <div class="doc-section" id="method-broadcastGlobalVoice">
+                <h3>broadcastGlobalVoice(String soundName)</h3>
+                <span class="method-sig">public void broadcastGlobalVoice(String soundName)</span>
+                <p>向所有玩家发送一个私有的全局语音事件（如 "Terrorists Win!"）。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerStartInteraction">
+                <h3>playerStartInteraction(String playerId)</h3>
+                <span class="method-sig">public void playerStartInteraction(String playerId)</span>
+                <p>处理玩家（或其控制的Bot）开始交互（安放/拆除C4）的请求。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerStopInteraction">
+                <h3>playerStopInteraction(String playerId)</h3>
+                <span class="method-sig">public void playerStopInteraction(String playerId)</span>
+                <p>处理玩家（或其控制的Bot）停止交互的请求。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerUndoPurchase">
+                <h3>playerUndoPurchase(String playerId, String itemName)</h3>
+                <span class="method-sig">public void playerUndoPurchase(String playerId, String itemName)</span>
+                <p>处理玩家撤销购买物品或武器的请求，仅在爆破模式冻结时间内有效。</p>
+            </div>
+
+             <div class="doc-section" id="method-playerPickupDroppedWeapon">
+                 <h3>playerPickupDroppedWeapon(String playerId, String itemId)</h3>
+                 <span class="method-sig">public void playerPickupDroppedWeapon(String playerId, String itemId)</span>
+                 <p>处理玩家拾取地上掉落武器的请求。</p>
+            </div>
+
+            <div class="doc-section" id="method-getRecentDeaths">
+                <h3>getRecentDeaths(int millisecondsAgo)</h3>
+                 <span class="comment">/**
+ * 获取指定时间范围内的所有死亡事件
+ *
+ * @param millisecondsAgo 时间范围（毫秒）
+ * @return 死亡事件列表
+ */</span>
+                <span class="method-sig">public List&lt;PlayerDeath&gt; getRecentDeaths(int millisecondsAgo)</span>
+                <p>获取指定时间范围内的玩家死亡事件列表。</p>
+            </div>
+
+            <div class="doc-section" id="method-isInBounds">
+                <h3>isInBounds(Point2D.Double point)</h3>
+                 <span class="comment">/**
+ * 检查一个点是否在地图边界内
+ *
+ * @param point 要检查的点
+ * @return 如果在边界内则为true，否则为false
+ */</span>
+                <span class="method-sig">public boolean isInBounds(Point2D.Double point)</span>
+                <p>检查给定的点是否在地图边界之内。</p>
+            </div>
+
+            <div class="doc-section" id="method-getSpatialGrid">
+                <h3>getSpatialGrid()</h3>
+                <span class="comment">/**
+ * 允许 AI 控制器访问空间网格以进行近距离感知。
+ * @return 包含玩家列表的2D网格数组。
+ */</span>
+                <span class="method-sig">public List&lt;Player&gt;[][] getSpatialGrid()</span>
+                <p>获取用于加速近距离查询的空间网格二维数组。</p>
+            </div>
+
+             <div class="doc-section" id="method-getGridCellSize">
+                 <h3>getGridCellSize()</h3>
+                 <span class="comment">/**
+ * 获取网格单元的大小。
+ */</span>
+                 <span class="method-sig">public int getGridCellSize()</span>
+                 <p>获取空间网格的单元格大小。</p>
+            </div>
+
+             <div class="doc-section" id="method-getGridWidth">
+                 <h3>getGridWidth()</h3>
+                 <span class="comment">/**
+ * 获取网格的宽度（单元格数量）。
+ */</span>
+                 <span class="method-sig">public int getGridWidth()</span>
+                 <p>获取空间网格的宽度（以单元格数量计）。</p>
+            </div>
+
+            <div class="doc-section" id="method-getGridHeight">
+                <h3>getGridHeight()</h3>
+                 <span class="comment">/**
+ * 获取网格的高度（单元格数量）。
+ */</span>
+                <span class="method-sig">public int getGridHeight()</span>
+                <p>获取空间网格的高度（以单元格数量计）。</p>
+            </div>
+
+            <div class="doc-section" id="method-manuallyAddAiPlayer">
+                <h3>manuallyAddAiPlayer(Player.Team team)</h3>
+                 <span class="comment">/**
+ * 手动添加一个AI玩家到指定队伍。
+ * 此方法被服务器控制面板调用，用于在游戏运行时动态增加人机。
+ *
+ * @param team 要加入的队伍 (CT 或 T)。
+ */</span>
+                <span class="method-sig">public void manuallyAddAiPlayer(Player.Team team)</span>
+                <p>从外部（如控制面板）向指定队伍手动添加一个AI Bot。</p>
+            </div>
+
+            <div class="doc-section" id="method-executeCommand">
+                <h3>executeCommand(String command)</h3>
+                 <span class="comment">/**
+ * 执行文本命令的核心逻辑。
+ *
+ * @param command 完整的命令字符串。
+ */</span>
+                <span class="method-sig">public void executeCommand(String command)</span>
+                <p>从外部（如控制面板）执行一个控制台命令。</p>
+            </div>
+
+            <div class="doc-section" id="method-removeBotByTeam">
+                <h3>removeBotByTeam(Player.Team team)</h3>
+                 <span class="comment">/**
+ * 根据指定队伍，移除列表中的第一个AI玩家。
+ *
+ * @param team 要移除AI的队伍。
+ */</span>
+                <span class="method-sig">public void removeBotByTeam(Player.Team team)</span>
+                <p>从指定队伍中移除一个AI Bot。</p>
+            </div>
+
+            <div class="doc-section" id="method-killAllBots">
+                <h3>killAllBots()</h3>
+                 <span class="comment">/**
+ * 杀死所有AI玩家。
+ */</span>
+                <span class="method-sig">public void killAllBots()</span>
+                <p>立即杀死游戏中所有的AI Bot。</p>
+            </div>
+
+            <div class="doc-section" id="method-getFirePatches">
+                <h3>getFirePatches()</h3>
+                 <span class="comment">/**
+ * 新增：提供一个公共方法，让外部可以获取当前所有的火焰区域列表。
+ *
+ * @return 包含所有FirePatch对象的列表。
+ */</span>
+                <span class="method-sig">public List&lt;FirePatch&gt; getFirePatches()</span>
+                <p>获取当前所有活跃的火焰区域列表。</p>
+            </div>
+
+            <div class="doc-section" id="method-getCharacterCount">
+                <h3>getCharacterCount()</h3>
+                <span class="comment">/**
+ * 获取当前所有需要被同步的角色总数 (玩家 + 僵尸)。
+ *
+ * @return 角色总数。
+ */</span>
+                <span class="method-sig">public int getCharacterCount()</span>
+                <p>获取当前游戏中需要同步的角色总数（玩家+僵尸）。</p>
+            </div>
+
+            <div class="doc-section" id="method-playerRequestControlBot">
+                <h3>playerRequestControlBot(String humanPlayerId, JsonObject data)</h3>
+                <span class="method-sig">public void playerRequestControlBot(String humanPlayerId, JsonObject data)</span>
+                <p>处理人类玩家请求夺舍或释放Bot控制权的逻辑。</p>
+            </div>
+
+            <div class="doc-section" id="method-getRoundTimeRemaining">
+                <h3>getRoundTimeRemaining()</h3>
+                 <span class="comment">/**
+ * 计算爆破模式当前回合剩余时间（毫秒）。
+ * 此方法主要供 AIController.java 调用。
+ *
+ * @return 剩余时间（毫秒），如果回合已结束或不是 IN_PROGRESS 状态，则返回 0。
+ */</span>
+                <span class="method-sig">public long getRoundTimeRemaining()</span>
+                <p>计算并返回爆破模式当前回合（或炸弹）的剩余时间（毫秒）。</p>
+            </div>
+
+            <div class="doc-section" id="method-getAllCharacters">
+                <h3>getAllCharacters()</h3>
+                 <span class="comment">/**
+ * 获取一个包含所有角色（玩家和僵尸）的完整列表。
+ *
+ * @return 包含所有角色的新列表。
+ */</span>
+                <span class="method-sig">public List&lt;Player&gt; getAllCharacters()</span>
+                <p>获取一个包含当前所有角色（玩家和僵尸）的新列表。</p>
+            </div>
+
+            <div class="doc-section" id="method-hasWaypointGraph">
+                <h3>hasWaypointGraph()</h3>
+                <span class="comment">/**
+ * 检查粗算图是否已成功烘焙并可用。
+ * @return 如果 waypointGraph 不是 null 且不为空，则返回 true。
+ */</span>
+                <span class="method-sig">public boolean hasWaypointGraph()</span>
+                <p>检查地图是否包含有效的路径点图。</p>
+            </div>
+
+            <div class="doc-section" id="method-getWaypointGraph">
+                <h3>getWaypointGraph()</h3>
+                <span class="comment">/**
+ * 获取烘焙好的粗算图。
+ * @return 包含 Waypoint 对象的列表 (图)，如果未烘焙则返回 null。
+ */</span>
+                <span class="method-sig">public List&lt;WaypointNode&gt; getWaypointGraph()</span>
+                <p>获取预计算（或加载）的路径点图。</p>
+            </div>
+
+            <div class="doc-section" id="method-getObstacles">
+                <h3>getObstacles()</h3>
+                <span class="comment">/**
+ * 获取障碍物列表 (供烘焙和 AIController 使用)
+ * @return 包含 Shape 对象的列表
+ */</span>
+                <span class="method-sig">public List&lt;Shape&gt; getObstacles()</span>
+                <p>获取所有障碍物的 `Shape` 对象列表。</p>
+            </div>
+
+             <div class="doc-section" id="method-getSoundEvents">
+                 <h3>getSoundEvents()</h3>
+                  <span class="comment">/**
+ * 获取当前帧累积的所有公共声音事件。
+ * AIService 会读取此列表。注意：此方法不清除列表。
+ * @return 包含 SoundEvent 的线程安全列表。
+ */</span>
+                 <span class="method-sig">public List&lt;SoundEvent&gt; getSoundEvents()</span>
+                 <p>获取当前帧累积的公共声音事件列表（注意：此方法不清除列表）。</p>
+            </div>
+
+            <div class="doc-section" id="method-clearSoundEvents">
+                <h3>clearSoundEvents()</h3>
+                <span class="method-sig">public void clearSoundEvents()</span>
+                <p>清除当前帧累积的公共声音事件列表。</p>
+            </div>
+
+            <div class="doc-section" id="method-commandAiMoveTo">
+                <h3>commandAiMoveTo(String aiPlayerId, double targetX, double targetY)</h3>
+                 <span class="comment">/**
+ * 命令指定的AI移动到目标坐标点。
+ * 这个方法通常由服务器控制台命令或游戏逻辑触发。
+ *
+ * @param aiPlayerId 要命令移动的AI玩家的唯一ID。
+ * @param targetX    目标位置的X坐标。
+ * @param targetY    目标位置的Y坐标。
+ */</span>
+                <span class="method-sig">public void commandAiMoveTo(String aiPlayerId, double targetX, double targetY)</span>
+                <p>命令指定的AI移动到目标坐标。</p>
+            </div>
+
+            <div class="doc-section" id="method-getIsAiFrozen">
+                 <h3>getIsAiFrozen()</h3>
+                 <span class="method-sig">public boolean getIsAiFrozen()</span>
+                 <p>检查AI当前是否被冻结（兼容旧版getter）。</p>
+            </div>
+
+            <div class="doc-section" id="method-toggleAiFreeze">
+                <h3>toggleAiFreeze()</h3>
+                <span class="comment">/**
+ * 切换AI的冻结/恢复状态。
+ * 当此方法被调用时，会翻转 isAiFrozen 标志。
+ */</span>
+                <span class="method-sig">public void toggleAiFreeze()</span>
+                <p>切换AI的冻结/恢复状态。</p>
+            </div>
+
+            <div class="doc-section" id="method-isAiFrozen">
+                <h3>isAiFrozen()</h3>
+                <span class="comment">/**
+ * 检查AI当前是否处于冻结状态。
+ *
+ * @return 如果AI被冻结，则返回 true，否则返回 false。
+ */</span>
+                <span class="method-sig">public boolean isAiFrozen()</span>
+                <p>检查AI当前是否处于冻结状态。</p>
+            </div>
+
+            <div class="doc-section" id="method-shutdown-gamestate">
+                <h3>shutdown()</h3>
+                 <span class="comment">/**
+ * 关闭 GameState 持有的资源，如线程池。
+ */</span>
+                <span class="method-sig">public void shutdown()</span>
+                <p>关闭GameState内部持有的资源，例如AI线程池。</p>
+            </div>
+
+
+        </main>
+    </div>
+
+    <script>
+        // 简单的TOC高亮脚本 (来自 GameClient.html)
+        document.addEventListener('DOMContentLoaded', (event) => {
+            const tocLinks = document.querySelectorAll('.toc a');
+            const sections = document.querySelectorAll('.doc-section[id], h2[id], h3[id], h4[id]');
+
+            const observer = new IntersectionObserver(entries => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const id = entry.target.id;
+                        tocLinks.forEach(link => {
+                            link.style.fontWeight = 'normal';
+                            link.style.backgroundColor = 'transparent';
+                            if (link.href.endsWith('#' + id)) {
+                                link.style.fontWeight = 'bold';
+                                link.style.backgroundColor = '#dee2e6';
+                            }
+                        });
+                    }
+                });
+            }, { rootMargin: "0px 0px -80% 0px" });
+
+            sections.forEach(section => {
+                observer.observe(section);
+            });
+        });
+    </script>
+</body>
+</html>
