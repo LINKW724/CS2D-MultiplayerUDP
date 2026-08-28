@@ -80,6 +80,10 @@ import javafx.scene.effect.ColorAdjust;
 
 // 定义游戏客户端的主类，它继承自 JavaFX 的 Application 类
 public class GameClient extends Application {
+    static int sanitizeRenderRate(int requestedRate) {
+        return requestedRate >= 30 && requestedRate <= 500 ? requestedRate : 165;
+    }
+
 
     private static final int SUPPORTED_PROTOCOL_VERSION = 2;
 
@@ -383,8 +387,12 @@ public class GameClient extends Application {
     private static final int CANVAS_HEIGHT = 900;
     // 玩家的尺寸（直径）
     private static final int PLAYER_SIZE = 24;
-    // 客户端每秒向服务器发送输入的次数 (Ticks Per Second)
-    private static final double TPS = 120;
+    // 服务器权威模拟、输入发送和客户端渲染使用彼此独立的时钟。
+    private static final double SERVER_TICK_RATE = 120.0;
+    private static final int INPUT_SEND_RATE = 120;
+    private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
+            Integer.getInteger("cs2d.renderHz", 165));
+    private static final int MAX_NETWORK_MESSAGES_PER_RENDER_FRAME = 512;
 
     // --- JavaFX UI 元素 ---
     private Stage primaryStage; // 主窗口
@@ -441,38 +449,23 @@ public class GameClient extends Application {
     // 用于处理连接和重连的定时任务执行器
     private final ScheduledExecutorService connectionExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    // --- [核心优化：网络消息批处理] ---
+    // 网络线程只入队；JavaFX线程在每个渲染帧边界消费，避免8ms批处理时钟与165Hz渲染互相拍频。
     private final ConcurrentLinkedQueue<String> messageBatchQueue = new ConcurrentLinkedQueue<>();
-    private final ScheduledExecutorService batchExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "Message-Batcher-Thread");
-        t.setDaemon(true);
-        return t;
-    });
 
-    private void startMessageBatcher() {
-        // 每 8 毫秒执行一次，收集所有积压的网络包一次性推给UI线程（对应 120TPS）
-        batchExecutor.scheduleAtFixedRate(() -> {
-            if (messageBatchQueue.isEmpty())
-                return;
-            List<String> batch = new ArrayList<>();
-            String msg;
-            while ((msg = messageBatchQueue.poll()) != null) {
-                batch.add(msg);
+    private int drainNetworkMessagesForRenderFrame() {
+        int processed = 0;
+        String message;
+        while (processed < MAX_NETWORK_MESSAGES_PER_RENDER_FRAME
+                && (message = messageBatchQueue.poll()) != null) {
+            try {
+                handleServerMessage(message);
+            } catch (RuntimeException e) {
+                System.err.println("Network message execution error: " + e.getMessage());
             }
-            if (!batch.isEmpty()) {
-                Platform.runLater(() -> {
-                    for (String str : batch) {
-                        try {
-                            handleServerMessage(str);
-                        } catch (Exception e) {
-                            System.err.println("Batch execution error: " + e.getMessage());
-                        }
-                    }
-                });
-            }
-        }, 0, 8, TimeUnit.MILLISECONDS);
+            processed++;
+        }
+        return processed;
     }
-    // ----------------------------
 
     private final Gson gson = new Gson(); // Gson实例，用于JSON序列化和反序列化
 
@@ -697,9 +690,6 @@ public class GameClient extends Application {
     // JavaFX Application 的入口方法
     @Override
     public void start(Stage stage) {
-        // 启动网络消息批处理器
-        startMessageBatcher();
-
         // 在程序启动时加载设置
         loadSettings();
 
@@ -1018,11 +1008,8 @@ public class GameClient extends Application {
                 // 将接收到的字节数据转换为UTF-8编码的字符串
                 String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
 
-                // --- [核心优化] ---
-                // 这里不再对于每一个很小的 UDP 包单独发起极其昂贵的 Platform.runLater 阻塞调用
-                // 而是将未解析的原始字符串塞入无锁化高并发队列，交给 Batcher 统一批处理
+                // 网络线程只负责入队；渲染线程会在下一次165Hz帧边界统一消费。
                 messageBatchQueue.offer(message);
-                // --- [优化结束] ---
 
             } catch (SocketException e) { // 捕获套接字异常
                 // 如果程序仍在运行，说明是意外关闭，打印错误
@@ -1926,8 +1913,12 @@ public class GameClient extends Application {
         // 创建一个 AnimationTimer，它会在每一帧被调用
         gameLoop = new AnimationTimer() {
             private long lastInputSendTime = 0; // 记录上一次发送输入的时间
-            private final long inputInterval = 1_000_000_000 / (long) TPS;
+            private final long inputInterval = 1_000_000_000L / INPUT_SEND_RATE;
             private long lastPerfLogTime = 0; // 用于 2 秒性能日志
+            private final RenderFrameScheduler renderScheduler =
+                    new RenderFrameScheduler(TARGET_RENDER_RATE);
+            private final FramePacingMonitor framePacingMonitor =
+                    new FramePacingMonitor(TARGET_RENDER_RATE, TARGET_RENDER_RATE * 4);
 
             // --- [新] 最终诊断变量 ---
             /** 记录上一次 handle() 方法被调用的时间戳 */
@@ -1939,6 +1930,10 @@ public class GameClient extends Application {
             // AnimationTimer 的核心方法，每帧执行
             @Override
             public void handle(long now) {
+                // JavaFX fullspeed pulse只提供高分辨率时钟；真正绘制由客户端精确限制到目标刷新率。
+                if (!renderScheduler.shouldRender(now))
+                    return;
+
                 // [新增] 局域网服务器发现广播
                 if (serverBrowserPane != null && serverBrowserPane.isVisible()) {
                     broadcastDiscoveryProbe();
@@ -1951,12 +1946,16 @@ public class GameClient extends Application {
                 }
                 long timeSinceLastHandle = now - lastNanoTime;
                 lastNanoTime = now;
+                framePacingMonitor.record(timeSinceLastHandle);
 
                 // --- 计时 [A] 帧间总耗时 ---
                 perfTime_A_TotalFrameTime += timeSinceLastHandle;
 
                 // [新] 启动 [B] 帧内代码耗时的总计时器
                 long onFrameCodeStartTime = System.nanoTime();
+
+                // 在渲染帧边界应用网络状态。服务器仍保持120Hz，渲染不会被网络包到达时刻驱动。
+                drainNetworkMessagesForRenderFrame();
 
                 // ----------------------------------------------------
                 // --- (你所有的游戏逻辑和渲染) ---
@@ -1966,7 +1965,7 @@ public class GameClient extends Application {
                 frameCount++;
                 if (now - lastFpsUpdateTime >= 1_000_000_000) {
                     double fps = frameCount;
-                    Platform.runLater(() -> fpsLabel.setText(String.format("FPS: %.0f", fps)));
+                    fpsLabel.setText(String.format("FPS: %.0f", fps));
                     frameCount = 0;
                     lastFpsUpdateTime = now;
                 }
@@ -1986,6 +1985,7 @@ public class GameClient extends Application {
                     deltaTime = 1.0 / 60.0; // 防御性处理
 
                 long interpStartTime = System.nanoTime();
+                updateLocalAimVisual();
                 updateRecoil(deltaTime); // [修复] 传入 deltaTime
                 final double finalDeltaTime = deltaTime;
                 clientPlayers.values().forEach(p -> p.updateRenderPosition(finalDeltaTime));
@@ -2062,13 +2062,10 @@ public class GameClient extends Application {
                         // [M] 消息处理 (总)
                         double avg_M_Total = (perfTimeMsgHandling / perfFrameCount) / 1_000_000.0;
 
-                        // [新] [FX_Render] 真正的隐性开销 (渲染/GC)
-                        // [A] = [B] + [M] + [FX_Render] => [FX_Render] = [A] - [B] - [M]
-                        double avg_FX_Render = avg_A_TotalFrameTime - avg_B_OnFrameCodeTime - avg_M_Total;
-
-                        // [旧的C] (我们现在将其分解为 M + FX_Render)
-                        // double avg_C_HiddenOverhead = avg_A_TotalFrameTime - avg_B_OnFrameCodeTime;
-                        // // (avg_M + avg_FX_Render)
+                        // [A]-[B] 是等待下一次客户端渲染截止时间/系统呈现的时间，不是FX或GC执行耗时。
+                        double avgFramePacingWait = Math.max(0.0,
+                                avg_A_TotalFrameTime - avg_B_OnFrameCodeTime);
+                        FramePacingMonitor.Snapshot pacing = framePacingMonitor.snapshotAndReset();
 
                         // --- [新] 打印 [M] 的详细分解 ---
                         double avg_M1_Full = (perfTimeMsg_FullUpdate / perfFrameCount) / 1_000_000.0;
@@ -2100,7 +2097,11 @@ public class GameClient extends Application {
                                 (int) (1000.0 / avg_A_TotalFrameTime));
                         System.out.printf("  [B] 帧内代码 (Code in handle()): \t%.3f ms\n", avg_B_OnFrameCodeTime);
                         System.out.printf("  [M] 消息处理 (handleServerMessage): \t%.3f ms\n", avg_M_Total);
-                        System.out.printf("  [FX] 隐性开销 (FX Render / GC): \t%.3f ms  <-- (A - B - M)\n", avg_FX_Render);
+                        System.out.printf("  [P] 帧调度/呈现等待 (A - B): \t%.3f ms\n", avgFramePacingWait);
+                        System.out.printf("  [REAL] 目标 %d Hz | 实际 %.1f FPS | 1%% Low %.1f FPS | p99 %.3f ms | 最大 %.3f ms | 严重迟帧 %d/%d\n",
+                                TARGET_RENDER_RATE, pacing.observedFps(), pacing.onePercentLowFps(),
+                                pacing.p99Millis(), pacing.maxMillis(), pacing.severelyLateFrames(),
+                                pacing.sampleCount());
                         System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                         System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                         System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -2928,18 +2929,9 @@ public class GameClient extends Application {
         if (clientState != cs2d.client.GameClient.ClientState.PLAYING || myPlayerId == null || me == null)
             return;
 
-        // 将鼠标在屏幕上的坐标转换为游戏世界中的坐标
-        Point2D mouseWorld = camera.screenToWorld(mouseX, mouseY);
-        // 计算玩家朝向鼠标的角度
-        // [核心修复] 必须使用 renderX/renderY 计算角度。
-        // 因为鼠标的世界坐标(mouseWorld)是基于当前相机位置计算的，而相机是跟随 renderX/Y 的。
-        // 使用 renderX/Y 作为原点可以抵消插值带来的滞后，让角度计算变得绝对稳定，彻底消除抖动。
-        double angle = Math.atan2(mouseWorld.getY() - me.renderY, mouseWorld.getX() - me.renderX);
-
-        // [优化] 只有当角度变化超过极小阈值时才更新，减少微小浮点误差波动
-        if (Math.abs(angle - me.angle) > 1e-6) {
-            me.angle = angle;
-        }
+        // 本地视觉角度每个165Hz渲染帧都会更新；这里读取并发送当前结果，
+        // 网络发送频率仍保持120Hz，不再反向限制瞄准手感。
+        double angle = updateLocalAimVisual();
 
         // 创建一个 JSON 对象用于存储输入信息
         JsonObject input = new JsonObject();
@@ -2962,6 +2954,20 @@ public class GameClient extends Application {
         // --- 新增：客户端本地后坐力预测 ---
         // 如果正在开火，并且有武器
 
+    }
+
+    private double updateLocalAimVisual() {
+        if (me == null)
+            return 0.0;
+        Point2D mouseWorld = camera.screenToWorld(mouseX, mouseY);
+        double angle = Math.atan2(mouseWorld.getY() - me.renderY, mouseWorld.getX() - me.renderX);
+        if (Double.isFinite(angle)) {
+            // 本地玩家的视觉朝向以鼠标为准。服务器仍会收到角度并进行权威射击判定，
+            // 但服务器快照不能把本地准星/角色朝向降回120Hz。
+            me.angle = angle;
+            me.targetAngle = angle;
+        }
+        return angle;
     }
 
     // 更新本地对 "me" (我自己) 对象的引用
@@ -7088,8 +7094,15 @@ public class GameClient extends Application {
                 topLeft, topRight, bottomLeft, center,
                 interactionBarContainer, damageLogDisplayBox);
         new AnimationTimer() {
+            private final RenderFrameScheduler hudScheduler =
+                    new RenderFrameScheduler(TARGET_RENDER_RATE);
+
             @Override
             public void handle(long now) {
+                // fullspeed Pulse只作为高分辨率时钟，HUD同样限制在客户端渲染频率，
+                // 避免无意义地以约1000Hz刷新控件。
+                if (!hudScheduler.shouldRender(now))
+                    return;
                 // 注意：参数列表已简化，因为我们现在通过成员变量访问标签
                 updateHUDLabels(interactionBarContainer, interactionProgressBar);
             }
@@ -7380,7 +7393,7 @@ public class GameClient extends Application {
         synchronized void updateRenderPosition(double deltaTime) {
             if (health > 0) {
                 // [修复] 将服务器的速度 (每tick位移) 转换为每秒位移，再乘以实际帧间隔 deltaTime
-                double speedMultiplier = deltaTime * 120.0;
+                double speedMultiplier = deltaTime * SERVER_TICK_RATE;
                 this.targetX += this.vx * speedMultiplier;
                 this.targetY += this.vy * speedMultiplier;
 
@@ -8290,7 +8303,7 @@ public class GameClient extends Application {
         double vy = throwVy + me.vy;
 
         // --- 3. [核心修正] 基于【连续碰撞检测】的物理模拟 ---
-        int maxSteps = (int) (flightTime * TPS);
+        int maxSteps = (int) (flightTime * SERVER_TICK_RATE);
 
         // --- VVVV 核心修改 VVVV ---
         // JsonArray obstacles = mapData.getAsJsonArray("obstacles"); // <-- [删除]
@@ -8622,7 +8635,7 @@ public class GameClient extends Application {
             this.renderY += (this.targetY - this.renderY) * actualLerp;
 
             // [修复] 预测位移，并增加简易碰撞检测防止穿墙抖动
-            double speedMultiplier = deltaTime * 120.0;
+            double speedMultiplier = deltaTime * SERVER_TICK_RATE;
             double nextTargetX = this.targetX + this.vx * speedMultiplier;
             double nextTargetY = this.targetY + this.vy * speedMultiplier;
 
