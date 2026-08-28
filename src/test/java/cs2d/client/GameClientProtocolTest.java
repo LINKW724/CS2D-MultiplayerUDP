@@ -18,6 +18,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameClientProtocolTest {
     @Test
+    @SuppressWarnings({ "rawtypes", "unchecked" })
+    void gameOverLocksTheSharedScoreboardInFinalMode() throws Exception {
+        Class<? extends Enum> stateClass = (Class<? extends Enum>) Class
+                .forName("cs2d.client.GameClient$ClientState");
+        Method finalState = GameClient.class.getDeclaredMethod("isFinalScoreboardState", stateClass);
+        finalState.setAccessible(true);
+
+        Object playing = Enum.valueOf(stateClass, "PLAYING");
+        Object gameOver = Enum.valueOf(stateClass, "GAME_OVER");
+        assertFalse((boolean) finalState.invoke(null, playing));
+        assertTrue((boolean) finalState.invoke(null, gameOver));
+    }
+
+    @Test
     void rejectsOutOfOrderAndForeignSessionSnapshots() throws Exception {
         GameClient client = new GameClient();
         setField(client, "serverSessionId", "session-a");

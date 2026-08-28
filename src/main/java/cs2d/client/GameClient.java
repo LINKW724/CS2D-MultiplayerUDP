@@ -413,10 +413,8 @@ public class GameClient extends Application {
     private StackPane gameContainer; // 游戏主界面容器
     private BorderPane buyMenuPane; // 购买菜单界面
     private StackPane scoreboardPane; // 记分板界面
-    private StackPane gameOverPane; // 游戏结束界面
     private VBox tdmWeaponSelectorPane; // 团队死斗模式的武器选择界面
     private VBox settingsPane; // 设置界面
-    private Label gameOverTitle; // 游戏结束标题
     private Label connectionStatusLabel; // 连接状态标签
     // 存储购买菜单中所有“购买”按钮的映射
     private final Map<String, Button> buyMenuButtons = new ConcurrentHashMap<>();
@@ -804,7 +802,6 @@ public class GameClient extends Application {
             initialWeaponSelectorPane.setVisible(false);
             buyMenuPane.setVisible(false);
             scoreboardPane.setVisible(false);
-            gameOverPane.setVisible(false);
 
             // 显示 IP 输入界面
             ipEntryPane.setVisible(true);
@@ -859,10 +856,8 @@ public class GameClient extends Application {
             // 根据新状态决定游戏主容器是否可见
             gameContainer.setVisible(clientState == cs2d.client.GameClient.ClientState.PLAYING
                     || clientState == cs2d.client.GameClient.ClientState.GAME_OVER);
-            // 根据新状态决定游戏结束界面是否可见
-            gameOverPane.setVisible(clientState == cs2d.client.GameClient.ClientState.GAME_OVER);
-            // 隐藏记分板
-            scoreboardPane.setVisible(false);
+            // 比赛结束直接复用 TAB 记分板；其他状态默认隐藏。
+            scoreboardPane.setVisible(clientState == cs2d.client.GameClient.ClientState.GAME_OVER);
             // 隐藏购买菜单
             buyMenuPane.setVisible(false);
             // 隐藏团队死斗武器选择器
@@ -870,8 +865,8 @@ public class GameClient extends Application {
 
             // 如果新状态是游戏结束
             if (clientState == cs2d.client.GameClient.ClientState.GAME_OVER) {
-                // 更新游戏结束屏幕上的信息
-                updateGameOverScreen();
+                updateScoreboardUI();
+                scoreboardPane.toFront();
             }
             // else if (clientState == ClientState.PLAYING) { // 如果新状态是正在游戏
             // // 如果游戏状态不为空，并且游戏模式是团队死斗
@@ -1125,7 +1120,6 @@ public class GameClient extends Application {
             buyMenuPane.setVisible(false);
             scoreboardPane.setVisible(false);
             tdmWeaponSelectorPane.setVisible(false);
-            gameOverPane.setVisible(false);
 
             // 重置客户端状态到“连接中”，这将暂停看门狗（因为它只在PLAYING时运行）
             // 注意：我们不调用 setClientState()，因为它会隐藏我们想显示的 lobbyPane
@@ -3959,32 +3953,32 @@ public class GameClient extends Application {
     }
 
     // --- UI 更新逻辑 ---
-    // 更新游戏结束屏幕
-    private void updateGameOverScreen() {
+    // 创建最终赛果标题；比赛结束界面与 TAB 计分板共用同一套内容。
+    private Label createFinalResultLabel() {
+        Label resultLabel = new Label("Game Over");
+        resultLabel.setFont(Font.font("Orbitron", FontWeight.BOLD, 48));
+        resultLabel.setTextFill(Color.WHITE);
         if (latestGameState == null)
-            return; // 如果游戏状态为空，则返回
+            return resultLabel;
         String mode = getString(latestGameState, "mode"); // 获取游戏模式
         if ("TEAM_DEATHMATCH".equals(mode) || "DEMOLITION".equals(mode)) { // 如果是TDM或爆破
             int ctScore = getInt(latestGameState, "ctScore"), tScore = getInt(latestGameState, "tScore");
             if (ctScore > tScore) { // CT赢
-                gameOverTitle.setText("Counter-Terrorists Win");
-                gameOverTitle.setTextFill(Color.CYAN);
+                resultLabel.setText("Counter-Terrorists Win");
+                resultLabel.setTextFill(Color.CYAN);
             } else if (tScore > ctScore) { // T赢
-                gameOverTitle.setText("Terrorists Win");
-                gameOverTitle.setTextFill(Color.RED);
+                resultLabel.setText("Terrorists Win");
+                resultLabel.setTextFill(Color.RED);
             } else { // 平局
-                gameOverTitle.setText("Draw");
-                gameOverTitle.setTextFill(Color.WHITE);
+                resultLabel.setText("Draw");
             }
         } else if ("DEATHMATCH".equals(mode)) {
-            // 为死斗模式添加正确的结束界面
-            gameOverTitle.setText("Game Over - Time's Up!");
-            gameOverTitle.setTextFill(Color.WHITE);
+            resultLabel.setText("Game Over - Time's Up!");
         } else if ("ZOMBIE_MODE".equals(mode)) {
-            // 僵尸模式的逻辑现在是安全的
-            gameOverTitle.setText("Game Over - Survived " + (getInt(latestGameState, "wave") - 1) + " Waves");
-            gameOverTitle.setTextFill(Color.ORANGE);
+            resultLabel.setText("Game Over - Survived " + (getInt(latestGameState, "wave") - 1) + " Waves");
+            resultLabel.setTextFill(Color.ORANGE);
         }
+        return resultLabel;
     }
 
     // 更新购买菜单UI
@@ -4190,11 +4184,16 @@ public class GameClient extends Application {
         scoreboardContent.setAlignment(Pos.TOP_CENTER);
         scoreboardContent.setMaxWidth(CANVAS_WIDTH * 0.9);
 
-        // 创建标题
-        Label title = new Label("Scoreboard");
+        boolean finalScoreboard = isFinalScoreboardState(clientState);
+
+        // 普通 TAB 和最终结算复用相同计分内容，最终结算额外显示赛果与返回按钮。
+        Label title = new Label(finalScoreboard ? "Final Scoreboard" : "Scoreboard");
         title.setFont(titleFont);
         title.setStyle("-fx-text-fill: yellow;");
         scoreboardContent.getChildren().add(title);
+        if (finalScoreboard) {
+            scoreboardContent.getChildren().add(createFinalResultLabel());
+        }
 
         // 获取并排序所有人类玩家数据
         List<JsonObject> playersData = clientPlayers.values().stream()
@@ -4260,11 +4259,23 @@ public class GameClient extends Application {
             addTeamSection(scoreboardContent, tPlayers, "Terrorists   [ " + tScore + " ]", "#f56565", mode);
         }
 
+        if (finalScoreboard) {
+            Button backButton = new Button("Back to Lobby");
+            styleButton(backButton);
+            backButton.setFont(hudFont);
+            backButton.setOnAction(e -> setClientState(cs2d.client.GameClient.ClientState.LOBBY));
+            scoreboardContent.getChildren().add(backButton);
+        }
+
         ScrollPane scrollPane = new ScrollPane(scoreboardContent);
         scrollPane.setFitToWidth(true);
         scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
         scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
         scoreboardPane.getChildren().setAll(scrollPane);
+    }
+
+    private static boolean isFinalScoreboardState(cs2d.client.GameClient.ClientState state) {
+        return state == cs2d.client.GameClient.ClientState.GAME_OVER;
     }
 
     private void addTeamSection(VBox container, List<JsonObject> players, String title, String color, String mode) {
@@ -4768,15 +4779,13 @@ public class GameClient extends Application {
         // 创建各种UI元素
         createBuyMenuUI();
         createScoreboardUI();
-        createGameOverUI();
         createTdmWeaponSelectorUI();
         Node hudOverlay = createHUDOverlay();
         hudOverlay.setPickOnBounds(false); // 允许鼠标事件穿透HUD的透明区域
         gameContainer.setPickOnBounds(false);
 
         // 将所有UI元素添加到游戏容器中
-        gameContainer.getChildren().addAll(canvas, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane,
-                gameOverPane);
+        gameContainer.getChildren().addAll(canvas, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
         gameContainer.setVisible(false); // 初始时隐藏游戏容器
     }
 
@@ -5822,24 +5831,6 @@ public class GameClient extends Application {
         scoreboardPane.setVisible(false);
     }
 
-    // 创建游戏结束UI
-    private void createGameOverUI() {
-        gameOverPane = new StackPane();
-        gameOverPane.setStyle("-fx-background-color: rgba(0, 0, 0, 0.7);"); // 半透明背景
-        gameOverPane.setVisible(false);
-        VBox content = new VBox(30);
-        content.setAlignment(Pos.CENTER);
-        gameOverTitle = new Label("Game Over");
-        gameOverTitle.setFont(Font.font("Orbitron", FontWeight.BOLD, 70));
-        gameOverTitle.setTextFill(Color.RED);
-        Button backButton = new Button("Back to Lobby");
-        styleButton(backButton);
-        backButton.setFont(hudFont);
-        backButton.setOnAction(e -> setClientState(cs2d.client.GameClient.ClientState.LOBBY)); // 返回大厅
-        content.getChildren().addAll(gameOverTitle, backButton);
-        gameOverPane.getChildren().add(content);
-    }
-
     // 打开初始武器选择界面
     private void openInitialWeaponSelection() {
         ((Label) tdmWeaponSelectorPane.lookup("#weapon-selector-title")).setText("Select Your Starting Weapon");
@@ -5869,7 +5860,6 @@ public class GameClient extends Application {
         // 注：这一步是为了防止在选枪时，背后出现其他游戏UI元素
         buyMenuPane.setVisible(false);
         scoreboardPane.setVisible(false);
-        gameOverPane.setVisible(false);
 
         // 显示选枪界面并把它置于最顶层
         tdmWeaponSelectorPane.setVisible(true);
