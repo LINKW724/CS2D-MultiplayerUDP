@@ -1,0 +1,9 @@
+{
+  "followRecoil": true,
+  "maxKillFeedEntries": 1,
+  "crosshairColorWeb": "#FFFF4D",
+  "pingColorWeb": "#00FFFF",
+  "showAimLine": true,
+  "aimLineColorWeb": "#FFFF00",
+  "aimLineOpacity": 0.7
+}
