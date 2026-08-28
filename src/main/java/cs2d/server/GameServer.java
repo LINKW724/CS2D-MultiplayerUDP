@@ -17,6 +17,7 @@ import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -31,10 +32,12 @@ import java.util.function.Consumer;
 public class GameServer {
 
     public static final double TPS = 120;
+    public static final int PROTOCOL_VERSION = 2;
     private static final long CLIENT_TIMEOUT_MS = 10000;
     private static final long TIMEOUT_CHECK_INTERVAL_MS = 2000;
     private static final int MAX_INVALID_PACKETS = 10;
     private static final int MAX_STRING_FIELD_LENGTH = 128;
+    private static final int MAX_COMMANDS_PER_TICK = 2048;
 
     private final GameState gameState;
     private final Gson gson = new Gson();
@@ -47,6 +50,8 @@ public class GameServer {
     private Thread receiverThread;
     private Thread timeoutThread;
     private NetworkBroadcaster networkBroadcaster;
+    private final String sessionId = UUID.randomUUID().toString();
+    private final ConcurrentLinkedQueue<Runnable> gameCommandQueue = new ConcurrentLinkedQueue<>();
 
     private final ConcurrentHashMap<InetSocketAddress, String> addressToPlayerId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, InetSocketAddress> playerIdToAddress = new ConcurrentHashMap<>();
@@ -105,7 +110,7 @@ public class GameServer {
             this.rlBridgeService = new cs2d.server.rl.RLBridgeService(this.gameState, this.rlMacroMailbox,
                     bindHost, token);
         }
-        this.networkBroadcaster = new NetworkBroadcaster(this.gameState, this.logger);
+        this.networkBroadcaster = new NetworkBroadcaster(this.gameState, this.logger, this.sessionId);
     }
 
     /**
@@ -231,6 +236,9 @@ public class GameServer {
             }
 
             playerBytesReceivedInInterval.computeIfAbsent(playerId, k -> new LongAdder()).add(packet.getLength());
+            boolean preWelcomeRetry = "joinGame".equals(type) && !json.has("sessionId");
+            if (!preWelcomeRetry)
+                validateClientSession(json);
             handlePlayerMessage(playerId, type, json);
             invalidPacketCounts.remove(address);
 
@@ -273,8 +281,10 @@ public class GameServer {
         sendInitialInfo(address, newPlayerId);
         sendStaticData(address);
 
-        gameState.addPlayer(newPlayerId, name, selection);
-        broadcastFullUpdate();
+        enqueueGameCommand(() -> {
+            gameState.addPlayer(newPlayerId, name, selection);
+            broadcastFullUpdateNow();
+        });
     }
 
     private void sendInitialInfo(InetSocketAddress address, String playerId) {
@@ -282,11 +292,16 @@ public class GameServer {
         initialInfo.addProperty("type", "initialInfo");
         initialInfo.addProperty("playerId", playerId);
         initialInfo.addProperty("mode", gameState.getGameMode().toString());
+        initialInfo.addProperty("protocolVersion", PROTOCOL_VERSION);
+        initialInfo.addProperty("sessionId", sessionId);
         send(gson.toJson(initialInfo), address);
     }
 
     private void sendStaticData(InetSocketAddress address) {
-        String mapJson = gson.toJson(gameState.getMapDataJson());
+        JsonObject mapData = gameState.getMapDataJson().deepCopy();
+        mapData.addProperty("protocolVersion", PROTOCOL_VERSION);
+        mapData.addProperty("sessionId", sessionId);
+        String mapJson = gson.toJson(mapData);
         if (mapJson.length() > 1024) {
             sendLargeMessage(mapJson, address);
         } else {
@@ -308,8 +323,10 @@ public class GameServer {
                     }
                     break;
                 }
-                gameState.addPlayer(playerId, name, selection);
-                broadcastFullUpdate();
+                enqueueGameCommand(() -> {
+                    gameState.addPlayer(playerId, name, selection);
+                    broadcastFullUpdateNow();
+                });
                 break;
             case "welcome_ack":
                 // UDP 欢迎包确认无需改变世界状态；收到即证明客户端已获得 playerId。
@@ -320,62 +337,96 @@ public class GameServer {
                     sendStaticData(staticDataAddress);
                 break;
             case "chooseWeapon":
-                gameState.playerChooseWeapon(playerId, requireString(json, "weapon", 64));
-                broadcastFullUpdate();
+                String weapon = requireString(json, "weapon", 64);
+                enqueueGameCommand(() -> {
+                    gameState.playerChooseWeapon(playerId, weapon);
+                    broadcastFullUpdateNow();
+                });
                 break;
             case "buyItem":
-                gameState.playerBuyItem(playerId, requireString(json, "item", 64));
+                String buyItem = requireString(json, "item", 64);
+                enqueueGameCommand(() -> gameState.playerBuyItem(playerId, buyItem));
                 break;
             case "undoPurchase":
-                gameState.playerUndoPurchase(playerId, requireString(json, "item", 64));
+                String undoItem = requireString(json, "item", 64);
+                enqueueGameCommand(() -> gameState.playerUndoPurchase(playerId, undoItem));
                 break;
             case "pickupWeapon":
-                gameState.playerPickupDroppedWeapon(playerId, requireString(json, "itemId", MAX_STRING_FIELD_LENGTH));
+                String itemId = requireString(json, "itemId", MAX_STRING_FIELD_LENGTH);
+                enqueueGameCommand(() -> gameState.playerPickupDroppedWeapon(playerId, itemId));
                 break;
             case "selectNextWeapon":
-                gameState.playerSelectsNextWeapon(playerId, requireString(json, "weapon", 64));
+                String nextWeapon = requireString(json, "weapon", 64);
+                enqueueGameCommand(() -> gameState.playerSelectsNextWeapon(playerId, nextWeapon));
                 break;
             case "requestReload":
-                gameState.playerRequestReload(playerId);
+                enqueueGameCommand(() -> gameState.playerRequestReload(playerId));
                 break;
             case "dropWeapon":
-                gameState.playerDropWeapon(playerId);
+                enqueueGameCommand(() -> gameState.playerDropWeapon(playerId));
                 break;
             case "startInteraction":
-                gameState.playerStartInteraction(playerId);
+                enqueueGameCommand(() -> gameState.playerStartInteraction(playerId));
                 break;
             case "stopInteraction":
-                gameState.playerStopInteraction(playerId);
+                enqueueGameCommand(() -> gameState.playerStopInteraction(playerId));
                 break;
             case "playerInput":
-                gameState.updatePlayerInput(playerId, validatePlayerInput(json));
+                JsonObject validatedInput = validatePlayerInput(json);
+                enqueueGameCommand(() -> gameState.updatePlayerInput(playerId, validatedInput));
                 break;
             case "dropC4":
-                gameState.playerDropC4(playerId);
+                enqueueGameCommand(() -> gameState.playerDropC4(playerId));
                 break;
             case "switchToSlot":
                 int slot = requireInt(json, "slot", 0, 16);
-                gameState.playerSwitchSlot(playerId, slot);
+                enqueueGameCommand(() -> gameState.playerSwitchSlot(playerId, slot));
                 break;
             case "requestPing":
                 JsonObject pos = requireObject(json, "position");
                 Point2D.Double position = new Point2D.Double(requireFiniteDouble(pos, "x"),
                         requireFiniteDouble(pos, "y"));
-                gameState.playerRequestPing(playerId, position);
+                enqueueGameCommand(() -> gameState.playerRequestPing(playerId, position));
                 break;
             case "requestControlBot":
                 if (json.has("targetId") && !json.get("targetId").isJsonNull())
                     requireString(json, "targetId", MAX_STRING_FIELD_LENGTH);
-                gameState.playerRequestControlBot(playerId, json);
+                JsonObject controlRequest = json.deepCopy();
+                enqueueGameCommand(() -> gameState.playerRequestControlBot(playerId, controlRequest));
                 break;
             case "ping":
                 InetSocketAddress address = playerIdToAddress.get(playerId);
-                if (address != null)
-                    send("{\"type\":\"pong\"}", address);
+                if (address != null) {
+                    JsonObject pong = new JsonObject();
+                    pong.addProperty("type", "pong");
+                    pong.addProperty("protocolVersion", PROTOCOL_VERSION);
+                    pong.addProperty("sessionId", sessionId);
+                    send(gson.toJson(pong), address);
+                }
                 break;
             default:
                 throw new IllegalArgumentException("未知消息类型: " + type);
         }
+    }
+
+    private void enqueueGameCommand(Runnable command) {
+        if (command != null)
+            gameCommandQueue.offer(command);
+    }
+
+    private void drainGameCommands() {
+        int processed = 0;
+        Runnable command;
+        while (processed < MAX_COMMANDS_PER_TICK && (command = gameCommandQueue.poll()) != null) {
+            try {
+                command.run();
+            } catch (RuntimeException e) {
+                logger.accept("游戏命令执行失败，已隔离: " + e.getMessage());
+            }
+            processed++;
+        }
+        if (processed == MAX_COMMANDS_PER_TICK && !gameCommandQueue.isEmpty())
+            logger.accept("警告: 游戏命令队列积压，剩余约 " + gameCommandQueue.size() + " 条");
     }
 
     private void recordInvalidPacket(InetSocketAddress address, String reason) {
@@ -471,6 +522,13 @@ public class GameServer {
         return value.getAsJsonObject();
     }
 
+    private void validateClientSession(JsonObject json) {
+        int version = requireInt(json, "protocolVersion", PROTOCOL_VERSION, PROTOCOL_VERSION);
+        String incomingSession = requireString(json, "sessionId", 64);
+        if (version != PROTOCOL_VERSION || !sessionId.equals(incomingSession))
+            throw new IllegalArgumentException("协议版本或会话标识不匹配");
+    }
+
     private final HighPrecisionTimer precisionTimer = new HighPrecisionTimer();
     private long frameTimeSum = 0;
     private int frameCount = 0;
@@ -516,6 +574,7 @@ public class GameServer {
             lastFrameTime = currentTime;
 
             while (delta >= 1) {
+                drainGameCommands();
                 gameState.update();
                 delta -= 1;
                 if (networkBroadcaster != null)
@@ -581,9 +640,11 @@ public class GameServer {
             playerSendRateBps.remove(playerId);
             playerReceiveRateBps.remove(playerId);
             invalidPacketCounts.remove(address);
-            gameState.removePlayer(playerId);
             logger.accept("客户端超时: " + address + " (PlayerID: " + playerId + ")");
-            broadcastFullUpdate();
+            enqueueGameCommand(() -> {
+                gameState.removePlayer(playerId);
+                broadcastFullUpdateNow();
+            });
         }
     }
 
@@ -591,15 +652,15 @@ public class GameServer {
      * 强制向所有在线客户端广播一条当前世界的全量状态包。
      */
     public void broadcastFullUpdate() {
-        if (addressToPlayerId.isEmpty())
-            return;
-        String stateJson = gson.toJson(gameState.getFullUpdateJson());
-        for (InetSocketAddress address : addressToPlayerId.keySet()) {
-            if (stateJson.length() > 1024)
-                sendLargeMessage(stateJson, address);
-            else
-                send(stateJson, address);
-        }
+        if (Thread.currentThread() == gameLoopThread)
+            broadcastFullUpdateNow();
+        else
+            enqueueGameCommand(this::broadcastFullUpdateNow);
+    }
+
+    private void broadcastFullUpdateNow() {
+        if (networkBroadcaster != null)
+            networkBroadcaster.broadcastFullUpdate();
     }
 
     private void send(String message, InetSocketAddress address) {
@@ -619,25 +680,26 @@ public class GameServer {
     }
 
     public void addBotToGame(Player.Team team) {
-        if (gameState != null) {
+        if (gameState != null)
+            enqueueGameCommand(() -> {
             gameState.manuallyAddAiPlayer(team);
-            broadcastFullUpdate();
-        }
+                broadcastFullUpdateNow();
+            });
     }
 
     public void executeCommand(String command) {
         if (gameState != null)
-            gameState.executeCommand(command);
+            enqueueGameCommand(() -> gameState.executeCommand(command));
     }
 
     public void removeBotByTeam(cs2d.playerAndAi.Player.Team team) {
         if (gameState != null)
-            gameState.removeBotByTeam(team);
+            enqueueGameCommand(() -> gameState.removeBotByTeam(team));
     }
 
     public void killAllBots() {
         if (gameState != null)
-            gameState.killAllBots();
+            enqueueGameCommand(gameState::killAllBots);
     }
 
     public void removePlayer(String playerId) {
@@ -646,8 +708,10 @@ public class GameServer {
             if (address != null)
                 handleDisconnect(address);
             else {
-                gameState.removePlayer(playerId);
-                broadcastFullUpdate();
+                enqueueGameCommand(() -> {
+                    gameState.removePlayer(playerId);
+                    broadcastFullUpdateNow();
+                });
             }
         }
     }
@@ -666,7 +730,12 @@ public class GameServer {
      */
     public void toggleAiFreeze() {
         if (gameState != null)
-            gameState.toggleAiFreeze();
+            enqueueGameCommand(gameState::toggleAiFreeze);
+    }
+
+    public void commandAiMoveTo(String aiId, double x, double y) {
+        if (gameState != null && Double.isFinite(x) && Double.isFinite(y))
+            enqueueGameCommand(() -> gameState.commandAiMoveTo(aiId, x, y));
     }
 
     /**

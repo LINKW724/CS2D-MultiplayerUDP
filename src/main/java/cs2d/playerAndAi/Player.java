@@ -112,6 +112,7 @@ public class Player {
       public int consecutiveLosses = 0;
       public boolean wasAliveLastRound = false;
       public final List<String> itemsBoughtThisFreezeTime = new ArrayList<>();
+      public final Map<String, Integer> itemPurchaseCostsThisFreezeTime = new HashMap<>();
 
       // --- 输入控制 ---
       public final Set<String> keysDown = ConcurrentHashMap.newKeySet();
@@ -605,6 +606,7 @@ public class Player {
             this.isInteracting = false;
             this.interactionStartTime = 0;
             this.itemsBoughtThisFreezeTime.clear();
+            this.itemPurchaseCostsThisFreezeTime.clear();
             this.predictedRecoilAngle = 0;
             if (!wasAliveLastRound) {
                   this.armorValue = 0;

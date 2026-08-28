@@ -1596,10 +1596,8 @@ public class ServerControlPanel {
                 double y = Double.parseDouble(parts.get(3)); // 解析Y坐标
 
                 // 检查 gameServer 和 gameState 是否可用
-                GameState gameState = (gameServer != null) ? gameServer.getGameState() : null;
-                if (gameState != null) {
-                    // 调用 GameState 中的 commandAiMoveTo 方法
-                    gameState.commandAiMoveTo(aiId, x, y);
+                if (gameServer != null && gameServer.getGameState() != null) {
+                    gameServer.commandAiMoveTo(aiId, x, y);
                     // log("已向 AI ID: " + aiId + " ("+aiNameOrId+") 下达移动命令。"); // 可以在日志中同时显示名字/ID
                 } else {
                     log("错误：游戏状态不可用，无法执行移动命令。");

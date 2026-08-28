@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.CRC32;
@@ -32,6 +33,8 @@ public class NetworkBroadcaster {
     private final GameState gameState;
     private final Consumer<String> logger;
     private final Gson gson = new Gson();
+    private final String sessionId;
+    private final AtomicLong sequenceCounter = new AtomicLong();
 
     // 从 GameServer 传入的共享资源 (必须是线程安全的)
     private DatagramSocket socket;
@@ -47,9 +50,10 @@ public class NetworkBroadcaster {
     private volatile double perfTimeChunkPreparation = 0.0;
     private volatile double perfTimeParallelSend = 0.0;
 
-    public NetworkBroadcaster(GameState gameState, Consumer<String> logger) {
+    public NetworkBroadcaster(GameState gameState, Consumer<String> logger, String sessionId) {
         this.gameState = gameState;
         this.logger = logger;
+        this.sessionId = sessionId;
     }
 
     public void initialize(DatagramSocket socket,
@@ -78,11 +82,15 @@ public class NetworkBroadcaster {
             // --- 2. 序列化 ---
             String stateJson;
             try {
-                if (tickCounter % 10 == 0) { 
-                    stateJson = gson.toJson(gameState.getFullUpdateJson());
+                long serverTick = ++tickCounter;
+                JsonObject state;
+                if (serverTick % 10 == 0) {
+                    state = gameState.getFullUpdateJson();
                 } else {
-                    stateJson = gson.toJson(gameState.getSmallUpdateJson());
+                    state = gameState.getSmallUpdateJson();
                 }
+                decorateState(state, serverTick);
+                stateJson = gson.toJson(state);
             } catch (Exception e) {
                 logger.accept("[Broadcaster] JSON 序列化失败 (可能存在并发修改): " + e.toString());
                 e.printStackTrace(); // 在服务器终端打印详细堆栈
@@ -90,8 +98,6 @@ public class NetworkBroadcaster {
             }
             long stepEndJson = System.nanoTime();
             double jsonSerTimeMs = (stepEndJson - stepStartTime) / 1_000_000.0;
-            tickCounter++;
-
             // --- 3. 预准备数据 ---
             stepStartTime = System.nanoTime();
             final String finalStateJson = stateJson; 
@@ -137,6 +143,33 @@ public class NetworkBroadcaster {
         }
     }
 
+    /** 仅由游戏主线程调用，立即发送带新序号的完整快照。 */
+    public void broadcastFullUpdate() {
+        if (addressToPlayerId == null || addressToPlayerId.isEmpty())
+            return;
+        try {
+            JsonObject state = gameState.getFullUpdateJson();
+            decorateState(state, tickCounter);
+            String stateJson = gson.toJson(state);
+            List<String> chunks = stateJson.length() > 1024 ? prepareChunks(stateJson) : null;
+            for (InetSocketAddress address : addressToPlayerId.keySet()) {
+                if (chunks != null)
+                    sendLargeMessageChunks(chunks, address);
+                else
+                    send(stateJson, address);
+            }
+        } catch (RuntimeException e) {
+            logger.accept("[Broadcaster] 强制全量广播失败: " + e.getMessage());
+        }
+    }
+
+    private void decorateState(JsonObject state, long serverTick) {
+        state.addProperty("protocolVersion", GameServer.PROTOCOL_VERSION);
+        state.addProperty("sessionId", sessionId);
+        state.addProperty("sequence", sequenceCounter.incrementAndGet());
+        state.addProperty("serverTick", serverTick);
+    }
+
     public void sendLargeMessage(String message, InetSocketAddress clientAddress) {
         List<String> chunks = prepareChunks(message);
         if (!chunks.isEmpty()) {
@@ -155,6 +188,11 @@ public class NetworkBroadcaster {
             final int CHUNK_SIZE = 1024;
             int totalChunks = (int) Math.ceil((double) base64Message.length() / CHUNK_SIZE);
             String messageId = UUID.randomUUID().toString();
+            JsonObject sourceMetadata = null;
+            try {
+                sourceMetadata = gson.fromJson(message, JsonObject.class);
+            } catch (RuntimeException ignored) {
+            }
 
             List<String> preparedChunks = new ArrayList<>(totalChunks);
             for (int i = 0; i < totalChunks; i++) {
@@ -168,6 +206,10 @@ public class NetworkBroadcaster {
                 chunkJson.addProperty("index", i);
                 chunkJson.addProperty("total", totalChunks);
                 chunkJson.addProperty("checksum", checksum);
+                copyMetadata(sourceMetadata, chunkJson, "protocolVersion");
+                copyMetadata(sourceMetadata, chunkJson, "sessionId");
+                copyMetadata(sourceMetadata, chunkJson, "sequence");
+                copyMetadata(sourceMetadata, chunkJson, "serverTick");
                 chunkJson.addProperty("data", chunkData);
                 preparedChunks.add(gson.toJson(chunkJson));
             }
@@ -176,6 +218,11 @@ public class NetworkBroadcaster {
             logger.accept("[Broadcaster] 准备分片失败: " + e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private static void copyMetadata(JsonObject source, JsonObject target, String name) {
+        if (source != null && source.has(name) && !source.get(name).isJsonNull())
+            target.add(name, source.get(name).deepCopy());
     }
 
     private void sendLargeMessageChunks(List<String> preparedChunks, InetSocketAddress clientAddress) {

@@ -5,8 +5,6 @@ import cs2d.AIControl.A.PathfindingModule;
 import cs2d.AIControl.BG.TEAM_DEATHMATCHcontrol;
 import cs2d.AIControl.BG.ZOMBIEcontrol;
 import cs2d.playerAndAi.Player;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonArray;
 
 import java.awt.Shape;
 import java.awt.geom.Line2D;
@@ -49,6 +47,7 @@ public class AIService implements Runnable {
     private final ConcurrentHashMap<String, Map<String, PerceivedPlayer>> aiShortTermMemory = new ConcurrentHashMap<>();
     // ID -> (TargetID -> LastSeenTime)
     private final ConcurrentHashMap<String, Map<String, Long>> aiPerceptionTimestamps = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Long> lastDropRequestTimes = new ConcurrentHashMap<>();
     private static final long MEMORY_EXPIRY_MS = 5000;
 
     public AIService(GameState gameState, ConcurrentHashMap<String, AIInput> aiInputMailbox,
@@ -267,9 +266,11 @@ public class AIService implements Runnable {
                         if (macro.dropItem()
                                 && gameState.getRoundPhase() == cs2d.server.GameState.RoundPhase.FREEZE_TIME) {
                             // 这里可以发送给 GameState 让其丢弃。用一个小 hack 防止每帧连丢：
-                            if (System.currentTimeMillis() - ai.lastKeyPressTime > 1500) {
-                                gameState.playerDropWeapon(ai.id);
-                                ai.lastKeyPressTime = System.currentTimeMillis(); // 借用 keypress 时间戳作为 cooldown
+                            long now = System.currentTimeMillis();
+                            long lastDrop = lastDropRequestTimes.getOrDefault(ai.id, 0L);
+                            if (now - lastDrop > 1500) {
+                                gameState.requestAiDropWeapon(ai.id);
+                                lastDropRequestTimes.put(ai.id, now);
                             }
                         }
 
@@ -477,17 +478,6 @@ public class AIService implements Runnable {
     }
 
     private void injectRealisticInput(Player ai, AIInput decision) {
-        JsonObject input = new JsonObject();
-        input.addProperty("type", "playerInput");
-        input.addProperty("angle", decision.angle());
-        input.addProperty("shooting", decision.shooting());
-        input.addProperty("walking", decision.walking());
-        input.addProperty("underhand", false);
-        JsonArray keysArray = new JsonArray();
-        if (decision.keys() != null)
-            decision.keys().forEach(keysArray::add);
-        input.add("keys", keysArray);
-        gameState.updatePlayerInput(ai.id, input);
         aiInputMailbox.put(ai.id, decision);
     }
 }

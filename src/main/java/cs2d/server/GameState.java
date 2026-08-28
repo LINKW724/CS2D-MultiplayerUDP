@@ -67,6 +67,7 @@ public class GameState {
     private final Set<Point> forbiddenSpawnGridCells = new HashSet<>(); // <-- 新增
     private final Set<Point> generalForbiddenGridCells = new HashSet<>(); // <-- 通用寻路禁区
     private final ConcurrentHashMap<String, AIService.AIInput> aiInputMailbox; // <-- AI输入数据邮箱（线程安全的消息队列），用于异步通信。
+    private final Set<String> pendingAiDropRequests = ConcurrentHashMap.newKeySet();
 
     // 僵尸生成点：
     private final List<Point2D.Double> precomputedSpawnPoints = new ArrayList<>();
@@ -1122,6 +1123,13 @@ public class GameState {
         if (isGameOver())
             return;
 
+        if (!pendingAiDropRequests.isEmpty()) {
+            for (String aiId : new ArrayList<>(pendingAiDropRequests)) {
+                if (pendingAiDropRequests.remove(aiId))
+                    playerDropWeapon(aiId);
+            }
+        }
+
         long frameStartTime = System.nanoTime();
         long lastTimeStamp = frameStartTime;
         long currentTime = System.currentTimeMillis();
@@ -1266,6 +1274,12 @@ public class GameState {
             this.perfTimeTotal = (System.nanoTime() - frameStartTime) / 1_000_000.0;
         }
         tickCounter++;
+    }
+
+    /** AI 线程只投递意图，实际丢枪由下一次游戏主线程 Tick 执行。 */
+    public void requestAiDropWeapon(String aiId) {
+        if (aiId != null)
+            pendingAiDropRequests.add(aiId);
     }
 
     // --- 供服务器状态窗口调用的性能日志 Getters ---
@@ -2649,7 +2663,8 @@ public class GameState {
 
         try { // 尝试将物品名称转换为Item枚举。
             Item itemToBuy = Item.valueOf(itemName);
-            if (player.money >= itemToBuy.cost) { // 如果玩家有足够的钱。
+            int purchaseCost = calculatePurchaseCost(itemToBuy, player.hasKevlar, player.hasHelmet);
+            if (player.money >= purchaseCost) { // 如果玩家有足够的钱。
                 boolean purchaseMade = false; // 标记是否成功购买。
 
                 if (itemToBuy.type == Item.ItemType.GEAR) { // 如果是装备。
@@ -2660,7 +2675,6 @@ public class GameState {
                         player.armorValue = 100; // 无论如何，买完都补满到100
                         purchaseMade = true;
                     }
-                    /** [BUG] 这里没有解决 做买了胸甲后买头甲差价的问题 */
                     // 购买头 + 甲的条件：之前没有头盔（升级），或者甲的耐久度低于80（补甲）
                     else if (itemToBuy == Item.KEVLAR_HELMET && (!player.hasHelmet || player.armorValue < 80)) {
                         player.hasKevlar = true;
@@ -2690,14 +2704,20 @@ public class GameState {
                 }
 
                 if (purchaseMade) { // 如果购买成功。
-                    player.money -= itemToBuy.cost; // 扣钱。
+                    player.money -= purchaseCost; // 已有胸甲升级头盔时只收 350 差价。
                     player.itemsBoughtThisFreezeTime.add(itemToBuy.name()); // 记录购买。
+                    player.itemPurchaseCostsThisFreezeTime.put(itemToBuy.name(), purchaseCost);
                     privateSoundEvents.add(new HeadshotEvent(player.id, "buy")); // 发送购买音效。
                 }
             }
         } catch (IllegalArgumentException e) { // 物品名称无效。
             logger.accept("无效的购买项目: " + itemName); // 记录日志。
         }
+    }
+
+    static int calculatePurchaseCost(Item item, boolean hasKevlar, boolean hasHelmet) {
+        boolean helmetUpgrade = item == Item.KEVLAR_HELMET && hasKevlar && !hasHelmet;
+        return helmetUpgrade ? item.cost - Item.KEVLAR.cost : item.cost;
     }
 
     // 处理伤害和相关事件。
@@ -5012,14 +5032,20 @@ public class GameState {
         // 如果它不是武器，再尝试作为装备/手雷/盔甲处理
         try {
             Item itemToUndo = Item.valueOf(itemName);
-            player.money += itemToUndo.cost;
+            int refund = player.itemPurchaseCostsThisFreezeTime.getOrDefault(itemName, itemToUndo.cost);
+            player.money += refund;
 
             if (itemToUndo.type == Item.ItemType.GEAR) {
                 // --- 退还装备（护甲/钳子） ---
                 if (itemToUndo == Item.KEVLAR_HELMET) {
                     player.hasHelmet = false;
-                    player.hasKevlar = false;
-                    player.armorValue = 0;
+                    if (refund == itemToUndo.cost - Item.KEVLAR.cost) {
+                        player.hasKevlar = true;
+                        player.armorValue = 100;
+                    } else {
+                        player.hasKevlar = false;
+                        player.armorValue = 0;
+                    }
                 } else if (itemToUndo == Item.KEVLAR) {
                     player.hasKevlar = false;
                     player.armorValue = 0;
@@ -5038,6 +5064,7 @@ public class GameState {
                 }
             }
             player.itemsBoughtThisFreezeTime.remove(itemName);
+            player.itemPurchaseCostsThisFreezeTime.remove(itemName);
             logger.accept(player.name + " refunded " + itemName);
 
         } catch (IllegalArgumentException e) {
