@@ -1,8 +1,10 @@
 package cs2d.server;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.google.gson.JsonSyntaxException;
+import com.google.gson.JsonParseException;
 import cs2d.playerAndAi.Player;
 
 import java.awt.geom.Point2D;
@@ -18,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 
@@ -30,6 +33,8 @@ public class GameServer {
     public static final double TPS = 120;
     private static final long CLIENT_TIMEOUT_MS = 10000;
     private static final long TIMEOUT_CHECK_INTERVAL_MS = 2000;
+    private static final int MAX_INVALID_PACKETS = 10;
+    private static final int MAX_STRING_FIELD_LENGTH = 128;
 
     private final GameState gameState;
     private final Gson gson = new Gson();
@@ -55,6 +60,7 @@ public class GameServer {
     private final ConcurrentHashMap<String, Double> playerReceiveRateBps = new ConcurrentHashMap<>();
     private ScheduledExecutorService networkStatScheduler;
     private final ConcurrentHashMap<InetSocketAddress, LongAdder> packetRateLimiter = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<InetSocketAddress, AtomicInteger> invalidPacketCounts = new ConcurrentHashMap<>();
     private static final int MAX_PACKETS_PER_SECOND = 250;
 
     private AIService aiService;
@@ -91,7 +97,14 @@ public class GameServer {
         this.logger = logger;
         this.gameState = new GameState(mode, difficulty, aiCount, startingWave, mapData, logger, aiInputMailbox);
         this.aiService = new AIService(this.gameState, this.aiInputMailbox, this.rlMacroMailbox, 10, 60, logger);
-        this.rlBridgeService = new cs2d.server.rl.RLBridgeService(this.gameState, this.rlMacroMailbox);
+        boolean rlEnabled = GameState.isRLTrainingMode
+                || Boolean.parseBoolean(System.getProperty("cs2d.rl.enabled", "false"));
+        if (rlEnabled) {
+            String bindHost = System.getProperty("cs2d.rl.host", "127.0.0.1");
+            String token = System.getProperty("cs2d.rl.token", System.getenv("CS2D_RL_TOKEN"));
+            this.rlBridgeService = new cs2d.server.rl.RLBridgeService(this.gameState, this.rlMacroMailbox,
+                    bindHost, token);
+        }
         this.networkBroadcaster = new NetworkBroadcaster(this.gameState, this.logger);
     }
 
@@ -109,8 +122,10 @@ public class GameServer {
             timeoutThread = new Thread(this::checkTimeouts, "Server-Timeout-Check");
 
             aiService.start();
-            if (rlBridgeService != null)
-                rlBridgeService.start(8081);
+            if (rlBridgeService != null) {
+                int rlPort = Integer.getInteger("cs2d.rl.port", 8081);
+                rlBridgeService.start(rlPort);
+            }
             networkBroadcaster.initialize(socket, addressToPlayerId, playerIdToAddress, playerBytesSentInInterval);
 
             receiverThread.start();
@@ -175,6 +190,10 @@ public class GameServer {
             } catch (IOException e) {
                 if (running)
                     logger.accept("接收数据时出错: " + e.getMessage());
+            } catch (RuntimeException e) {
+                // 单个坏包绝不能结束 Server-Receiver 线程。
+                if (running)
+                    logger.accept("丢弃处理失败的数据包: " + e.getMessage());
             }
         }
     }
@@ -192,10 +211,10 @@ public class GameServer {
 
         try {
             JsonObject json = gson.fromJson(message, JsonObject.class);
-            if (json == null || !json.has("type"))
-                return;
+            if (json == null)
+                throw new IllegalArgumentException("JSON 根对象为空");
 
-            String type = json.get("type").getAsString();
+            String type = requireString(json, "type", 48);
             String playerId = addressToPlayerId.get(address);
 
             if (playerId == null) {
@@ -205,15 +224,18 @@ public class GameServer {
                 }
                 if ("joinGame".equals(type)) {
                     handleNewPlayer(address, json);
+                } else {
+                    recordInvalidPacket(address, "未连接客户端发送了不允许的消息: " + type);
                 }
                 return;
             }
 
             playerBytesReceivedInInterval.computeIfAbsent(playerId, k -> new LongAdder()).add(packet.getLength());
             handlePlayerMessage(playerId, type, json);
+            invalidPacketCounts.remove(address);
 
-        } catch (JsonSyntaxException e) {
-            logger.accept("从 " + address + " 收到无效的JSON消息");
+        } catch (JsonParseException | IllegalStateException | IllegalArgumentException e) {
+            recordInvalidPacket(address, e.getMessage());
         }
     }
 
@@ -241,53 +263,77 @@ public class GameServer {
     }
 
     private void handleNewPlayer(InetSocketAddress address, JsonObject json) {
+        String selection = optionalString(json, "selection", "CT", 32);
+        String name = optionalString(json, "name", "Player", MAX_STRING_FIELD_LENGTH);
         String newPlayerId = UUID.randomUUID().toString();
         addressToPlayerId.put(address, newPlayerId);
         playerIdToAddress.put(newPlayerId, address);
         logger.accept("新连接: " + address + " -> 分配ID: " + newPlayerId);
 
+        sendInitialInfo(address, newPlayerId);
+        sendStaticData(address);
+
+        gameState.addPlayer(newPlayerId, name, selection);
+        broadcastFullUpdate();
+    }
+
+    private void sendInitialInfo(InetSocketAddress address, String playerId) {
         JsonObject initialInfo = new JsonObject();
         initialInfo.addProperty("type", "initialInfo");
-        initialInfo.addProperty("playerId", newPlayerId);
+        initialInfo.addProperty("playerId", playerId);
         initialInfo.addProperty("mode", gameState.getGameMode().toString());
         send(gson.toJson(initialInfo), address);
+    }
 
+    private void sendStaticData(InetSocketAddress address) {
         String mapJson = gson.toJson(gameState.getMapDataJson());
         if (mapJson.length() > 1024) {
             sendLargeMessage(mapJson, address);
         } else {
             send(mapJson, address);
         }
-
-        String selection = json.has("selection") ? json.get("selection").getAsString() : "CT";
-        String name = json.has("name") ? json.get("name").getAsString() : "Player";
-        gameState.addPlayer(newPlayerId, name, selection);
-        broadcastFullUpdate();
     }
 
     private void handlePlayerMessage(String playerId, String type, JsonObject json) {
         switch (type) {
             case "joinGame":
-                String selection = json.has("selection") ? json.get("selection").getAsString() : "CT";
-                String name = json.has("name") ? json.get("name").getAsString() : "Player";
+                String selection = optionalString(json, "selection", "CT", 32);
+                String name = optionalString(json, "name", "Player", MAX_STRING_FIELD_LENGTH);
+                // 客户端在欢迎包丢失时会重复发送 SPECTATOR 握手；每次都重发欢迎包和地图。
+                if ("SPECTATOR".equalsIgnoreCase(selection)) {
+                    InetSocketAddress joinAddress = playerIdToAddress.get(playerId);
+                    if (joinAddress != null) {
+                        sendInitialInfo(joinAddress, playerId);
+                        sendStaticData(joinAddress);
+                    }
+                    break;
+                }
                 gameState.addPlayer(playerId, name, selection);
                 broadcastFullUpdate();
                 break;
+            case "welcome_ack":
+                // UDP 欢迎包确认无需改变世界状态；收到即证明客户端已获得 playerId。
+                break;
+            case "request_static_data":
+                InetSocketAddress staticDataAddress = playerIdToAddress.get(playerId);
+                if (staticDataAddress != null)
+                    sendStaticData(staticDataAddress);
+                break;
             case "chooseWeapon":
-                gameState.playerChooseWeapon(playerId, json.get("weapon").getAsString());
+                gameState.playerChooseWeapon(playerId, requireString(json, "weapon", 64));
                 broadcastFullUpdate();
                 break;
             case "buyItem":
-                gameState.playerBuyItem(playerId, json.get("item").getAsString());
+                gameState.playerBuyItem(playerId, requireString(json, "item", 64));
                 break;
             case "undoPurchase":
-                gameState.playerUndoPurchase(playerId, json.get("item").getAsString());
+                gameState.playerUndoPurchase(playerId, requireString(json, "item", 64));
                 break;
             case "pickupWeapon":
-                gameState.playerPickupDroppedWeapon(playerId, json.get("itemId").getAsString());
+                gameState.playerPickupDroppedWeapon(playerId, requireString(json, "itemId", MAX_STRING_FIELD_LENGTH));
                 break;
             case "selectNextWeapon":
-                gameState.playerSelectsNextWeapon(playerId, json.get("weapon").getAsString());
+                gameState.playerSelectsNextWeapon(playerId, requireString(json, "weapon", 64));
                 break;
             case "requestReload":
                 gameState.playerRequestReload(playerId);
@@ -302,21 +348,24 @@ public class GameServer {
                 gameState.playerStopInteraction(playerId);
                 break;
             case "playerInput":
-                gameState.updatePlayerInput(playerId, json);
+                gameState.updatePlayerInput(playerId, validatePlayerInput(json));
                 break;
             case "dropC4":
                 gameState.playerDropC4(playerId);
                 break;
             case "switchToSlot":
-                if (json.has("slot"))
-                    gameState.playerSwitchSlot(playerId, json.get("slot").getAsInt());
+                int slot = requireInt(json, "slot", 0, 16);
+                gameState.playerSwitchSlot(playerId, slot);
                 break;
             case "requestPing":
-                JsonObject pos = json.getAsJsonObject("position");
-                Point2D.Double position = new Point2D.Double(pos.get("x").getAsDouble(), pos.get("y").getAsDouble());
+                JsonObject pos = requireObject(json, "position");
+                Point2D.Double position = new Point2D.Double(requireFiniteDouble(pos, "x"),
+                        requireFiniteDouble(pos, "y"));
                 gameState.playerRequestPing(playerId, position);
                 break;
             case "requestControlBot":
+                if (json.has("targetId") && !json.get("targetId").isJsonNull())
+                    requireString(json, "targetId", MAX_STRING_FIELD_LENGTH);
                 gameState.playerRequestControlBot(playerId, json);
                 break;
             case "ping":
@@ -324,7 +373,102 @@ public class GameServer {
                 if (address != null)
                     send("{\"type\":\"pong\"}", address);
                 break;
+            default:
+                throw new IllegalArgumentException("未知消息类型: " + type);
         }
+    }
+
+    private void recordInvalidPacket(InetSocketAddress address, String reason) {
+        if (!addressToPlayerId.containsKey(address)) {
+            logger.accept("从未连接地址 " + address + " 丢弃非法数据包: "
+                    + (reason == null ? "格式错误" : reason));
+            return;
+        }
+        int count = invalidPacketCounts.computeIfAbsent(address, ignored -> new AtomicInteger()).incrementAndGet();
+        logger.accept("从 " + address + " 丢弃非法数据包 (" + count + "/" + MAX_INVALID_PACKETS + "): "
+                + (reason == null ? "格式错误" : reason));
+        if (count >= MAX_INVALID_PACKETS && addressToPlayerId.containsKey(address)) {
+            logger.accept("客户端非法数据包达到阈值，断开连接: " + address);
+            handleDisconnect(address);
+        }
+    }
+
+    private static JsonObject validatePlayerInput(JsonObject json) {
+        JsonObject validated = new JsonObject();
+        validated.addProperty("type", "playerInput");
+        validated.addProperty("angle", requireFiniteDouble(json, "angle"));
+        validated.addProperty("shooting", requireBoolean(json, "shooting"));
+        validated.addProperty("underhand", optionalBoolean(json, "underhand", false));
+        validated.addProperty("walking", optionalBoolean(json, "walking", false));
+        JsonElement keysElement = json.get("keys");
+        if (keysElement == null || !keysElement.isJsonArray())
+            throw new IllegalArgumentException("字段 keys 必须是数组");
+        JsonArray keys = keysElement.getAsJsonArray();
+        if (keys.size() > 16)
+            throw new IllegalArgumentException("字段 keys 数量超限");
+        JsonArray validatedKeys = new JsonArray();
+        for (JsonElement key : keys) {
+            if (!key.isJsonPrimitive() || !key.getAsJsonPrimitive().isString())
+                throw new IllegalArgumentException("字段 keys 包含非字符串");
+            String value = key.getAsString();
+            if (value.length() > 24)
+                throw new IllegalArgumentException("按键名称过长");
+            validatedKeys.add(value);
+        }
+        validated.add("keys", validatedKeys);
+        return validated;
+    }
+
+    private static String requireString(JsonObject json, String field, int maxLength) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
+            throw new IllegalArgumentException("字段 " + field + " 必须是字符串");
+        String result = value.getAsString();
+        if (result.isBlank() || result.length() > maxLength)
+            throw new IllegalArgumentException("字段 " + field + " 为空或长度超限");
+        return result;
+    }
+
+    private static String optionalString(JsonObject json, String field, String fallback, int maxLength) {
+        return json.has(field) && !json.get(field).isJsonNull() ? requireString(json, field, maxLength) : fallback;
+    }
+
+    private static int requireInt(JsonObject json, String field, int min, int max) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IllegalArgumentException("字段 " + field + " 必须是整数");
+        int result = value.getAsInt();
+        if (result < min || result > max)
+            throw new IllegalArgumentException("字段 " + field + " 超出范围");
+        return result;
+    }
+
+    private static double requireFiniteDouble(JsonObject json, String field) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IllegalArgumentException("字段 " + field + " 必须是数字");
+        double result = value.getAsDouble();
+        if (!Double.isFinite(result))
+            throw new IllegalArgumentException("字段 " + field + " 必须是有限数字");
+        return result;
+    }
+
+    private static boolean requireBoolean(JsonObject json, String field) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean())
+            throw new IllegalArgumentException("字段 " + field + " 必须是布尔值");
+        return value.getAsBoolean();
+    }
+
+    private static boolean optionalBoolean(JsonObject json, String field, boolean fallback) {
+        return json.has(field) && !json.get(field).isJsonNull() ? requireBoolean(json, field) : fallback;
+    }
+
+    private static JsonObject requireObject(JsonObject json, String field) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonObject())
+            throw new IllegalArgumentException("字段 " + field + " 必须是对象");
+        return value.getAsJsonObject();
     }
 
     private final HighPrecisionTimer precisionTimer = new HighPrecisionTimer();
@@ -436,6 +580,7 @@ public class GameServer {
             playerBytesReceivedInInterval.remove(playerId);
             playerSendRateBps.remove(playerId);
             playerReceiveRateBps.remove(playerId);
+            invalidPacketCounts.remove(address);
             gameState.removePlayer(playerId);
             logger.accept("客户端超时: " + address + " (PlayerID: " + playerId + ")");
             broadcastFullUpdate();

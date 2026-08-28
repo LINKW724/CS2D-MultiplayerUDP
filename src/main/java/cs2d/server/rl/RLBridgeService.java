@@ -10,12 +10,17 @@ import com.sun.net.httpserver.HttpServer;
 import cs2d.server.GameState;
 
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.Type;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
@@ -26,38 +31,60 @@ import java.util.concurrent.Executors;
 public class RLBridgeService {
     private final GameState gameState;
     private HttpServer server;
+    private ExecutorService executor;
     private final Gson gson = new GsonBuilder().create();
+    private final String bindHost;
+    private final String authToken;
+    private static final int MAX_REQUEST_BYTES = 1024 * 1024;
 
     // Centralized mailbox for incoming neural network decisions
     private final ConcurrentHashMap<String, RLMacroCommand> rlActionMailbox;
 
-    public RLBridgeService(GameState gameState, ConcurrentHashMap<String, RLMacroCommand> rlActionMailbox) {
+    public RLBridgeService(GameState gameState, ConcurrentHashMap<String, RLMacroCommand> rlActionMailbox,
+            String bindHost, String authToken) {
         this.gameState = gameState;
         this.rlActionMailbox = rlActionMailbox;
+        this.bindHost = bindHost;
+        this.authToken = authToken == null || authToken.isBlank() ? null : authToken;
     }
 
     public void start(int port) {
         try {
-            server = HttpServer.create(new InetSocketAddress(port), 0);
+            InetAddress bindAddress = InetAddress.getByName(bindHost);
+            if (!bindAddress.isLoopbackAddress() && authToken == null) {
+                throw new IllegalStateException("远程 RL 监听必须配置 cs2d.rl.token 或 CS2D_RL_TOKEN");
+            }
+            server = HttpServer.create(new InetSocketAddress(bindAddress, port), 0);
             server.createContext("/step", new StepHandler());
             // [新增] 用于提供地图尺寸边界信息
             server.createContext("/map_info", new HttpHandler() {
                 @Override
                 public void handle(HttpExchange exchange) throws IOException {
+                    if (!authorize(exchange))
+                        return;
+                    if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+                        exchange.sendResponseHeaders(405, -1);
+                        exchange.close();
+                        return;
+                    }
                     // GameState的宽高在初始化大地图时确定 (如果没有public访问，可以在GameState里加getter或直接包内访问)
                     String response = String.format("{ \"width\": %d, \"height\": %d }",
                             gameState.width, gameState.height);
-                    exchange.sendResponseHeaders(200, response.length());
+                    byte[] responseBytes = response.getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+                    exchange.sendResponseHeaders(200, responseBytes.length);
                     OutputStream os = exchange.getResponseBody();
-                    os.write(response.getBytes());
+                    os.write(responseBytes);
                     os.close();
                 }
             });
             // Fast executor for HTTP requests
-            server.setExecutor(Executors.newFixedThreadPool(4));
+            executor = Executors.newFixedThreadPool(4);
+            server.setExecutor(executor);
             server.start();
-            System.out.println("[RLBridge] Started RL Python CTDE Bridge on port " + port);
-        } catch (IOException e) {
+            System.out.println("[RLBridge] Started RL Python CTDE Bridge on " + bindHost + ":" + port);
+        } catch (IOException | IllegalStateException e) {
+            System.err.println("[RLBridge] Failed to start: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -66,6 +93,8 @@ public class RLBridgeService {
         if (server != null) {
             server.stop(0);
         }
+        if (executor != null)
+            executor.shutdownNow();
     }
 
     public RLMacroCommand getCommandForAgent(String agentId) {
@@ -80,11 +109,14 @@ public class RLBridgeService {
     class StepHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
-            if ("POST".equals(exchange.getRequestMethod())) {
-                try (InputStreamReader reader = new InputStreamReader(exchange.getRequestBody())) {
+            if (!authorize(exchange))
+                return;
+            if ("POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+                try {
+                    String requestBody = readLimitedBody(exchange.getRequestBody());
                     Type type = new TypeToken<Map<String, RLMacroCommand>>() {
                     }.getType();
-                    Map<String, RLMacroCommand> incomingActions = gson.fromJson(reader, type);
+                    Map<String, RLMacroCommand> incomingActions = gson.fromJson(requestBody, type);
 
                     if (incomingActions != null) {
                         rlActionMailbox.putAll(incomingActions);
@@ -172,12 +204,16 @@ public class RLBridgeService {
 
                     String response = gson.toJson(observations);
 
-                    exchange.getResponseHeaders().add("Content-Type", "application/json");
-                    exchange.sendResponseHeaders(200, response.getBytes().length);
+                    byte[] responseBytes = response.getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
+                    exchange.sendResponseHeaders(200, responseBytes.length);
 
                     try (OutputStream os = exchange.getResponseBody()) {
-                        os.write(response.getBytes());
+                        os.write(responseBytes);
                     }
+                } catch (RequestTooLargeException e) {
+                    exchange.sendResponseHeaders(413, -1);
+                    exchange.close();
                 } catch (Exception e) {
                     System.err.println("[RLBridge] Malformed JSON from RL agent.");
                     exchange.sendResponseHeaders(400, 0);
@@ -187,5 +223,40 @@ public class RLBridgeService {
                 exchange.sendResponseHeaders(405, -1); // Method Not Allowed
             }
         }
+    }
+
+    private boolean authorize(HttpExchange exchange) throws IOException {
+        if (authToken == null)
+            return true;
+        String supplied = exchange.getRequestHeaders().getFirst("X-CS2D-RL-Token");
+        if (supplied == null) {
+            String authorization = exchange.getRequestHeaders().getFirst("Authorization");
+            if (authorization != null && authorization.startsWith("Bearer "))
+                supplied = authorization.substring(7);
+        }
+        boolean valid = supplied != null && MessageDigest.isEqual(authToken.getBytes(StandardCharsets.UTF_8),
+                supplied.getBytes(StandardCharsets.UTF_8));
+        if (!valid) {
+            exchange.sendResponseHeaders(401, -1);
+            exchange.close();
+        }
+        return valid;
+    }
+
+    private static String readLimitedBody(InputStream input) throws IOException, RequestTooLargeException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        int total = 0;
+        int read;
+        while ((read = input.read(buffer)) != -1) {
+            total += read;
+            if (total > MAX_REQUEST_BYTES)
+                throw new RequestTooLargeException();
+            output.write(buffer, 0, read);
+        }
+        return output.toString(StandardCharsets.UTF_8);
+    }
+
+    private static final class RequestTooLargeException extends Exception {
     }
 }

@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
+import java.util.zip.CRC32;
 
 /**
  * 专职的网络广播器。
@@ -145,15 +146,12 @@ public class NetworkBroadcaster {
 
     public List<String> prepareChunks(String message) {
         try {
-            byte[] compressedBytes;
-            try {
-                compressedBytes = compress(message);
-            } catch (IOException e) {
-                logger.accept("[Broadcaster] GZIP 压缩失败: " + e.getMessage());
-                compressedBytes = message.getBytes(StandardCharsets.UTF_8);
-            }
+            byte[] compressedBytes = compress(message);
 
             String base64Message = Base64.getEncoder().encodeToString(compressedBytes);
+            CRC32 crc32 = new CRC32();
+            crc32.update(compressedBytes);
+            String checksum = Long.toHexString(crc32.getValue());
             final int CHUNK_SIZE = 1024;
             int totalChunks = (int) Math.ceil((double) base64Message.length() / CHUNK_SIZE);
             String messageId = UUID.randomUUID().toString();
@@ -169,6 +167,7 @@ public class NetworkBroadcaster {
                 chunkJson.addProperty("id", messageId);
                 chunkJson.addProperty("index", i);
                 chunkJson.addProperty("total", totalChunks);
+                chunkJson.addProperty("checksum", checksum);
                 chunkJson.addProperty("data", chunkData);
                 preparedChunks.add(gson.toJson(chunkJson));
             }
