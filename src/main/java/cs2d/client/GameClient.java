@@ -72,6 +72,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.CRC32;
 
 import javafx.scene.image.Image;
 import javafx.scene.effect.ColorAdjust;
@@ -142,6 +143,7 @@ public class GameClient extends Application {
     // --- 网络保活追踪 ---
     // 用于保存当前的定时重连句柄以及心跳线程，以防止多次点击导致的并发泄漏
     private java.util.concurrent.ScheduledFuture<?> connectionHandle;
+    private java.util.concurrent.ScheduledFuture<?> staticDataRequestHandle;
     private Thread pingThread;
 
     // public String spectatorTargetId;
@@ -494,7 +496,7 @@ public class GameClient extends Application {
     // 存储所有僵尸的信息
     private final ConcurrentHashMap<String, cs2d.client.GameClient.ClientPlayer> clientZombies = new ConcurrentHashMap<>();
     private volatile JsonObject latestGameState; // 最新的游戏状态快照，volatile保证多线程可见性
-    private String myPlayerId; // 我自己的玩家ID
+    private volatile String myPlayerId; // 我自己的玩家ID，需对握手重试线程立即可见
     private cs2d.client.GameClient.ClientPlayer me; // 对我自己的 ClientPlayer 对象的引用
     private String playerName = "Player"; // 玩家设置的名字
     private final Set<KeyCode> keysDown = new HashSet<>(); // 存储当前按下的所有键盘按键
@@ -784,6 +786,7 @@ public class GameClient extends Application {
 
         // 1. 停止运行标志和循环
         running = false;
+        cancelStaticDataRequests();
         if (gameLoop != null) {
             gameLoop.stop();
         }
@@ -891,11 +894,13 @@ public class GameClient extends Application {
         if (this.socket != null && !this.socket.isClosed()) {
             this.socket.close();
         }
+        this.mapData = null;
 
         // [核心修复] 切断之前残留的定时握手器和心跳线程，防止重开端口导致成倍发送洪水包。
         if (this.connectionHandle != null && !this.connectionHandle.isDone()) {
             this.connectionHandle.cancel(true);
         }
+        cancelStaticDataRequests();
         if (this.pingThread != null && this.pingThread.isAlive()) {
             this.pingThread.interrupt();
         }
@@ -963,6 +968,24 @@ public class GameClient extends Application {
         }
     }
 
+    private synchronized void startStaticDataRequests() {
+        cancelStaticDataRequests();
+        if (mapData != null)
+            return;
+        staticDataRequestHandle = connectionExecutor.scheduleAtFixedRate(() -> {
+            if (running && myPlayerId != null && mapData == null) {
+                sendMessage(createJsonMessage("request_static_data"));
+            }
+        }, 0, 750, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void cancelStaticDataRequests() {
+        if (staticDataRequestHandle != null) {
+            staticDataRequestHandle.cancel(false);
+            staticDataRequestHandle = null;
+        }
+    }
+
     // 监听来自服务器的数据包
     private void listen() {
         // 创建一个足够大的字节数组作为接收缓冲区
@@ -1001,6 +1024,9 @@ public class GameClient extends Application {
     private void startConnectionWatchdog() {
         // 5秒超时（纳秒）
         long disconnectTimeoutNanos = 5_000_000_000L;
+
+        // 即使之后没有新分片到达，也会按 TTL 主动释放不完整缓存。
+        connectionExecutor.scheduleAtFixedRate(this::cleanupExpiredChunkBuffers, 2, 2, TimeUnit.SECONDS);
 
         // 使用 connectionExecutor 安排一个重复执行的任务
         connectionExecutor.scheduleAtFixedRate(() -> {
@@ -1153,19 +1179,42 @@ public class GameClient extends Application {
             int index = getInt(json, "index");
             int total = getInt(json, "total");
             String data = getString(json, "data");
+            String checksum = getString(json, "checksum");
+
+            cleanupExpiredChunkBuffers();
+            if (id == null || id.isBlank() || id.length() > 128
+                    || total < 1 || total > MAX_CHUNK_COUNT
+                    || index < 0 || index >= total
+                    || data == null || data.length() > MAX_CHUNK_DATA_LENGTH
+                    || checksum == null || !checksum.matches("[0-9a-fA-F]{1,16}")) {
+                if (id != null)
+                    chunkBuffers.remove(id);
+                System.err.println("[CLIENT] 丢弃无效 UDP 分片");
+                return;
+            }
+
+            if (!chunkBuffers.containsKey(id) && chunkBuffers.size() >= MAX_CHUNK_BUFFERS) {
+                evictOldestChunkBuffer();
+            }
 
             // 获取或为此消息ID创建一个缓冲区
             cs2d.client.GameClient.ChunkBuffer buffer = chunkBuffers.computeIfAbsent(id,
-                    k -> new cs2d.client.GameClient.ChunkBuffer(total));
+                    k -> new cs2d.client.GameClient.ChunkBuffer(total, checksum));
+
+            if (!buffer.matches(total, checksum)) {
+                chunkBuffers.remove(id, buffer);
+                System.err.println("[CLIENT] 丢弃元数据冲突的 UDP 分片: " + id);
+                return;
+            }
 
             // 添加分片并检查消息是否完整
             boolean isComplete = buffer.addChunk(index, data);
 
             if (isComplete) {
                 // 如果完整，获取完整的消息并递归处理它
-                String fullMessage = buffer.getFullMessage();
                 chunkBuffers.remove(id); // 清理缓冲区
                 try {
+                    String fullMessage = buffer.getFullMessage();
                     // 解析重组后的消息并再次调用此处理程序
                     // [修改] 递归调用时也传递 String
                     // JsonObject fullJson = gson.fromJson(fullMessage, JsonObject.class); // [旧]
@@ -1194,6 +1243,7 @@ public class GameClient extends Application {
                     System.err.println("[CLIENT DEBUG] ERROR: Handling 'map_data' but received null JSON!");
                 }
                 this.mapData = json; // 更新本地地图数据
+                cancelStaticDataRequests();
                 initializeQuadtree();
                 perfTimeMsg_MapData += (System.nanoTime() - mapStartTime); // 累加 [M4]
                 break;
@@ -1242,12 +1292,17 @@ public class GameClient extends Application {
 
             case "initialInfo": // 如果是服务器发送的初始信息
                 myPlayerId = getString(json, "playerId"); // 获取并保存我自己的玩家ID
+                if (myPlayerId == null || myPlayerId.isBlank()) {
+                    System.err.println("[CLIENT] 丢弃缺少 playerId 的 initialInfo");
+                    break;
+                }
                 setClientState(cs2d.client.GameClient.ClientState.LOBBY); // 将客户端状态切换到大厅
                 connectionStatusLabel.setText("Connection Successful!"); // 更新连接状态标签
                 nameSelectionPane.setVisible(true); // 显示名字选择界面
                 teamSelectionPane.setVisible(false); // 隐藏队伍选择界面
                 populateTeamSelection(getString(json, "mode")); // 根据游戏模式填充队伍选择界面
-                sendMessage(createJsonMessage("request_static_data")); // 静态墙壁数据请求
+                sendMessage(createJsonMessage("welcome_ack", "playerId", myPlayerId));
+                startStaticDataRequests();
                 break;
 
             case "server_info": // [新增] 处理发现的服务器信息
@@ -7112,6 +7167,11 @@ public class GameClient extends Application {
          */
         synchronized void updateDynamic(JsonObject data) {
 
+            boolean packetHasX = data.has("x") && data.get("x").isJsonPrimitive()
+                    && data.getAsJsonPrimitive("x").isNumber();
+            boolean packetHasY = data.has("y") && data.get("y").isJsonPrimitive()
+                    && data.getAsJsonPrimitive("y").isNumber();
+
             // [!! GC 修复 !!]
             // 我们现在不再创建深拷贝 (deepCopy)，
             // 因为整个方法是 synchronized 的，所以我们可以安全地
@@ -7143,8 +7203,17 @@ public class GameClient extends Application {
                 }
             }
             // 立即同步关键变量
-            this.targetX = getDouble(this.data, "x");
-            this.targetY = getDouble(this.data, "y");
+            // small_update 不带坐标；不能用合并对象中的旧 x/y 反复覆盖预测目标。
+            if (packetHasX) {
+                double incomingX = getDouble(data, "x");
+                if (Double.isFinite(incomingX))
+                    this.targetX = incomingX;
+            }
+            if (packetHasY) {
+                double incomingY = getDouble(data, "y");
+                if (Double.isFinite(incomingY))
+                    this.targetY = incomingY;
+            }
             this.vx = getDouble(this.data, "vx");
             this.vy = getDouble(this.data, "vy");
             this.health = getDouble(this.data, "health");
@@ -8581,6 +8650,8 @@ public class GameClient extends Application {
         if (compressedData == null || compressedData.length == 0) {
             return new byte[0];
         }
+        if (compressedData.length > MAX_COMPRESSED_MESSAGE_BYTES)
+            throw new IOException("压缩消息超过大小限制");
         // 1. 用压缩数据创建一个字节数组输入流
         ByteArrayInputStream bis = new ByteArrayInputStream(compressedData);
         // 2. 用 GZIP 输入流包裹它
@@ -8589,8 +8660,12 @@ public class GameClient extends Application {
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
         byte[] buffer = new byte[1024]; // 缓冲区
         int len;
+        int total = 0;
         // 4. 循环读取解压后的数据
         while ((len = gis.read(buffer)) != -1) {
+            total += len;
+            if (total > MAX_DECOMPRESSED_MESSAGE_BYTES)
+                throw new IOException("解压消息超过大小限制");
             bos.write(buffer, 0, len);
         }
         // 5. 关闭流
@@ -8605,17 +8680,45 @@ public class GameClient extends Application {
      * Key: 大消息的唯一ID。
      * Value: 一个包含分片数组和接收计数器的对象。
      */
+    private static final int MAX_CHUNK_COUNT = 8192;
+    private static final int MAX_CHUNK_DATA_LENGTH = 1200;
+    private static final int MAX_CHUNK_BUFFERS = 128;
+    private static final int MAX_COMPRESSED_MESSAGE_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_DECOMPRESSED_MESSAGE_BYTES = 32 * 1024 * 1024;
+    private static final long CHUNK_TTL_NANOS = TimeUnit.SECONDS.toNanos(5);
     private final Map<String, cs2d.client.GameClient.ChunkBuffer> chunkBuffers = new ConcurrentHashMap<>();
+
+    private void cleanupExpiredChunkBuffers() {
+        long now = System.nanoTime();
+        chunkBuffers.entrySet().removeIf(entry -> entry.getValue().isExpired(now));
+    }
+
+    private void evictOldestChunkBuffer() {
+        chunkBuffers.entrySet().stream()
+                .min(Comparator.comparingLong(entry -> entry.getValue().createdAtNanos))
+                .ifPresent(entry -> chunkBuffers.remove(entry.getKey(), entry.getValue()));
+    }
 
     /**
      * 用于管理单个分片消息重组的辅助类。
      */
     private static class ChunkBuffer {
         final String[] chunks;
+        final String checksum;
+        final long createdAtNanos = System.nanoTime();
         int receivedCount = 0;
 
-        ChunkBuffer(int total) {
+        ChunkBuffer(int total, String checksum) {
             this.chunks = new String[total];
+            this.checksum = checksum.toLowerCase(Locale.ROOT);
+        }
+
+        boolean matches(int total, String candidateChecksum) {
+            return chunks.length == total && checksum.equalsIgnoreCase(candidateChecksum);
+        }
+
+        boolean isExpired(long nowNanos) {
+            return nowNanos - createdAtNanos > CHUNK_TTL_NANOS;
         }
 
         /**
@@ -8625,7 +8728,9 @@ public class GameClient extends Application {
          * @param data  此分片的 Base64 编码数据。
          * @return 如果所有分片都已收到，则返回 true，否则返回 false。
          */
-        boolean addChunk(int index, String data) {
+        synchronized boolean addChunk(int index, String data) {
+            if (index < 0 || index >= chunks.length || data == null || data.length() > MAX_CHUNK_DATA_LENGTH)
+                return false;
             if (chunks[index] == null) {
                 chunks[index] = data;
                 receivedCount++;
@@ -8639,24 +8744,31 @@ public class GameClient extends Application {
          *
          * @return 重组后的 JSON 字符串。
          */
-        String getFullMessage() {
+        synchronized String getFullMessage() throws IOException {
+            if (receivedCount != chunks.length)
+                throw new IOException("分片尚未接收完整");
             // 将所有 Base64 字符串连接在一起 (这现在是 *压缩后* 的Base64)
             String fullCompressedBase64 = String.join("", chunks);
+            if (fullCompressedBase64.length() > (MAX_COMPRESSED_MESSAGE_BYTES * 4L / 3L) + 4)
+                throw new IOException("Base64 分片消息超过大小限制");
 
             // 将 Base64 解码回 *压缩* 的字节数组
-            byte[] compressedData = Base64.getDecoder().decode(fullCompressedBase64);
-
+            byte[] compressedData;
             try {
-                // 使用 GZIP 解压缩字节数组
-                byte[] decompressedData = decompress(compressedData);
-                // 将解压后的字节转换回原始 JSON 字符串
-                return new String(decompressedData, StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                System.err.println("GZIP 解压分片消息失败: " + e.getMessage());
-                // 备用方案：如果解压失败，尝试将其作为未压缩数据处理
-                // 这可以防止在服务器更新、客户端未更新时完全崩溃
-                return new String(compressedData, StandardCharsets.UTF_8);
+                compressedData = Base64.getDecoder().decode(fullCompressedBase64);
+            } catch (IllegalArgumentException e) {
+                throw new IOException("Base64 分片数据无效", e);
             }
+            if (compressedData.length > MAX_COMPRESSED_MESSAGE_BYTES)
+                throw new IOException("压缩消息超过大小限制");
+
+            CRC32 crc32 = new CRC32();
+            crc32.update(compressedData);
+            if (!Long.toHexString(crc32.getValue()).equalsIgnoreCase(checksum))
+                throw new IOException("分片 CRC 校验失败");
+
+            byte[] decompressedData = decompress(compressedData);
+            return new String(decompressedData, StandardCharsets.UTF_8);
         }
 
     }
