@@ -10,6 +10,8 @@ public class HighPrecisionTimer {
 
     private static final long SPIN_THRESHOLD_NS = 2_000_000; // 2ms
     private static final long PARK_BUFFER_NS = 500_000; // 0.5ms缓冲
+    private static final long MAX_PARK_OVERSHOOT_NS = 20_000_000; // 防止异常采样无限放大补偿
+    private volatile long observedParkOvershootNs;
 
     /**
      * 极高精度的休眠阻断 - 修复原文漏洞
@@ -21,14 +23,21 @@ public class HighPrecisionTimer {
 
         // 1. 系统休眠让出 CPU (阻塞阶段)
         while ((remainingNs = targetTimeNs - System.nanoTime()) > SPIN_THRESHOLD_NS) {
-            // 动态调整缓冲时间，防止 Windows 调度器超期休眠
-            long parkTime = Math.max(1, remainingNs - SPIN_THRESHOLD_NS - PARK_BUFFER_NS);
+            // Windows 的 parkNanos 可能按约 15.625ms 粒度唤醒。先扣除已观测到的超休眠，
+            // 如果本帧预算不足，则跳过 park，直接进入精确自旋，避免 120TPS 退化到约 64Hz。
+            long parkTime = calculateParkTimeNs(remainingNs, observedParkOvershootNs);
+            if (parkTime <= 0)
+                break;
+            long parkStartedAt = System.nanoTime();
             LockSupport.parkNanos(parkTime);
+            long actualParkTime = System.nanoTime() - parkStartedAt;
+            long overshoot = Math.max(0, actualParkTime - parkTime);
+            if (overshoot > observedParkOvershootNs)
+                observedParkOvershootNs = Math.min(overshoot, MAX_PARK_OVERSHOOT_NS);
 
             // 检查线程是否被中断
-            if (Thread.interrupted()) {
-                break; // 让外部调用者检测 interupt 或者由外层循环决定
-            }
+            if (Thread.currentThread().isInterrupted())
+                break;
         }
 
         // 2. 高精度自旋阶段 - 关键修复！
@@ -40,6 +49,11 @@ public class HighPrecisionTimer {
                 break;
             }
         }
+    }
+
+    static long calculateParkTimeNs(long remainingNs, long observedOvershootNs) {
+        long compensatedOvershoot = Math.max(0, Math.min(observedOvershootNs, MAX_PARK_OVERSHOOT_NS));
+        return Math.max(0, remainingNs - SPIN_THRESHOLD_NS - PARK_BUFFER_NS - compensatedOvershoot);
     }
 
     /**

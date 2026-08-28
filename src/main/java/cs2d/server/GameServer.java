@@ -579,6 +579,8 @@ public class GameServer {
     private final HighPrecisionTimer precisionTimer = new HighPrecisionTimer();
     private long frameTimeSum = 0;
     private int frameCount = 0;
+    private long tickWorkTimeSum = 0;
+    private int tickWorkCount = 0;
     private long lastMonitorTime = System.nanoTime();
     private long lastFrameTimeMonitor = System.nanoTime();
 
@@ -590,14 +592,18 @@ public class GameServer {
 
         if (currentTime - lastMonitorTime >= 5_000_000_000L) {
             double avgFrameTime = (double) frameTimeSum / frameCount / 1_000_000.0;
+            double avgTickWorkTime = tickWorkCount == 0 ? 0.0
+                    : (double) tickWorkTimeSum / tickWorkCount / 1_000_000.0;
             double targetFrameTime = 1000.0 / TPS;
             double deviation = avgFrameTime - targetFrameTime;
 
-            System.out.printf("性能监控: 平均帧时间 %.3f ms, 目标 %.3f ms, 偏差 %.3f ms\n",
-                    avgFrameTime, targetFrameTime, deviation);
+            System.out.printf("性能监控: 平均循环间隔 %.3f ms, 平均Tick工作耗时 %.3f ms, 目标 %.3f ms, 间隔偏差 %.3f ms\n",
+                    avgFrameTime, avgTickWorkTime, targetFrameTime, deviation);
 
             frameTimeSum = 0;
             frameCount = 0;
+            tickWorkTimeSum = 0;
+            tickWorkCount = 0;
             lastMonitorTime = currentTime;
         }
     }
@@ -621,11 +627,14 @@ public class GameServer {
             lastFrameTime = currentTime;
 
             while (delta >= 1) {
+                long tickWorkStartedAt = System.nanoTime();
                 drainGameCommands();
                 gameState.update();
                 delta -= 1;
                 if (networkBroadcaster != null)
                     networkBroadcaster.broadcast();
+                tickWorkTimeSum += System.nanoTime() - tickWorkStartedAt;
+                tickWorkCount++;
                 consecutiveSkippedFrames = 0;
             }
 
