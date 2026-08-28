@@ -389,9 +389,7 @@ public class GameServer {
                 enqueueGameCommand(() -> gameState.playerRequestPing(playerId, position));
                 break;
             case "requestControlBot":
-                if (json.has("targetId") && !json.get("targetId").isJsonNull())
-                    requireString(json, "targetId", MAX_STRING_FIELD_LENGTH);
-                JsonObject controlRequest = json.deepCopy();
+                JsonObject controlRequest = validateControlBotRequest(json);
                 enqueueGameCommand(() -> gameState.playerRequestControlBot(playerId, controlRequest));
                 break;
             case "ping":
@@ -521,6 +519,26 @@ public class GameServer {
         if (result < min || result > max)
             throw new IllegalArgumentException("字段 " + field + " 超出范围");
         return result;
+    }
+
+    /**
+     * targetId 是可选字段。旧客户端在 TDM 死亡观战时会发送空字符串，语义等同于
+     * “未指定目标”，服务端应继续执行寻找同队可用 BOT 的后备策略。
+     */
+    static JsonObject validateControlBotRequest(JsonObject json) {
+        JsonObject validated = new JsonObject();
+        JsonElement target = json.get("targetId");
+        if (target == null || target.isJsonNull())
+            return validated;
+        if (!target.isJsonPrimitive() || !target.getAsJsonPrimitive().isString())
+            throw new IllegalArgumentException("字段 targetId 必须是字符串");
+        String targetId = target.getAsString().trim();
+        if (targetId.isEmpty())
+            return validated;
+        if (targetId.length() > MAX_STRING_FIELD_LENGTH)
+            throw new IllegalArgumentException("字段 targetId 长度超限");
+        validated.addProperty("targetId", targetId);
+        return validated;
     }
 
     private static double requireFiniteDouble(JsonObject json, String field) {

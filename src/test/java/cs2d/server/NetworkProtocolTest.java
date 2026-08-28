@@ -9,6 +9,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NetworkProtocolTest {
     private final Gson gson = new Gson();
@@ -56,5 +57,38 @@ class NetworkProtocolTest {
         assertEquals(3, GameServer.requireCompatibleInt(legacy, "slot", 1, 10));
         assertThrows(IllegalArgumentException.class,
                 () -> GameServer.requireCompatibleInt(decimal, "slot", 1, 10));
+    }
+
+    @Test
+    void blankControlTargetFallsBackInsteadOfBecomingInvalidPacket() {
+        JsonObject blank = new JsonObject();
+        blank.addProperty("targetId", "");
+        JsonObject missing = new JsonObject();
+        JsonObject explicit = new JsonObject();
+        explicit.addProperty("targetId", "bot-7");
+        JsonObject invalid = new JsonObject();
+        invalid.addProperty("targetId", 7);
+
+        assertFalse(GameServer.validateControlBotRequest(blank).has("targetId"));
+        assertFalse(GameServer.validateControlBotRequest(missing).has("targetId"));
+        assertEquals("bot-7",
+                GameServer.validateControlBotRequest(explicit).get("targetId").getAsString());
+        assertThrows(IllegalArgumentException.class,
+                () -> GameServer.validateControlBotRequest(invalid));
+    }
+
+    @Test
+    void smallUpdateCarriesBotControlLifecycleState() {
+        JsonObject deadSpectator = new JsonObject();
+        GameState.addControlStateToSmallUpdate(deadSpectator, false, "TEAM_SPECTATE", null);
+        assertFalse(deadSpectator.get("isAlive").getAsBoolean());
+        assertEquals("TEAM_SPECTATE", deadSpectator.get("spectatorMode").getAsString());
+        assertTrue(deadSpectator.get("spectatorTargetId").isJsonNull());
+
+        JsonObject controlling = new JsonObject();
+        GameState.addControlStateToSmallUpdate(controlling, true, "CONTROLLING_BOT", "bot-7");
+        assertTrue(controlling.get("isAlive").getAsBoolean());
+        assertEquals("CONTROLLING_BOT", controlling.get("spectatorMode").getAsString());
+        assertEquals("bot-7", controlling.get("spectatorTargetId").getAsString());
     }
 }

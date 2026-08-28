@@ -4613,6 +4613,7 @@ public class GameState {
             pJson.addProperty("vy", dataSource.vy);
             pJson.addProperty("angle", dataSource.angle);
             pJson.addProperty("health", dataSource.health);
+            addControlStateToSmallUpdate(pJson, dataSource.isAlive(), p.spectatorMode, p.spectatorTargetId);
             pJson.addProperty("isShooting", dataSource.isShooting);
             pJson.addProperty("isReloading", dataSource.isReloading);
             pJson.addProperty("predictedRecoilAngle", dataSource.predictedRecoilAngle);
@@ -4646,6 +4647,14 @@ public class GameState {
         serializeThrownGrenades(state);
 
         return state; // 返回小包JSON对象。
+    }
+
+    static void addControlStateToSmallUpdate(JsonObject target, boolean isAlive, String spectatorMode,
+            String spectatorTargetId) {
+        target.addProperty("isAlive", isAlive);
+        target.addProperty("spectatorMode", spectatorMode);
+        // addProperty 会把 null 序列化为 JsonNull，以便客户端清除旧观战目标。
+        target.addProperty("spectatorTargetId", spectatorTargetId);
     }
 
     /**
