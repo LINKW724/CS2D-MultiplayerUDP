@@ -1317,14 +1317,7 @@ public class GameClient extends Application {
                 if (!acceptStatePacket(json))
                     break;
                 long smallUpStartTime = System.nanoTime();
-                final JsonObject finalJsonSmall = json.deepCopy();
-                JsonObject fullSnapshot = latestFullGameState;
-                if (fullSnapshot != null) {
-                    if (fullSnapshot.has("smokePuffs"))
-                        finalJsonSmall.add("smokePuffs", fullSnapshot.get("smokePuffs").deepCopy());
-                    if (fullSnapshot.has("firePatches"))
-                        finalJsonSmall.add("firePatches", fullSnapshot.get("firePatches").deepCopy());
-                }
+                final JsonObject finalJsonSmall = mergeMissingStateFields(latestFullGameState, json);
                 this.latestGameState = finalJsonSmall;
                 // [修复] 提交到专用线程池，而不是 new Thread
                 stateUpdateExecutor.submit(() -> {
@@ -1580,6 +1573,21 @@ public class GameClient extends Application {
             previous = lastStateSequence.get();
         }
         return false;
+    }
+
+    /**
+     * 小状态包只携带高频动态字段。保留其新值，同时从最近完整快照补回 mode、roundPhase、
+     * 炸弹状态等缺失字段，避免按键和 HUD 在两个完整快照之间失去运行上下文。
+     */
+    static JsonObject mergeMissingStateFields(JsonObject fullSnapshot, JsonObject incrementalSnapshot) {
+        JsonObject merged = incrementalSnapshot == null ? new JsonObject() : incrementalSnapshot.deepCopy();
+        if (fullSnapshot == null)
+            return merged;
+        for (Map.Entry<String, JsonElement> entry : fullSnapshot.entrySet()) {
+            if (!merged.has(entry.getKey()))
+                merged.add(entry.getKey(), entry.getValue().deepCopy());
+        }
+        return merged;
     }
 
     // 触发闪光弹效果
@@ -5301,7 +5309,7 @@ public class GameClient extends Application {
 
         if (nextSlot != -1) {
             this.predictedSlot = nextSlot; // <-- 在这里添加预测！
-            sendMessage(createJsonMessage("switchToSlot", "slot", String.valueOf(nextSlot)));
+            sendMessage(createSlotSwitchMessage(nextSlot));
         }
 
     }
@@ -5321,16 +5329,21 @@ public class GameClient extends Application {
             switch (event.getCode()) {
                 // 处理切换武器和道具的逻辑
                 case DIGIT1 -> {
-                    sendMessage(createJsonMessage("switchToSlot", "slot", "1"));
+                    sendMessage(createSlotSwitchMessage(1));
                     predictedWeaponKey = null; // 切换到主武器时，清除投掷物预测
 
                     predictedSlot = 1;
                 }
                 case DIGIT2 -> {
-                    sendMessage(createJsonMessage("switchToSlot", "slot", "2"));
-                    predictedWeaponKey = null; // 切换到主武器时，清除投掷物预测
+                    sendMessage(createSlotSwitchMessage(2));
+                    predictedWeaponKey = null;
 
-                    predictedSlot = 1;
+                    predictedSlot = 2;
+                }
+                case DIGIT3 -> {
+                    sendMessage(createSlotSwitchMessage(3));
+                    predictedWeaponKey = null;
+                    predictedSlot = 3;
                 }
 
                 case DIGIT4 -> cycleToNextGrenade(); // 切换到下一个道具
@@ -5898,6 +5911,14 @@ public class GameClient extends Application {
         addProtocolMetadata(obj);
         for (int i = 0; i < keyVals.length; i += 2)
             obj.addProperty(keyVals[i], keyVals[i + 1]);
+        return gson.toJson(obj);
+    }
+
+    private String createSlotSwitchMessage(int slot) {
+        JsonObject obj = new JsonObject();
+        obj.addProperty("type", "switchToSlot");
+        addProtocolMetadata(obj);
+        obj.addProperty("slot", slot);
         return gson.toJson(obj);
     }
 

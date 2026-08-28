@@ -79,6 +79,22 @@ class GameClientProtocolTest {
         assertEquals(5, after.get("vx").getAsInt());
     }
 
+    @Test
+    void smallStateKeepsFullStateContextWithoutOverwritingNewValues() {
+        JsonObject full = new JsonObject();
+        full.addProperty("mode", "DEMOLITION");
+        full.addProperty("roundPhase", "IN_PROGRESS");
+        full.addProperty("bombTimer", 30_000);
+
+        JsonObject small = new JsonObject();
+        small.addProperty("bombTimer", 29_500);
+        JsonObject merged = GameClient.mergeMissingStateFields(full, small);
+
+        assertEquals("DEMOLITION", merged.get("mode").getAsString());
+        assertEquals("IN_PROGRESS", merged.get("roundPhase").getAsString());
+        assertEquals(29_500, merged.get("bombTimer").getAsInt());
+    }
+
     private static JsonObject state(String sessionId, long sequence) {
         JsonObject state = new JsonObject();
         state.addProperty("protocolVersion", 2);
