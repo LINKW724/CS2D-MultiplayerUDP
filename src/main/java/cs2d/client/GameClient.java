@@ -67,6 +67,8 @@ import java.util.concurrent.*;
 // 导入 Java 的函数式接口类
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 // 导入 Java 的 Stream API 类，用于数据流处理
 import java.util.stream.Collectors;
@@ -392,6 +394,7 @@ public class GameClient extends Application {
     private static final int INPUT_SEND_RATE = 120;
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
+    static final int FOV_RAY_COUNT = 106 * 4;
     private static final int MAX_NETWORK_MESSAGES_PER_RENDER_FRAME = 512;
 
     // --- JavaFX UI 元素 ---
@@ -438,6 +441,8 @@ public class GameClient extends Application {
         t.setDaemon(true); // 设为守护线程
         return t;
     });
+    private final AtomicReference<cs2d.client.GameClient.FovRequest> pendingFovRequest = new AtomicReference<>();
+    private final AtomicBoolean fovWorkerRunning = new AtomicBoolean(false);
     // 一个专用的 handleServerMessage 单线程池
     private final ExecutorService stateUpdateExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "State-Update-Thread");
@@ -513,11 +518,6 @@ public class GameClient extends Application {
 
     /** [1] 性能日志间隔内的FOV计算耗时 (纳秒) */
     private double perfTimeFovCalc = 0;
-    /** [1a] 性能日志间隔内的 FOV-Quadtree查询 耗时 (纳秒) */
-    private double perfTimeFovQuery = 0;
-    /** [1b] 性能日志间隔内的 FOV-边缘提取 耗时 (纳秒) */
-    private double perfTimeFovEdgeExtract = 0;
-    /** [1c] 性能日志间隔内的 FOV-交点计算 耗时 (纳秒) */
     /** [L1] 逻辑 - 发送输入耗时 */
     private double perfTimeLogic_SendInput = 0;
     /** [L2] 逻辑 - 插值/平滑耗时 (玩家/僵尸/手雷) */
@@ -527,7 +527,21 @@ public class GameClient extends Application {
 
     /** 性能日志间隔内的总帧数 */
     private int perfFrameCount = 0;
-    private double perfTimeFovIntersection = 0;
+    // 后台 FOV 多维度监控；LongAdder 避免计算线程与 JavaFX 线程争用。
+    private final LongAdder fovRequestCount = new LongAdder();
+    private final LongAdder fovCalculationCount = new LongAdder();
+    private final LongAdder fovPublishedCount = new LongAdder();
+    private final LongAdder fovPendingReplacementCount = new LongAdder();
+    private final LongAdder fovStaleResultCount = new LongAdder();
+    private final LongAdder fovTotalCalculationNanos = new LongAdder();
+    private final LongAdder fovQueryNanos = new LongAdder();
+    private final LongAdder fovEdgeExtractNanos = new LongAdder();
+    private final LongAdder fovIntersectionNanos = new LongAdder();
+    private final LongAdder fovCandidateObstacleCount = new LongAdder();
+    private final LongAdder fovRawVertexCount = new LongAdder();
+    private final LongAdder fovFinalVertexCount = new LongAdder();
+    private final AtomicLong fovMaxCalculationNanos = new AtomicLong();
+    private final AtomicLong fovLatestFinalVertexCount = new AtomicLong();
 
     /** [2] (这个不再直接累加，而是由 2a, 2b, 2c 相加得出) */
     // private double perfTimeWorldDraw = 0; // 我们不再需要这个总的累加器
@@ -558,14 +572,8 @@ public class GameClient extends Application {
     /** [M5] Events (声音/击杀) 耗时 */
     private double perfTimeMsg_Events = 0;
 
-    // --- [新] FOV 优化变量 ---
-    /** 帧计数器，用于决定何时更新 FOV */
-    // 用于防止 FOV 队列爆炸和 OOM 的并发锁
-    private final AtomicBoolean isFovCalculating = new AtomicBoolean(false);
-    private int fovUpdateCounter = 0;
+    // --- FOV 优化变量 ---
     private AnimationTimer gameLoop; // 管理游戏循环的 AnimationTimer
-    /** 每 N 帧更新一次 FOV。(例如: 3 = 120fps/3 = 40Hz FOV) */
-    private final int FOV_UPDATE_RATE = 3;
 
     // --- 渲染与相机 ---
     // 游戏镜头对象，用于控制视野
@@ -2085,6 +2093,22 @@ public class GameClient extends Application {
                         double avgHud = (perfTimeHudDraw / perfFrameCount) / 1_000_000.0;
                         double avgTotalDraw = (perfTimeTotalDraw / perfFrameCount) / 1_000_000.0; // 这个是 draw() 的总耗时
 
+                        long fovRequests = fovRequestCount.sumThenReset();
+                        long fovCalculations = fovCalculationCount.sumThenReset();
+                        long fovPublished = fovPublishedCount.sumThenReset();
+                        long fovPendingReplaced = fovPendingReplacementCount.sumThenReset();
+                        long fovStaleResults = fovStaleResultCount.sumThenReset();
+                        long fovTotalNanos = fovTotalCalculationNanos.sumThenReset();
+                        long fovQueryTotal = fovQueryNanos.sumThenReset();
+                        long fovEdgeTotal = fovEdgeExtractNanos.sumThenReset();
+                        long fovIntersectionTotal = fovIntersectionNanos.sumThenReset();
+                        long fovCandidateTotal = fovCandidateObstacleCount.sumThenReset();
+                        long fovRawVertices = fovRawVertexCount.sumThenReset();
+                        long fovFinalVertices = fovFinalVertexCount.sumThenReset();
+                        long fovMaxNanos = fovMaxCalculationNanos.getAndSet(0);
+                        double fovBackgroundAvgMs = fovCalculations == 0 ? 0.0
+                                : fovTotalNanos / (double) fovCalculations / 1_000_000.0;
+
                         // --- 最终的性能报告 ---
                         System.out.println("--- 客户端性能 (最终诊断) (每 ~2s 更新) ---");
                         System.out.printf("  [A] 帧间总耗时 (Real FPS Time): \t%.3f ms (约 %d FPS)\n", avg_A_TotalFrameTime,
@@ -2104,6 +2128,20 @@ public class GameClient extends Application {
                         System.out.printf("          [2] 世界渲染: \t\t%.3f ms\n", avgWorld);
                         System.out.printf("          [3] 迷雾绘制: \t\t%.3f ms\n", avgFog);
                         System.out.printf("          [4] HUD 绘制: \t\t%.3f ms\n", avgHud);
+                        System.out.printf("  [FOV-BG] 请求 %d | 实算 %d | 发布 %d | 待算覆盖 %d | 过期结果 %d\n",
+                                fovRequests, fovCalculations, fovPublished, fovPendingReplaced, fovStaleResults);
+                        System.out.printf("           后台耗时 avg %.3f ms / max %.3f ms"
+                                        + " | 查询 %.3f ms | 边提取 %.3f ms | 求交 %.3f ms\n",
+                                fovBackgroundAvgMs, fovMaxNanos / 1_000_000.0,
+                                fovCalculations == 0 ? 0.0 : fovQueryTotal / (double) fovCalculations / 1_000_000.0,
+                                fovCalculations == 0 ? 0.0 : fovEdgeTotal / (double) fovCalculations / 1_000_000.0,
+                                fovCalculations == 0 ? 0.0
+                                        : fovIntersectionTotal / (double) fovCalculations / 1_000_000.0);
+                        System.out.printf("           候选障碍 avg %.1f | 顶点 avg %.1f -> %.1f | 最新发布顶点 %d\n",
+                                fovCalculations == 0 ? 0.0 : fovCandidateTotal / (double) fovCalculations,
+                                fovCalculations == 0 ? 0.0 : fovRawVertices / (double) fovCalculations,
+                                fovCalculations == 0 ? 0.0 : fovFinalVertices / (double) fovCalculations,
+                                fovLatestFinalVertexCount.get());
                         System.out.println("  --- (消息处理 [M] 的详细分解) ---");
                         System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
                         System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
@@ -2118,9 +2156,6 @@ public class GameClient extends Application {
 
                         perfTimeTotalDraw = 0;
                         perfTimeFovCalc = 0;
-                        perfTimeFovQuery = 0;
-                        perfTimeFovEdgeExtract = 0;
-                        perfTimeFovIntersection = 0;
                         perfTimeDrawWorld_Obstacles = 0;
                         perfTimeDrawWorld_Entities = 0;
                         perfTimeDrawWorld_VFX = 0;
@@ -2261,15 +2296,17 @@ public class GameClient extends Application {
         perfFrameCount++; // 帧计数+1，用于计算平均值
     }
 
-    /**
-     * [已修改] 此方法现在运行在 UI 线程 (AnimationTimer) 中。
-     * 它不再进行计算，而是将计算任务提交到 fovExecutor (后台线程)。
-     */
-    private void calculateFOVIfNeeded() {
-        // [旧的“跳帧”逻辑已被移除，我们现在每帧都提交任务]
-        // fovUpdateCounter++;
-        // if (fovUpdateCounter < FOV_UPDATE_RATE) { ... }
+    private record FovRequest(Point2D sourcePos, Point2D lookAtPos, double sourceAngle,
+            List<JsonObject> dynamicObstacles) {
+    }
 
+    private record FovComputationResult(List<Point2D> points, long totalNanos, long queryNanos,
+            long edgeExtractNanos, long intersectionNanos, int candidateObstacles,
+            int rawVertices, int finalVertices) {
+    }
+
+    /** JavaFX线程只发布最新视角；单一后台worker顺序计算，并自动跳过中间过期请求。 */
+    private void calculateFOVIfNeeded() {
         cs2d.client.GameClient.ClientPlayer fovSource = null; // 视野的来源 (玩家自己、观战目标或夺舍的Bot)
 
         // --- 1. 确定视野源 (逻辑不变) ---
@@ -2307,10 +2344,6 @@ public class GameClient extends Application {
             return; // 跳过计算
         }
 
-        // 更新缓存的位置
-        lastPlayerPosForFOV = sourcePos;
-        lastMousePosForFOV = lookAtPos;
-
         // --- 5. 收集动态障碍物 (逻辑不变) ---
         List<JsonObject> dynamicObstacles = new ArrayList<>();
         smokePuffs.values().forEach(smokePuff -> {
@@ -2324,25 +2357,63 @@ public class GameClient extends Application {
             dynamicObstacles.add(smokeObstacle);
         });
 
-        // --- 6. [核心修改] 提交 FOV 任务到后台线程 ---
-        // fovPoints = calculateFOV(sourcePos, fovSource.angle, dynamicObstacles); //
-        // [旧] 阻塞 UI 线程
+        FovRequest request = new FovRequest(sourcePos, lookAtPos, fovSource.angle,
+                List.copyOf(dynamicObstacles));
+        FovRequest replaced = pendingFovRequest.getAndSet(request);
+        fovRequestCount.increment();
+        if (replaced != null)
+            fovPendingReplacementCount.increment();
 
-        // [新] 立即返回，不阻塞 UI 线程
-        final double sourceAngle = fovSource.angle; // 必须是 final 才能传入 lambda
+        // 只有请求真正进入latest-wins邮箱后才更新缓存，避免快速转头时把未计算角度误标为已完成。
+        lastPlayerPosForFOV = sourcePos;
+        lastMousePosForFOV = lookAtPos;
+        ensureFovWorkerRunning();
+    }
 
-        // [修复：加入 AtomicBoolean 丢弃策略，防治队列爆炸与 OOM 内存泄漏]
-        if (isFovCalculating.compareAndSet(false, true)) {
-            fovExecutor.submit(() -> {
-                try {
-                    // 这段代码将在 "FOV-Calculator-Thread" 上运行
-                    calculateAndSetFOV(sourcePos, sourceAngle, dynamicObstacles);
-                } finally {
-                    // 计算完毕，释放锁，允许下一帧再次提交计算
-                    isFovCalculating.set(false);
-                }
-            });
+    private void ensureFovWorkerRunning() {
+        if (!fovWorkerRunning.compareAndSet(false, true))
+            return;
+        try {
+            fovExecutor.execute(this::drainLatestFovRequests);
+        } catch (RejectedExecutionException ignored) {
+            fovWorkerRunning.set(false);
         }
+    }
+
+    private void drainLatestFovRequests() {
+        try {
+            FovRequest request;
+            while ((request = pendingFovRequest.getAndSet(null)) != null) {
+                FovComputationResult result = computeFov(request);
+                recordFovComputation(result);
+
+                // 计算期间若又来了更新角度，只保留最新请求，旧结果不再让迷雾短暂回跳。
+                if (pendingFovRequest.get() == null) {
+                    fovPoints = result.points();
+                    fovPublishedCount.increment();
+                    fovLatestFinalVertexCount.set(result.finalVertices());
+                } else {
+                    fovStaleResultCount.increment();
+                }
+            }
+        } finally {
+            fovWorkerRunning.set(false);
+            // 处理“读到空邮箱”和“worker置空”之间刚到达的请求。
+            if (pendingFovRequest.get() != null)
+                ensureFovWorkerRunning();
+        }
+    }
+
+    private void recordFovComputation(FovComputationResult result) {
+        fovCalculationCount.increment();
+        fovTotalCalculationNanos.add(result.totalNanos());
+        fovQueryNanos.add(result.queryNanos());
+        fovEdgeExtractNanos.add(result.edgeExtractNanos());
+        fovIntersectionNanos.add(result.intersectionNanos());
+        fovCandidateObstacleCount.add(result.candidateObstacles());
+        fovRawVertexCount.add(result.rawVertices());
+        fovFinalVertexCount.add(result.finalVertices());
+        fovMaxCalculationNanos.accumulateAndGet(result.totalNanos(), Math::max);
     }
 
     /**
@@ -7497,16 +7568,20 @@ public class GameClient extends Application {
      * @param sourceAngle      视野源角度
      * @param dynamicObstacles 动态障碍物 (如烟雾)
      */
-    private void calculateAndSetFOV(Point2D sourcePos, double sourceAngle, List<JsonObject> dynamicObstacles) {
+    private FovComputationResult computeFov(FovRequest request) {
+        long totalStartTime = System.nanoTime();
+        Point2D sourcePos = request.sourcePos();
+        double sourceAngle = request.sourceAngle();
+        List<JsonObject> dynamicObstacles = request.dynamicObstacles();
         final double fovRadians = Math.toRadians(106.0); // FOV 106
 
-        final int NUM_FOV_RAYS = 106 * 4; // X 条射线
+        final int NUM_FOV_RAYS = FOV_RAY_COUNT; // 保持原有424条射线精度
 
         final double RAY_LENGTH = 8000.0;
         final double angleStep = fovRadians / (NUM_FOV_RAYS - 1);
         final double startAngle = sourceAngle - fovRadians / 2.0;
 
-        List<Point2D> newFovPolygon = new ArrayList<>();
+        List<Point2D> newFovPolygon = new ArrayList<>(NUM_FOV_RAYS + 1);
         newFovPolygon.add(sourcePos);
 
         // --- 计时器（用于日志） ---
@@ -7519,6 +7594,7 @@ public class GameClient extends Application {
         for (JsonObject dynObs : dynamicObstacles) {
             dynamicEdges.addAll(extractEdgesFromObstacle(dynObs));
         }
+        double[] dynamicEdgeCoordinates = flattenEdgeCoordinates(dynamicEdges);
         frameEdgeExtractTime += (System.nanoTime() - extractStartTime);
 
         // [性能修复] 1. 一次性查询 FOV 区域的所有静态障碍物
@@ -7533,68 +7609,83 @@ public class GameClient extends Application {
         frameQueryTime += (System.nanoTime() - queryStartTime);
 
         long intersectStartTime = System.nanoTime();
+        final double sourceX = sourcePos.getX();
+        final double sourceY = sourcePos.getY();
         for (int i = 0; i < NUM_FOV_RAYS; i++) {
             double currentAngle = startAngle + i * angleStep;
-            Point2D rayEnd = new Point2D(sourcePos.getX() + RAY_LENGTH * Math.cos(currentAngle),
-                    sourcePos.getY() + RAY_LENGTH * Math.sin(currentAngle));
-            Point2D closestHit = rayEnd;
-            double minDistanceSq = Double.POSITIVE_INFINITY;
+            double rayDirectionX = Math.cos(currentAngle);
+            double rayDirectionY = Math.sin(currentAngle);
+            double closestDistance = RAY_LENGTH;
 
-            // [性能修复] 2. 遍历预查询的候选者
+            // 使用预缓存的原始double边坐标，避免每条射线/每次命中创建临时Point2D。
             for (cs2d.client.GameClient.StaticObstacle obs : candidateStaticObstacles) {
-                List<Point2D[]> lines = obs.edges;
-                for (Point2D[] line : lines) {
-                    Point2D hit = getLineIntersection(sourcePos, rayEnd, line[0], line[1]);
-                    if (hit != null) {
-                        double dx = hit.getX() - sourcePos.getX();
-                        double dy = hit.getY() - sourcePos.getY();
-                        double distSq = dx * dx + dy * dy;
-                        if (distSq < minDistanceSq && distSq > 1e-6) {
-                            minDistanceSq = distSq;
-                            closestHit = hit;
-                        }
-                    }
+                double[] edges = obs.edgeCoordinates;
+                for (int edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 4) {
+                    double hitDistance = raySegmentIntersectionDistance(sourceX, sourceY,
+                            rayDirectionX, rayDirectionY, closestDistance,
+                            edges[edgeIndex], edges[edgeIndex + 1], edges[edgeIndex + 2], edges[edgeIndex + 3]);
+                    if (hitDistance < closestDistance)
+                        closestDistance = hitDistance;
                 }
             }
 
-            // 检查 *动态* 障碍物的边缘
-            for (Point2D[] line : dynamicEdges) {
-                Point2D hit = getLineIntersection(sourcePos, rayEnd, line[0], line[1]);
-                if (hit != null) {
-                    double dx = hit.getX() - sourcePos.getX();
-                    double dy = hit.getY() - sourcePos.getY();
-                    double distSq = dx * dx + dy * dy;
-                    if (distSq < minDistanceSq && distSq > 1e-6) {
-                        minDistanceSq = distSq;
-                        closestHit = hit;
-                    }
-                }
+            for (int edgeIndex = 0; edgeIndex < dynamicEdgeCoordinates.length; edgeIndex += 4) {
+                double hitDistance = raySegmentIntersectionDistance(sourceX, sourceY,
+                        rayDirectionX, rayDirectionY, closestDistance,
+                        dynamicEdgeCoordinates[edgeIndex], dynamicEdgeCoordinates[edgeIndex + 1],
+                        dynamicEdgeCoordinates[edgeIndex + 2], dynamicEdgeCoordinates[edgeIndex + 3]);
+                if (hitDistance < closestDistance)
+                    closestDistance = hitDistance;
             }
 
-            newFovPolygon.add(closestHit);
+            newFovPolygon.add(new Point2D(sourceX + rayDirectionX * closestDistance,
+                    sourceY + rayDirectionY * closestDistance));
         } // 结束射线循环
 
         frameIntersectionTime += (System.nanoTime() - intersectStartTime);
+        int rawVertexCount = newFovPolygon.size();
 
         // [性能修复] 3. 开启多边形抽稀减轻 Canvas 绘制负担 (1.0° 角度容差)
         newFovPolygon = simplifyPolygon(newFovPolygon, Math.toRadians(1.0));
 
-        // 将计算结果写回 volatile 变量，
-        // 这样 UI 线程在下一帧就能读到它
-        // 在赋值给全局变量之前，过滤掉密集锯齿顶点 (10.0 是像素阈值，可调)
-        // newFovPolygon = simplifyPolygon(newFovPolygon, 0.05);
-        this.fovPoints = newFovPolygon;
+        long totalNanos = System.nanoTime() - totalStartTime;
+        return new FovComputationResult(Collections.unmodifiableList(newFovPolygon), totalNanos,
+                frameQueryTime, frameEdgeExtractTime, frameIntersectionTime,
+                candidateStaticObstacles.size(), rawVertexCount, newFovPolygon.size());
+    }
 
-        // [关键] 我们仍然需要累加日志，但现在必须用 Platform.runLater
-        // 把累加任务扔回 UI 线程，以避免线程安全问题
-        long finalFrameQueryTime = frameQueryTime;
-        long finalFrameEdgeExtractTime = frameEdgeExtractTime;
-        long finalFrameIntersectionTime = frameIntersectionTime;
-        Platform.runLater(() -> {
-            perfTimeFovQuery += finalFrameQueryTime;
-            perfTimeFovEdgeExtract += finalFrameEdgeExtractTime;
-            perfTimeFovIntersection += finalFrameIntersectionTime;
-        });
+    private static double[] flattenEdgeCoordinates(List<Point2D[]> edges) {
+        double[] coordinates = new double[edges.size() * 4];
+        int index = 0;
+        for (Point2D[] edge : edges) {
+            coordinates[index++] = edge[0].getX();
+            coordinates[index++] = edge[0].getY();
+            coordinates[index++] = edge[1].getX();
+            coordinates[index++] = edge[1].getY();
+        }
+        return coordinates;
+    }
+
+    /** 返回射线起点到交点的距离；不相交时返回正无穷。 */
+    static double raySegmentIntersectionDistance(double originX, double originY,
+            double directionX, double directionY, double maxDistance,
+            double segmentStartX, double segmentStartY, double segmentEndX, double segmentEndY) {
+        double segmentX = segmentEndX - segmentStartX;
+        double segmentY = segmentEndY - segmentStartY;
+        double denominator = directionX * segmentY - directionY * segmentX;
+        if (denominator == 0.0)
+            return Double.POSITIVE_INFINITY;
+
+        double offsetX = segmentStartX - originX;
+        double offsetY = segmentStartY - originY;
+        double rayDistance = (offsetX * segmentY - offsetY * segmentX) / denominator;
+        double segmentParameter = (offsetX * directionY - offsetY * directionX) / denominator;
+        // 与旧算法保持一致：端点接触不算穿过，且必须落在有限射线内部。
+        if (rayDistance > 0.0 && rayDistance < maxDistance
+                && segmentParameter > 0.0 && segmentParameter < 1.0) {
+            return rayDistance;
+        }
+        return Double.POSITIVE_INFINITY;
     }
 
     // 没什么用
@@ -10070,11 +10161,14 @@ public class GameClient extends Application {
         final Rectangle2D bounds;
         /** 障碍物的预计算边缘，用于 FOV 计算 (calculateFOV) */
         final List<Point2D[]> edges;
+        /** 同一批边的原始坐标缓存，供高频射线求交使用，避免临时对象分配。 */
+        final double[] edgeCoordinates;
 
         StaticObstacle(JsonObject originalJson, Rectangle2D bounds, List<Point2D[]> edges) {
             this.originalJson = originalJson;
             this.bounds = bounds;
             this.edges = edges;
+            this.edgeCoordinates = flattenEdgeCoordinates(edges);
         }
     }
 }

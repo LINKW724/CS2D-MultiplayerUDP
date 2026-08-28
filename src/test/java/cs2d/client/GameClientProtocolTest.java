@@ -10,6 +10,11 @@ import java.lang.reflect.Method;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.util.Collections;
+import java.util.List;
+
+import javafx.geometry.Point2D;
+import javafx.geometry.Rectangle2D;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,6 +22,28 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameClientProtocolTest {
+    @Test
+    void fovOptimizationPreservesRayPrecisionAndIntersectionGeometry() {
+        assertEquals(424, GameClient.FOV_RAY_COUNT);
+
+        double distance = GameClient.raySegmentIntersectionDistance(
+                0, 0, 1, 0, 100,
+                10, -5, 10, 5);
+        assertEquals(10.0, distance, 1.0e-9);
+        assertTrue(Double.isInfinite(GameClient.raySegmentIntersectionDistance(
+                0, 0, 1, 0, 100,
+                -10, -5, -10, 5)));
+
+        List<Point2D[]> edges = Collections.singletonList(new Point2D[] {
+                new Point2D(1, 2), new Point2D(3, 4)
+        });
+        GameClient.StaticObstacle obstacle = new GameClient.StaticObstacle(
+                new JsonObject(), new Rectangle2D(1, 2, 2, 2), edges);
+        assertEquals(4, obstacle.edgeCoordinates.length);
+        assertEquals(1.0, obstacle.edgeCoordinates[0]);
+        assertEquals(4.0, obstacle.edgeCoordinates[3]);
+    }
+
     @Test
     @SuppressWarnings({ "rawtypes", "unchecked" })
     void gameOverLocksTheSharedScoreboardInFinalMode() throws Exception {
