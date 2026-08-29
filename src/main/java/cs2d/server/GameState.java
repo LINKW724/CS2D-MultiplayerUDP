@@ -212,6 +212,7 @@ public class GameState {
     private String roundWinReason = ""; // 当前回合胜利的原因。
     private long roundEndTime = 0; // 当前回合结束的时间戳。
     private final List<DroppedItem> droppedItems = new CopyOnWriteArrayList<>(); // 存储地图上所有掉落物品的线程安全列表。
+    static final long SELF_DROP_PICKUP_COOLDOWN_MS = 2_000L;
 
     private void addDroppedItem(DroppedItem item) {
         if (item == null)
@@ -419,9 +420,15 @@ public class GameState {
         int currentAmmo; // 如果是武器，则存储当前弹匣中的弹药量。
         int reserveAmmo; // 如果是武器，则存储备用弹药量。
         long dropTime; // 物品被丢弃时的时间戳。
+        final String dropperPlayerId; // 主动扔枪者；死亡掉落和地图生成物为null。
 
         // 武器构造函数
         DroppedItem(Weapon weapon, Point2D.Double position, int currentAmmo, int reserveAmmo) {
+            this(weapon, position, currentAmmo, reserveAmmo, null);
+        }
+
+        DroppedItem(Weapon weapon, Point2D.Double position, int currentAmmo, int reserveAmmo,
+                String dropperPlayerId) {
             this.id = UUID.randomUUID(); // 为物品生成一个唯一的ID。
             this.weapon = weapon; // 设置武器类型。
             this.position = position; // 设置物品位置。
@@ -429,6 +436,7 @@ public class GameState {
             this.currentAmmo = currentAmmo; // 设置当前弹药。
             this.reserveAmmo = reserveAmmo; // 设置备用弹药。
             this.dropTime = System.currentTimeMillis(); // 记录当前时间为丢弃时间。
+            this.dropperPlayerId = dropperPlayerId;
         }
 
         // C4构造函数
@@ -438,6 +446,7 @@ public class GameState {
             this.position = position; // 设置物品位置。
             this.isBomb = true; // 明确这是一个C4炸弹。
             this.dropTime = System.currentTimeMillis(); // 记录当前时间为丢弃时间。
+            this.dropperPlayerId = null;
         }
 
         // 将掉落物品的信息转换为JSON对象 -> 发送给客户端。
@@ -3194,7 +3203,7 @@ public class GameState {
 
             // 在游戏世界中创建掉落物实体，并记录武器当前的弹药
             addDroppedItem(new DroppedItem(droppedWeapon, dropPos, actionTarget.primary_currentAmmo,
-                    actionTarget.primary_reserveAmmo));
+                    actionTarget.primary_reserveAmmo, actionTarget.id));
 
             // 从玩家（或AI）的物品栏中移除主武器
             actionTarget.primaryWeapon = null;
@@ -5163,6 +5172,15 @@ public class GameState {
             return;
         }
 
+        long now = System.currentTimeMillis();
+        if (!canPlayerPickupDroppedWeapon(item, playerId, now)) {
+            long remainingMillis = Math.max(0L,
+                    SELF_DROP_PICKUP_COOLDOWN_MS - (now - item.dropTime));
+            logger.accept(player.name + " 暂时不能捡回自己刚扔出的 " + item.weapon.name()
+                    + " (剩余 " + remainingMillis + "ms). ");
+            return;
+        }
+
         if (player.position.distance(item.position) < 160) {
             // 如果玩家已经有主武器了，先把它扔掉
             if (player.primaryWeapon != null) {
@@ -5752,6 +5770,14 @@ public class GameState {
         return this.isAiFrozen;
     }
 
+    static boolean canPlayerPickupDroppedWeapon(DroppedItem item, String playerId, long nowMillis) {
+        if (item == null || item.isBomb || item.weapon == null)
+            return false;
+        if (item.dropperPlayerId == null || !item.dropperPlayerId.equals(playerId))
+            return true;
+        return nowMillis - item.dropTime >= SELF_DROP_PICKUP_COOLDOWN_MS;
+    }
+
     /** AI 在手动冻结、回合结束或整场比赛结束时都不得继续产生新动作。 */
     public boolean shouldFreezeAi() {
         return shouldFreezeAiState(this.isAiFrozen, this.isGameOver, this.roundPhase);
@@ -5945,16 +5971,18 @@ public class GameState {
             }
 
             // 处理物品拾取
+            long pickupCheckTime = System.currentTimeMillis();
             for (DroppedItem item : new CopyOnWriteArrayList<>(droppedItems)) {
-                if (p.position.distance(item.position) < Player.SIZE
-                        && System.currentTimeMillis() - item.dropTime > 500) {
-                    if (item.isBomb && p.team == Player.Team.T && !p.hasBomb) {
+                if (p.position.distance(item.position) < Player.SIZE) {
+                    if (item.isBomb && pickupCheckTime - item.dropTime > 500
+                            && p.team == Player.Team.T && !p.hasBomb) {
                         p.hasBomb = true;
                         droppedItems.remove(item);
                         logger.accept(p.name + " picked up the C4");
                         break;
                     } else if (!item.isBomb && item.weapon != null && !item.weapon.getWeaponType().isPistol()
-                            && p.primaryWeapon == null) {
+                            && p.primaryWeapon == null
+                            && canPlayerPickupDroppedWeapon(item, p.id, pickupCheckTime)) {
                         playerPickupDroppedWeapon(p.id, item.id.toString());
                         break;
                     }
