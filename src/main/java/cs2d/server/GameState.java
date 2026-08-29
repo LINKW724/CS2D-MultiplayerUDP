@@ -3769,11 +3769,11 @@ public class GameState {
                 break; // 结束射线检测
             }
 
-            // 统一穿透计算
-            // 检查子弹是否有足够的穿透力穿过这个 "厚度"
-            if (remainingPenetration >= objectThickness) {
+            // 统一穿透计算：判定和扣除必须使用同一个“穿透力”单位。
+            double penetrationCost = objectThickness * weapon.penetrationCostPerPixel();
+            if (remainingPenetration >= penetrationCost) {
                 // 可以穿透：消耗穿透力和伤害
-                remainingPenetration -= objectThickness * weapon.penetrationCostPerPixel();
+                remainingPenetration -= penetrationCost;
                 currentDamage = (initialPenetrationPower > 0)
                         ? weapon.damage * (remainingPenetration / initialPenetrationPower)
                         : 0;
@@ -4333,45 +4333,98 @@ public class GameState {
         return new Point2D.Double(width / 2.0, 50); // 返回一个默认点。
     }
 
-    // 计算一条直线与一个任意形状的所有交点。
+    private static final double LINE_INTERSECTION_EPSILON = 1.0e-8;
+
+    /**
+     * 返回线段从起点向终点经过的第一段“实体形状”区间。
+     *
+     * <p>不能简单取最近的两个边交点：穿过多边形顶点时相邻边会产生重复交点，
+     * 凹多边形可能有四个以上交点，而线段起点位于形状内部时只有一个出口交点。
+     * 这里先对边界参数去重，再用每个相邻区间的中点确认该区间是否真的位于填充区域内。</p>
+     */
     public static Point2D.Double[] getLineShapeIntersections(Line2D.Double line, Shape shape) {
-        // 获取形状的路径迭代器，用于遍历形状的每一条边。
-        PathIterator pathIterator = shape.getPathIterator(null, 1.0);
-        List<Point2D.Double> intersections = new ArrayList<>(); // 存储所有交点。
-        double[] coords = new double[6]; // 用于存储从迭代器获取的坐标数据。
-        double lastX = 0, lastY = 0, moveX = 0, moveY = 0; // 用于记录路径的上一个点和起始点。
-        while (!pathIterator.isDone()) { // 当迭代器还没遍历完所有边时。
-            int type = pathIterator.currentSegment(coords); // 获取当前段的类型和坐标。
-            if (type == PathIterator.SEG_MOVETO) { // 如果是“移动到”操作。
-                moveX = lastX = coords[0]; // 记录起始点和上一个点。
+        if (line == null || shape == null)
+            return null;
+
+        double dx = line.x2 - line.x1;
+        double dy = line.y2 - line.y1;
+        if (dx * dx + dy * dy <= LINE_INTERSECTION_EPSILON * LINE_INTERSECTION_EPSILON)
+            return null;
+        Rectangle2D bounds = shape.getBounds2D();
+        if (!bounds.intersectsLine(line) && !bounds.contains(line.x1, line.y1))
+            return null;
+
+        List<Double> boundaryParameters = new ArrayList<>();
+        PathIterator pathIterator = shape.getPathIterator(null, 0.25);
+        double[] coords = new double[6];
+        double lastX = 0, lastY = 0, moveX = 0, moveY = 0;
+        boolean hasCurrentSubpath = false;
+
+        while (!pathIterator.isDone()) {
+            int type = pathIterator.currentSegment(coords);
+            if (type == PathIterator.SEG_MOVETO) {
+                moveX = lastX = coords[0];
                 moveY = lastY = coords[1];
-            } else if (type == PathIterator.SEG_LINETO) { // 如果是“画线到”操作。
-                // 计算输入直线与当前形状的边（从lastX,lastY到coords[0],coords[1]）的交点。
-                Point2D intersection = getLineLineIntersectionPoint(line,
-                        new Line2D.Double(lastX, lastY, coords[0], coords[1]));
-                if (intersection != null) // 如果有交点。
-                    intersections.add(new Point2D.Double(intersection.getX(), intersection.getY())); // 添加到列表。
-                lastX = coords[0]; // 更新上一个点。
+                hasCurrentSubpath = true;
+            } else if (type == PathIterator.SEG_LINETO && hasCurrentSubpath) {
+                addSegmentIntersectionParameter(line, lastX, lastY, coords[0], coords[1], boundaryParameters);
+                lastX = coords[0];
                 lastY = coords[1];
-            } else if (type == PathIterator.SEG_CLOSE) { // 如果是“闭合路径”操作。
-                // 计算输入直线与形状的最后一条边（从上一个点到起始点）的交点。
-                Point2D intersection = getLineLineIntersectionPoint(line,
-                        new Line2D.Double(lastX, lastY, moveX, moveY));
-                if (intersection != null) // 如果有交点。
-                    intersections.add(new Point2D.Double(intersection.getX(), intersection.getY())); // 添加到列表。
-                lastX = moveX; // 更新上一个点。
+            } else if (type == PathIterator.SEG_CLOSE && hasCurrentSubpath) {
+                addSegmentIntersectionParameter(line, lastX, lastY, moveX, moveY, boundaryParameters);
+                lastX = moveX;
                 lastY = moveY;
             }
-            pathIterator.next(); // 移动到下一段。
+            pathIterator.next();
         }
-        if (intersections.isEmpty())
-            return null; // 如果没有交点，返回null。
-        // 按交点到直线起点的距离进行排序。
-        intersections.sort(Comparator.comparingDouble(p -> line.getP1().distanceSq(p)));
-        if (intersections.size() == 1)
-            return new Point2D.Double[] { intersections.get(0), intersections.get(0) }; // 如果只有一个交点，返回两次。
-        // 返回距离最近和最远的两个交点，即射线的入口点和出口点。
-        return new Point2D.Double[] { intersections.get(0), intersections.get(1) };
+
+        boundaryParameters.sort(Double::compareTo);
+        List<Double> breakpoints = new ArrayList<>(boundaryParameters.size() + 2);
+        breakpoints.add(0.0);
+        for (double parameter : boundaryParameters) {
+            double clamped = Math.max(0.0, Math.min(1.0, parameter));
+            double previous = breakpoints.get(breakpoints.size() - 1);
+            if (clamped - previous > LINE_INTERSECTION_EPSILON && clamped < 1.0 - LINE_INTERSECTION_EPSILON)
+                breakpoints.add(clamped);
+        }
+        if (1.0 - breakpoints.get(breakpoints.size() - 1) > LINE_INTERSECTION_EPSILON)
+            breakpoints.add(1.0);
+
+        for (int i = 0; i + 1 < breakpoints.size(); i++) {
+            double entryParameter = breakpoints.get(i);
+            double exitParameter = breakpoints.get(i + 1);
+            if (exitParameter - entryParameter <= LINE_INTERSECTION_EPSILON)
+                continue;
+
+            double midpoint = (entryParameter + exitParameter) * 0.5;
+            if (shape.contains(line.x1 + dx * midpoint, line.y1 + dy * midpoint)) {
+                return new Point2D.Double[] {
+                        new Point2D.Double(line.x1 + dx * entryParameter, line.y1 + dy * entryParameter),
+                        new Point2D.Double(line.x1 + dx * exitParameter, line.y1 + dy * exitParameter)
+                };
+            }
+        }
+        return null;
+    }
+
+    private static void addSegmentIntersectionParameter(Line2D.Double line, double edgeX1, double edgeY1,
+            double edgeX2, double edgeY2, List<Double> parameters) {
+        double rayX = line.x2 - line.x1;
+        double rayY = line.y2 - line.y1;
+        double edgeX = edgeX2 - edgeX1;
+        double edgeY = edgeY2 - edgeY1;
+        double denominator = rayX * edgeY - rayY * edgeX;
+        if (Math.abs(denominator) <= LINE_INTERSECTION_EPSILON)
+            return;
+
+        double offsetX = edgeX1 - line.x1;
+        double offsetY = edgeY1 - line.y1;
+        double rayParameter = (offsetX * edgeY - offsetY * edgeX) / denominator;
+        double edgeParameter = (offsetX * rayY - offsetY * rayX) / denominator;
+        if (rayParameter >= -LINE_INTERSECTION_EPSILON && rayParameter <= 1.0 + LINE_INTERSECTION_EPSILON
+                && edgeParameter >= -LINE_INTERSECTION_EPSILON && edgeParameter <= 1.0 + LINE_INTERSECTION_EPSILON) {
+            parameters.add(rayParameter);
+        }
     }
 
     // 计算两条线段的交点。
