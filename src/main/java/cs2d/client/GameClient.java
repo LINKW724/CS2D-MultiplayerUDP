@@ -449,6 +449,14 @@ public class GameClient extends Application {
         t.setDaemon(true);
         return t;
     });
+    /** 性能报告在后台格式化和输出，IDEA控制台变慢时不能阻塞JavaFX帧线程。 */
+    private final ExecutorService diagnosticsExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Client-Diagnostics-Thread");
+        t.setDaemon(true);
+        return t;
+    });
+    /** 状态线程只发刷新信号；JavaFX帧边界合并消费，避免120Hz runLater任务堆积。 */
+    private final AtomicBoolean buyMenuRefreshPending = new AtomicBoolean(false);
     // 用于处理连接和重连的定时任务执行器
     private final ScheduledExecutorService connectionExecutor = Executors.newSingleThreadScheduledExecutor();
 
@@ -578,6 +586,9 @@ public class GameClient extends Application {
 
     // --- FOV 优化变量 ---
     private AnimationTimer gameLoop; // 管理游戏循环的 AnimationTimer
+    /** HUD由唯一游戏帧循环驱动，避免匿名AnimationTimer在界面重建后残留。 */
+    private Runnable hudFrameUpdater = () -> {
+    };
 
     // --- 渲染与相机 ---
     // 游戏镜头对象，用于控制视野
@@ -1894,10 +1905,7 @@ public class GameClient extends Application {
             });
         }
 
-        Platform.runLater(() -> {
-            if (buyMenuPane != null && buyMenuPane.isVisible())
-                updateBuyMenuUI();
-        });
+        buyMenuRefreshPending.set(true);
     }
 
     // 发送消息到服务器
@@ -1934,8 +1942,6 @@ public class GameClient extends Application {
             private long lastInputSendTime = 0; // 记录上一次发送输入的时间
             private final long inputInterval = 1_000_000_000L / INPUT_SEND_RATE;
             private long lastPerfLogTime = 0; // 用于 2 秒性能日志
-            private final RenderFrameScheduler renderScheduler =
-                    new RenderFrameScheduler(TARGET_RENDER_RATE);
             private final FramePacingMonitor framePacingMonitor =
                     new FramePacingMonitor(TARGET_RENDER_RATE, TARGET_RENDER_RATE * 4);
 
@@ -1949,9 +1955,8 @@ public class GameClient extends Application {
             // AnimationTimer 的核心方法，每帧执行
             @Override
             public void handle(long now) {
-                // JavaFX fullspeed pulse只提供高分辨率时钟；真正绘制由客户端精确限制到目标刷新率。
-                if (!renderScheduler.shouldRender(now))
-                    return;
+                // ClientMain 已把 JavaFX Pulse 设置为目标刷新率。每个Pulse直接绘制，
+                // 避免同频的第二层截止时间过滤因亚毫秒抖动误跳过整个下一帧。
 
                 // [新增] 局域网服务器发现广播
                 if (serverBrowserPane != null && serverBrowserPane.isVisible()) {
@@ -1975,6 +1980,10 @@ public class GameClient extends Application {
 
                 // 在渲染帧边界应用网络状态。服务器仍保持120Hz，渲染不会被网络包到达时刻驱动。
                 drainNetworkMessagesForRenderFrame();
+                if (buyMenuRefreshPending.getAndSet(false)
+                        && buyMenuPane != null && buyMenuPane.isVisible()) {
+                    updateBuyMenuUI();
+                }
 
                 // ----------------------------------------------------
                 // --- (你所有的游戏逻辑和渲染) ---
@@ -2016,6 +2025,7 @@ public class GameClient extends Application {
                 long hudLogicStartTime = System.nanoTime();
                 updateAndCleanKillFeed();
                 triggerDamageLogDisplayIfNeeded();
+                hudFrameUpdater.run();
                 perfTimeLogic_HUDLogic += (System.nanoTime() - hudLogicStartTime);
 
                 // --- 状态检查 (死亡/复活/观战) ---
@@ -2123,49 +2133,51 @@ public class GameClient extends Application {
                         long fovRawVertices = fovRawVertexCount.sumThenReset();
                         long fovFinalVertices = fovFinalVertexCount.sumThenReset();
                         long fovMaxNanos = fovMaxCalculationNanos.getAndSet(0);
+                        long fovLatestVertices = fovLatestFinalVertexCount.get();
                         double fovBackgroundAvgMs = fovCalculations == 0 ? 0.0
                                 : fovTotalNanos / (double) fovCalculations / 1_000_000.0;
 
-                        // --- 最终的性能报告 ---
-                        System.out.println("--- 客户端性能 (最终诊断) (每 ~2s 更新) ---");
-                        System.out.printf("  [A] 帧间总耗时 (Real FPS Time): \t%.3f ms (约 %d FPS)\n", avg_A_TotalFrameTime,
-                                (int) (1000.0 / avg_A_TotalFrameTime));
-                        System.out.printf("  [B] 帧内代码 (Code in handle()): \t%.3f ms\n", avg_B_OnFrameCodeTime);
-                        System.out.printf("  [M] 消息处理 (handleServerMessage): \t%.3f ms\n", avg_M_Total);
-                        System.out.printf("  [P] 帧调度/呈现等待 (A - B): \t%.3f ms\n", avgFramePacingWait);
-                        System.out.printf("  [REAL] 目标 %d Hz | 实际 %.1f FPS | 1%% Low %.1f FPS | p99 %.3f ms | 最大 %.3f ms | 严重迟帧 %d/%d\n",
-                                TARGET_RENDER_RATE, pacing.observedFps(), pacing.onePercentLowFps(),
-                                pacing.p99Millis(), pacing.maxMillis(), pacing.severelyLateFrames(),
-                                pacing.sampleCount());
-                        System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
-                        System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
-                        System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
-                        System.out.println("  --- (渲染 [R] 的详细分解) ---");
-                        System.out.printf("          [1] FOV计算: \t\t%.3f ms\n", avgFov);
-                        System.out.printf("          [2] 世界渲染: \t\t%.3f ms\n", avgWorld);
-                        System.out.printf("          [3] 迷雾绘制: \t\t%.3f ms\n", avgFog);
-                        System.out.printf("          [4] HUD 绘制: \t\t%.3f ms\n", avgHud);
-                        System.out.printf("  [FOV-BG] 请求 %d | 实算 %d | 发布 %d | 待算覆盖 %d | 过期结果 %d\n",
-                                fovRequests, fovCalculations, fovPublished, fovPendingReplaced, fovStaleResults);
-                        System.out.printf("           后台耗时 avg %.3f ms / max %.3f ms"
-                                        + " | 查询 %.3f ms | 边提取 %.3f ms | 求交 %.3f ms\n",
-                                fovBackgroundAvgMs, fovMaxNanos / 1_000_000.0,
-                                fovCalculations == 0 ? 0.0 : fovQueryTotal / (double) fovCalculations / 1_000_000.0,
-                                fovCalculations == 0 ? 0.0 : fovEdgeTotal / (double) fovCalculations / 1_000_000.0,
-                                fovCalculations == 0 ? 0.0
-                                        : fovIntersectionTotal / (double) fovCalculations / 1_000_000.0);
-                        System.out.printf("           候选障碍 avg %.1f | 顶点 avg %.1f -> %.1f | 最新发布顶点 %d\n",
-                                fovCalculations == 0 ? 0.0 : fovCandidateTotal / (double) fovCalculations,
-                                fovCalculations == 0 ? 0.0 : fovRawVertices / (double) fovCalculations,
-                                fovCalculations == 0 ? 0.0 : fovFinalVertices / (double) fovCalculations,
-                                fovLatestFinalVertexCount.get());
-                        System.out.println("  --- (消息处理 [M] 的详细分解) ---");
-                        System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
-                        System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
-                        System.out.printf("      [M3] Chunk: \t\t%.3f ms\n", avg_M3_Chunk);
-                        System.out.printf("      [M4] Map Data: \t\t%.3f ms\n", avg_M4_Map);
-                        System.out.printf("      [M5] Events: \t\t%.3f ms\n", avg_M5_Events);
-                        System.out.println("----------------------------------------");
+                        diagnosticsExecutor.execute(() -> {
+                            System.out.println("--- 客户端性能 (最终诊断) (每 ~2s 更新) ---");
+                            System.out.printf("  [A] 帧间总耗时 (Real FPS Time): \t%.3f ms (约 %d FPS)\n", avg_A_TotalFrameTime,
+                                    (int) (1000.0 / avg_A_TotalFrameTime));
+                            System.out.printf("  [B] 帧内代码 (Code in handle()): \t%.3f ms\n", avg_B_OnFrameCodeTime);
+                            System.out.printf("  [M] 消息处理 (handleServerMessage): \t%.3f ms\n", avg_M_Total);
+                            System.out.printf("  [P] JavaFX Pulse/呈现间隔 (A - B): \t%.3f ms\n", avgFramePacingWait);
+                            System.out.printf("  [REAL] 目标 %d Hz | 实际 %.1f FPS | 1%% Low %.1f FPS | p99 %.3f ms | 最大 %.3f ms | 严重迟帧 %d/%d\n",
+                                    TARGET_RENDER_RATE, pacing.observedFps(), pacing.onePercentLowFps(),
+                                    pacing.p99Millis(), pacing.maxMillis(), pacing.severelyLateFrames(),
+                                    pacing.sampleCount());
+                            System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
+                            System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
+                            System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
+                            System.out.println("  --- (渲染 [R] 的详细分解) ---");
+                            System.out.printf("          [1] FOV计算: \t\t%.3f ms\n", avgFov);
+                            System.out.printf("          [2] 世界渲染: \t\t%.3f ms\n", avgWorld);
+                            System.out.printf("          [3] 迷雾绘制: \t\t%.3f ms\n", avgFog);
+                            System.out.printf("          [4] HUD 绘制: \t\t%.3f ms\n", avgHud);
+                            System.out.printf("  [FOV-BG] 请求 %d | 实算 %d | 发布 %d | 待算覆盖 %d | 过期结果 %d\n",
+                                    fovRequests, fovCalculations, fovPublished, fovPendingReplaced, fovStaleResults);
+                            System.out.printf("           后台耗时 avg %.3f ms / max %.3f ms"
+                                            + " | 查询 %.3f ms | 边提取 %.3f ms | 求交 %.3f ms\n",
+                                    fovBackgroundAvgMs, fovMaxNanos / 1_000_000.0,
+                                    fovCalculations == 0 ? 0.0 : fovQueryTotal / (double) fovCalculations / 1_000_000.0,
+                                    fovCalculations == 0 ? 0.0 : fovEdgeTotal / (double) fovCalculations / 1_000_000.0,
+                                    fovCalculations == 0 ? 0.0
+                                            : fovIntersectionTotal / (double) fovCalculations / 1_000_000.0);
+                            System.out.printf("           候选障碍 avg %.1f | 顶点 avg %.1f -> %.1f | 最新发布顶点 %d\n",
+                                    fovCalculations == 0 ? 0.0 : fovCandidateTotal / (double) fovCalculations,
+                                    fovCalculations == 0 ? 0.0 : fovRawVertices / (double) fovCalculations,
+                                    fovCalculations == 0 ? 0.0 : fovFinalVertices / (double) fovCalculations,
+                                    fovLatestVertices);
+                            System.out.println("  --- (消息处理 [M] 的详细分解) ---");
+                            System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
+                            System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
+                            System.out.printf("      [M3] Chunk: \t\t%.3f ms\n", avg_M3_Chunk);
+                            System.out.printf("      [M4] Map Data: \t\t%.3f ms\n", avg_M4_Map);
+                            System.out.printf("      [M5] Events: \t\t%.3f ms\n", avg_M5_Events);
+                            System.out.println("----------------------------------------");
+                        });
 
                         // 重置所有累加器
                         perfTime_A_TotalFrameTime = 0;
@@ -7173,20 +7185,7 @@ public class GameClient extends Application {
         hudPane.getChildren().addAll(
                 topLeft, topRight, bottomLeft, center,
                 interactionBarContainer, damageLogDisplayBox);
-        new AnimationTimer() {
-            private final RenderFrameScheduler hudScheduler =
-                    new RenderFrameScheduler(TARGET_RENDER_RATE);
-
-            @Override
-            public void handle(long now) {
-                // fullspeed Pulse只作为高分辨率时钟，HUD同样限制在客户端渲染频率，
-                // 避免无意义地以约1000Hz刷新控件。
-                if (!hudScheduler.shouldRender(now))
-                    return;
-                // 注意：参数列表已简化，因为我们现在通过成员变量访问标签
-                updateHUDLabels(interactionBarContainer, interactionProgressBar);
-            }
-        }.start();
+        hudFrameUpdater = () -> updateHUDLabels(interactionBarContainer, interactionProgressBar);
 
         return hudPane;
     }
@@ -7846,6 +7845,16 @@ public class GameClient extends Application {
         p.recomputeScore();
     }
 
+    private static void setTextIfChanged(Labeled label, String text) {
+        if (!Objects.equals(label.getText(), text))
+            label.setText(text);
+    }
+
+    private static void setStyleIfChanged(Node node, String style) {
+        if (!Objects.equals(node.getStyle(), style))
+            node.setStyle(style);
+    }
+
     private void updateHUDLabels(StackPane interactionBarContainer, Pane interactionProgressBar) {
         if (latestGameState == null || (clientState != cs2d.client.GameClient.ClientState.PLAYING
                 && clientState != cs2d.client.GameClient.ClientState.GAME_OVER)) {
@@ -7928,15 +7937,15 @@ public class GameClient extends Application {
             for (int i = 0; i < lossBonusBars.size(); i++) {
                 Region bar = lossBonusBars.get(i);
                 String color = (i < consecutiveLosses) ? "#f56565;" : "#4a5568;";
-                bar.setStyle("-fx-background-radius:3; -fx-background-color:" + color);
+                setStyleIfChanged(bar, "-fx-background-radius:3; -fx-background-color:" + color);
             }
-            moneyLabel.setText("$" + getInt(meData, "money"));
+            setTextIfChanged(moneyLabel, "$" + getInt(meData, "money"));
             moneyLabel.setTextFill(Color.GREEN);
         }
 
         // 杀敌数
         killsThisLifeContainer.setVisible(true);
-        killsThisLifeLabel.setText("KILL : " + killsThisLife);
+        setTextIfChanged(killsThisLifeLabel, "KILL : " + killsThisLife);
         String myTeam = getString(meData, "team");
         if ("CT".equals(myTeam)) {
             killsThisLifeLabel.setTextFill(PRIMARY_BLUE);
@@ -7955,27 +7964,27 @@ public class GameClient extends Application {
             // meData 此时是 BOT 的数据
             double hpVal = getDouble(meData, "health");
             // 同时显示夺舍状态和BOT的血量
-            hpLabel.setText("CONTROLLING: " + getString(meData, "name") + " [" + (int) hpVal + " HP]");
+            setTextIfChanged(hpLabel, "CONTROLLING: " + getString(meData, "name") + " [" + (int) hpVal + " HP]");
             hpLabel.setTextFill(hpVal > 50 ? Color.YELLOW : hpVal > 20 ? Color.ORANGE : Color.RED);
 
             // 强制显示 E 键释放提示 (取代 B 键提示)
             buyPrompt.setVisible(true);
-            buyPrompt.setText("[E] - Release Control");
+            setTextIfChanged(buyPrompt, "[E] - Release Control");
             buyPrompt.setTextFill(Color.ORANGE);
             changeWeaponPrompt.setVisible(false);
         } else {
             // 恢复正常 HP 显示
             double hpVal = getDouble(meData, "health");
-            hpLabel.setText("Health: " + (int) hpVal);
+            setTextIfChanged(hpLabel, "Health: " + (int) hpVal);
             hpLabel.setTextFill(hpVal > 50 ? Color.LIGHTGREEN : hpVal > 20 ? Color.YELLOW : Color.RED);
 
             // B 键提示
             buyPrompt.setVisible(isDemo && "FREEZE_TIME".equals(roundPhase));
-            buyPrompt.setText("[B] - Open Buy Menu");
+            setTextIfChanged(buyPrompt, "[B] - Open Buy Menu");
             buyPrompt.setTextFill(Color.GRAY);
 
             changeWeaponPrompt.setVisible(isTDM);
-            changeWeaponPrompt.setText("[B] - Change Weapon");
+            setTextIfChanged(changeWeaponPrompt, "[B] - Change Weapon");
             changeWeaponPrompt.setTextFill(Color.GRAY);
         }
 
@@ -7998,7 +8007,7 @@ public class GameClient extends Application {
         int armorVal = getInt(meData, "armorValue");
         armorLabel.setVisible(armorVal > 0);
         if (armorVal > 0) {
-            armorLabel.setText("Armor: " + armorVal + (getBool(meData, "hasHelmet") ? " (H)" : ""));
+            setTextIfChanged(armorLabel, "Armor: " + armorVal + (getBool(meData, "hasHelmet") ? " (H)" : ""));
             armorLabel.setTextFill(Color.CYAN);
         }
 
@@ -8013,12 +8022,12 @@ public class GameClient extends Application {
         } else {
             displayWeaponName = weaponOrItemNameKey;
         }
-        weaponLabel.setText(displayWeaponName);
+        setTextIfChanged(weaponLabel, displayWeaponName);
         weaponLabel.setTextFill(Color.LIGHTGRAY);
         weaponLabel.setVisible(true);
 
         if (currentSlot >= 6) {
-            ammoLabel.setText("");
+            setTextIfChanged(ammoLabel, "");
         } else {
             String ammoText = "";
             if (getBool(meData, "isReloading")) {
@@ -8042,7 +8051,7 @@ public class GameClient extends Application {
                 }
                 ammoText = "Ammo: " + currentAmmo + " / " + reserveStr;
             }
-            ammoLabel.setText(ammoText);
+            setTextIfChanged(ammoLabel, ammoText);
             ammoLabel.setTextFill(getBool(meData, "isReloading") ? Color.YELLOW : Color.WHITE);
         }
         ammoLabel.setVisible(true);
@@ -8057,7 +8066,7 @@ public class GameClient extends Application {
 
         // 1. 人机死亡后，强制切回观战的提示 (me.data.isAlive 此时已为 false)
         if ("CONTROLLING_BOT".equals(spectateMode)) {
-            hpLabel.setText("Target Killed! Releasing Control...");
+            setTextIfChanged(hpLabel, "Target Killed! Releasing Control...");
             hpLabel.setTextFill(Color.RED);
         }
         // 2. 正常观战模式
@@ -8072,10 +8081,10 @@ public class GameClient extends Application {
                 // 确保索引不会越界
                 spectateTeammateIndex = spectateTeammateIndex % livingTeammates.size();
                 cs2d.client.GameClient.ClientPlayer target = livingTeammates.get(spectateTeammateIndex);
-                hpLabel.setText("Spectating: " + getString(target.data, "name"));
+                setTextIfChanged(hpLabel, "Spectating: " + getString(target.data, "name"));
                 hpLabel.setTextFill(Color.YELLOW);
             } else {
-                hpLabel.setText("Dead");
+                setTextIfChanged(hpLabel, "Dead");
                 hpLabel.setTextFill(Color.RED);
             }
         }
@@ -8099,7 +8108,7 @@ public class GameClient extends Application {
      */
     private void updateGenericSpectatorHUD(StackPane interactionBarContainer, Pane interactionProgressBar) {
         // 观战（既不是自己死亡也不是控制Bot）
-        hpLabel.setText("Spectating");
+        setTextIfChanged(hpLabel, "Spectating");
         hpLabel.setTextFill(Color.GRAY);
         hpLabel.setVisible(true);
         lossBonusBox.setVisible(false);
@@ -8215,7 +8224,7 @@ public class GameClient extends Application {
     }
 
     private void updateGlobalInfo() {
-        pingLabel.setText("Ping: " + ping);
+        setTextIfChanged(pingLabel, "Ping: " + ping);
     }
 
     private void updateTopCornerLabels() {
@@ -8230,11 +8239,11 @@ public class GameClient extends Application {
         timerLabel.setVisible(isDemo || isTDM || isZombie || isDeathmatch);
 
         if (isDemo) {
-            roundLabel.setText("Round: " + getInt(latestGameState, "round") + "/" + DEMOLITION_MAX_ROUNDS);
+            setTextIfChanged(roundLabel, "Round: " + getInt(latestGameState, "round") + "/" + DEMOLITION_MAX_ROUNDS);
             long timer = getBool(latestGameState, "bombPlanted") ? (long) getDouble(latestGameState, "bombTimer")
                     : (long) getDouble(latestGameState, "roundTime");
             String timerPrefix = "FREEZE_TIME".equals(getString(latestGameState, "roundPhase")) ? "Prepare: " : "";
-            timerLabel.setText(timerPrefix + String.format("%02d", timer / 1000));
+            setTextIfChanged(timerLabel, timerPrefix + String.format("%02d", timer / 1000));
             if (getBool(latestGameState, "bombPlanted"))
                 timerLabel.setTextFill(Color.RED);
             else if ("FREEZE_TIME".equals(getString(latestGameState, "roundPhase")))
@@ -8243,7 +8252,7 @@ public class GameClient extends Application {
                 timerLabel.setTextFill(Color.WHITE);
         } else if (isTDM || isZombie || isDeathmatch) {
             long time = getInt(latestGameState, "time");
-            timerLabel.setText("Time: " + time / 60 + ":" + String.format("%02d", time % 60));
+            setTextIfChanged(timerLabel, "Time: " + time / 60 + ":" + String.format("%02d", time % 60));
             timerLabel.setTextFill(Color.WHITE);
         }
 
@@ -8253,14 +8262,14 @@ public class GameClient extends Application {
         waveLabel.setVisible(isZombie);
         zombiesLeftLabel.setVisible(isZombie);
         if (isDemo || isTDM) {
-            ctScoreLabel.setText("CT: " + getInt(latestGameState, "ctScore"));
+            setTextIfChanged(ctScoreLabel, "CT: " + getInt(latestGameState, "ctScore"));
             ctScoreLabel.setTextFill(Color.CYAN);
-            tScoreLabel.setText("T: " + getInt(latestGameState, "tScore"));
+            setTextIfChanged(tScoreLabel, "T: " + getInt(latestGameState, "tScore"));
             tScoreLabel.setTextFill(Color.RED);
         } else if (isZombie) {
-            waveLabel.setText("Wave: " + getInt(latestGameState, "wave"));
+            setTextIfChanged(waveLabel, "Wave: " + getInt(latestGameState, "wave"));
             waveLabel.setTextFill(Color.ORANGE);
-            zombiesLeftLabel.setText("Zombies Left: " + getInt(latestGameState, "zombiesLeft"));
+            setTextIfChanged(zombiesLeftLabel, "Zombies Left: " + getInt(latestGameState, "zombiesLeft"));
             zombiesLeftLabel.setTextFill(Color.RED);
         } // [2025-12-01] 死斗模式下，隐藏团队分数
         if (isDeathmatch) {
@@ -8275,15 +8284,15 @@ public class GameClient extends Application {
         winnerLabel.setVisible(roundOver);
         reasonLabel.setVisible(roundOver);
         if (roundOver) {
-            winnerLabel.setText(getString(latestGameState, "roundWinner") + " Win!");
+            setTextIfChanged(winnerLabel, getString(latestGameState, "roundWinner") + " Win!");
             winnerLabel.setTextFill("CT".equals(getString(latestGameState, "roundWinner")) ? Color.CYAN : Color.RED);
-            reasonLabel.setText(getString(latestGameState, "roundWinReason"));
+            setTextIfChanged(reasonLabel, getString(latestGameState, "roundWinReason"));
             reasonLabel.setTextFill(Color.WHITE);
         }
         boolean nextWave = latestGameState.has("nextWaveIn");
         nextWaveLabel.setVisible(nextWave);
         if (nextWave) {
-            nextWaveLabel.setText("Next Wave: " + getInt(latestGameState, "nextWaveIn"));
+            setTextIfChanged(nextWaveLabel, "Next Wave: " + getInt(latestGameState, "nextWaveIn"));
             nextWaveLabel.setTextFill(Color.YELLOW);
         }
     }
