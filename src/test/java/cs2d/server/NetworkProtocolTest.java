@@ -15,6 +15,14 @@ class NetworkProtocolTest {
     private final Gson gson = new Gson();
 
     @Test
+    void aiFreezesForManualPauseRoundEndAndMatchEnd() {
+        assertTrue(GameState.shouldFreezeAiState(true, false, GameState.RoundPhase.IN_PROGRESS));
+        assertTrue(GameState.shouldFreezeAiState(false, true, GameState.RoundPhase.IN_PROGRESS));
+        assertTrue(GameState.shouldFreezeAiState(false, false, GameState.RoundPhase.ROUND_OVER));
+        assertFalse(GameState.shouldFreezeAiState(false, false, GameState.RoundPhase.IN_PROGRESS));
+    }
+
+    @Test
     void chunksPreserveOrderingMetadata() {
         JsonObject state = new JsonObject();
         state.addProperty("type", "full_update");

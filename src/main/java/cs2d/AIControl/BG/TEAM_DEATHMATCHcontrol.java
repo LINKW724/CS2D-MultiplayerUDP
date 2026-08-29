@@ -408,11 +408,11 @@ public class TEAM_DEATHMATCHcontrol {
 
         // 如果决策结果是要扔某个道具
         if (itemToThrow != null) {
-            logger.accept("AI [" + owner.name + "] decided to throw " + itemToThrow.name() + " at ("
-                    + (int) throwTargetPos.x + "," + (int) throwTargetPos.y + ")");
-            // 发出请求
             boolean accepted = grenadeModule.requestThrow(itemToThrow, throwTargetPos);
-            if (!accepted && logger != null) {
+            if (accepted) {
+                logger.accept("AI [" + owner.name + "] decided to throw " + itemToThrow.name() + " at ("
+                        + (int) throwTargetPos.x + "," + (int) throwTargetPos.y + ")");
+            } else if (!gameState.shouldFreezeAi() && logger != null) {
                 logger.accept("AI [" + owner.name + "] grenade request for " + itemToThrow.name()
                         + " was rejected (busy or cooldown).");
             }
@@ -916,6 +916,19 @@ public class TEAM_DEATHMATCHcontrol {
             }
             // 不需要额外操作，因为状态已经是 PATROLLING，executeActions 会处理
         }
+    }
+
+    /** 比赛/回合结束时立即撤销寻路、攻击和异步投掷计划。 */
+    public void cancelPendingActions() {
+        primaryTarget = null;
+        lastKnownPosition = null;
+        currentState = AIState.PATROLLING;
+        if (pathfindingModule != null)
+            pathfindingModule.reset();
+        if (attackModule != null)
+            attackModule.reset();
+        if (grenadeModule != null)
+            grenadeModule.cancelPendingWork();
     }
 
     /**

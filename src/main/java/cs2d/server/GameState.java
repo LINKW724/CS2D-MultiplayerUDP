@@ -1120,7 +1120,7 @@ public class GameState {
      * 此版本已彻底解耦AI计算，只负责应用输入和更新物理状态。
      */
     public void update() {
-        if (isGameOver())
+        if (isGameOver)
             return;
 
         if (!pendingAiDropRequests.isEmpty()) {
@@ -2161,7 +2161,7 @@ public class GameState {
             // 检查是否还有任何幸存者存活。
             boolean survivorsAlive = players.stream().anyMatch(p -> p.isAlive() && p.team != Player.Team.ZOMBIE);
             if (!survivorsAlive) { // 如果没有幸存者了。
-                isGameOver = true; // 游戏结束。
+                finishGame();
                 return;
             }
             // --- 僵尸模式定时发放道具 ---
@@ -2245,9 +2245,9 @@ public class GameState {
                         if (!isRLTrainingMode
                                 && (teamCTScore_DEMO == DEMO_WIN_SCORE || teamTScore_DEMO == DEMO_WIN_SCORE
                                         || (currentRound >= DEMO_MAX_ROUNDS && teamCTScore_DEMO != teamTScore_DEMO))) {
-                            isGameOver = true; // 游戏结束。
+                            finishGame();
                         } else if (isRLTrainingMode && currentRound >= 9999) {
-                            isGameOver = true;
+                            finishGame();
                         } else { // 否则。
                             startNewRound(); // 开始新的一回合。
                         }
@@ -2258,7 +2258,7 @@ public class GameState {
             long time = System.currentTimeMillis();
             if (roundPhase == RoundPhase.ROUND_OVER) {
                 if (time - roundEndTime > 5000) {
-                    isGameOver = true;
+                    finishGame();
                 }
             } else {
                 if ((time - gameStartTime) / 1000 >= TDM_GAME_DURATION_SECONDS) {
@@ -2267,8 +2267,9 @@ public class GameState {
                             endRound(Player.Team.CT, "Time ran out");
                         else
                             endRound(Player.Team.T, "Time ran out");
+                        finishGame();
                     } else {
-                        isGameOver = true;
+                        finishGame();
                     }
                 }
             }
@@ -3108,9 +3109,9 @@ public class GameState {
                     teamTScore_TDM++;
 
                 if (teamCTScore_TDM >= tdmWinScore)
-                    endRound(Player.Team.CT, "Score limit reached");
+                    finishTdmMatch(Player.Team.CT, "Score limit reached");
                 else if (teamTScore_TDM >= tdmWinScore)
-                    endRound(Player.Team.T, "Score limit reached");
+                    finishTdmMatch(Player.Team.T, "Score limit reached");
             }
         }
     }
@@ -4395,13 +4396,31 @@ public class GameState {
     // 检查游戏是否结束。
     // 注意：TDM 的时间/分数检查已移入 handleGameModeLogic()，此处不再重复检查，避免绕过 roundPhase 守卫。
     private boolean isGameOver() {
+        return isGameOver;
+    }
+
+    /** 比赛终态：停止所有输入和位移，并丢弃尚未执行的 AI 请求。 */
+    private void finishGame() {
         if (isGameOver)
-            return true; // 如果已经标记为结束，则直接返回true。
-        if (gameMode == GameMode.ZOMBIE_MODE) { // 如果是僵尸模式。
-            // 检查是否还有幸存者存活。
-            isGameOver = players.stream().filter(p -> p.team != Player.Team.ZOMBIE).noneMatch(Player::isAlive);
+            return;
+        isGameOver = true;
+        pendingAiDropRequests.clear();
+        for (Player player : getAllCharacters()) {
+            player.keysDown.clear();
+            player.isShooting = false;
+            player.isInteracting = false;
+            player.ax = 0;
+            player.ay = 0;
+            player.vx = 0;
+            player.vy = 0;
+            aiInputMailbox.remove(player.id);
         }
-        return isGameOver; // 返回最终的结束状态。
+    }
+
+    /** TDM 达到分数上限时胜负已经确定，无需再等待 5 秒才进入最终结算。 */
+    private void finishTdmMatch(Player.Team winner, String reason) {
+        endRound(winner, reason);
+        finishGame();
     }
 
     public GameMode getGameMode() {
@@ -5678,6 +5697,15 @@ public class GameState {
      */
     public boolean isAiFrozen() {
         return this.isAiFrozen;
+    }
+
+    /** AI 在手动冻结、回合结束或整场比赛结束时都不得继续产生新动作。 */
+    public boolean shouldFreezeAi() {
+        return shouldFreezeAiState(this.isAiFrozen, this.isGameOver, this.roundPhase);
+    }
+
+    static boolean shouldFreezeAiState(boolean manuallyFrozen, boolean gameOver, RoundPhase phase) {
+        return manuallyFrozen || gameOver || phase == RoundPhase.ROUND_OVER;
     }
 
     // ================== [v2.5] AI线程池和决策结果类 ==================

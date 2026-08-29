@@ -30,6 +30,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -59,9 +60,10 @@ public class GrenadeModule {
     private final Random rand; // 随机数生成器
 
     // --- 模块内部状态 ---
-    private ModuleState currentState = ModuleState.IDLE;
+    private volatile ModuleState currentState = ModuleState.IDLE;
     private volatile GrenadeThrowPlan pendingGrenadePlan = null; // 异步计算的结果
-    private boolean isCalculatingGrenade = false; // 是否正在计算
+    private volatile boolean isCalculatingGrenade = false; // 是否正在计算
+    private final AtomicLong calculationGeneration = new AtomicLong();
     private long lastGrenadeThrowTime = 0; // 上次投掷时间
 
     // --- 当前投掷计划的状态 ---
@@ -254,6 +256,9 @@ public class GrenadeModule {
      * @return true 如果请求被接受（模块空闲），false 如果模块正忙或在冷却。
      */
     public boolean requestThrow(Item item, Point2D.Double targetPosition) {
+        if (gameState.shouldFreezeAi()) {
+            return false;
+        }
         // 检查所有冷却和条件
         if (currentState != ModuleState.IDLE || isCalculatingGrenade) {
             return false; // 模块正忙
@@ -279,6 +284,7 @@ public class GrenadeModule {
         lastGlobalGrenadeCheckTime = currentTime;
         isCalculatingGrenade = true;
         currentState = ModuleState.CALCULATING;
+        long generation = calculationGeneration.get();
 
         // 提交异步计算任务
         grenadeCalculatorService.submit(() -> {
@@ -286,20 +292,24 @@ public class GrenadeModule {
                 // 在后台线程中执行耗时的物理计算
                 GrenadeThrowPlan plan = calculateGrenadeThrow(item, targetPosition);
 
-                if (plan != null) {
+                if (plan != null && generation == calculationGeneration.get() && !gameState.shouldFreezeAi()) {
                     // 计算成功，将结果放入待处理队列
                     this.pendingGrenadePlan = plan;
+                    logger.accept(String.format("Background Calc OK for %s: Found a valid throw plan for %s.",
+                            self.name, item.name()));
                 }
             } catch (Exception e) {
-                logger.accept("GrenadeModule: 异步计算时发生错误: " + e.getMessage());
-                e.printStackTrace();
+                if (generation == calculationGeneration.get() && !gameState.shouldFreezeAi()) {
+                    logger.accept("GrenadeModule: 异步计算时发生错误: " + e.getMessage());
+                    e.printStackTrace();
+                }
             } finally {
-                // 无论成功与否，都重置标记
-                isCalculatingGrenade = false;
-                // 如果在计算完成时状态仍然是 CALCULATING，则重置回 IDLE
-                // 如果状态已经被外部（如 resetGrenadeState）改变，则不覆盖
-                if (currentState == ModuleState.CALCULATING) {
-                    currentState = ModuleState.IDLE;
+                // 被取消的旧任务不能改写新一代状态。
+                if (generation == calculationGeneration.get()) {
+                    isCalculatingGrenade = false;
+                    if (currentState == ModuleState.CALCULATING) {
+                        currentState = ModuleState.IDLE;
+                    }
                 }
             }
         });
@@ -322,8 +332,6 @@ public class GrenadeModule {
             double bestAngle = throwSolution.get().getKey();
             // [关键] 决策点就是 AI 发起请求时的位置
             Point2D.Double decisionPos = (Point2D.Double) self.position.clone();
-            logger.accept(String.format("Background Calc OK for %s: Found a valid throw plan for %s.", self.name,
-                    item.name()));
             // 决策成功！返回一个完整的“投掷计划”
             return new GrenadeThrowPlan(item, decisionPos, bestAngle, targetPosition);
         }
@@ -344,6 +352,12 @@ public class GrenadeModule {
         this.currentState = ModuleState.IDLE;
         this.isCalculatingGrenade = false; // 确保重置
         this.pendingGrenadePlan = null; // 确保清空
+    }
+
+    /** 让所有已提交但尚未完成的轨迹计算结果永久失效。 */
+    public void cancelPendingWork() {
+        calculationGeneration.incrementAndGet();
+        resetGrenadeState();
     }
 
     /**

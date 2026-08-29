@@ -357,9 +357,11 @@ public class ZOMBIEcontrol {
         }
 
         if (itemToThrow != null) {
-            logger.accept("Survivor [" + owner.name + "] decided to throw " + itemToThrow.name() + " at zombie horde.");
-            // 发出请求
-            grenadeModule.requestThrow(itemToThrow, primaryTarget.position);
+            boolean accepted = grenadeModule.requestThrow(itemToThrow, primaryTarget.position);
+            if (accepted) {
+                logger.accept(
+                        "Survivor [" + owner.name + "] decided to throw " + itemToThrow.name() + " at zombie horde.");
+            }
             // 无论是否接受，都重置冷却
             nextTacticalDecisionTime = currentTime + TACTICAL_DECISION_COOLDOWN;
         }
@@ -546,8 +548,21 @@ public class ZOMBIEcontrol {
             attackModule.reset(); // 重置攻击模块状态
         }
         if (grenadeModule != null && owner.team == Player.Team.CT) {
-            // grenadeModule 内部没有 reset 方法，但其状态会在下次 request 时重置
+            grenadeModule.cancelPendingWork();
         }
+    }
+
+    /** 比赛/回合结束时立即撤销寻路、攻击和异步投掷计划。 */
+    public void cancelPendingActions() {
+        primaryTarget = null;
+        lastKnownPosition = null;
+        currentState = AIState.PATROLLING;
+        if (pathfindingModule != null)
+            pathfindingModule.reset();
+        if (attackModule != null)
+            attackModule.reset();
+        if (grenadeModule != null)
+            grenadeModule.cancelPendingWork();
     }
 
     /**

@@ -39,6 +39,7 @@ public class AIService implements Runnable {
     private final ConcurrentHashMap<String, AIInput> aiInputMailbox;
     private final ConcurrentHashMap<String, cs2d.server.rl.RLMacroCommand> rlMacroMailbox;
     private volatile boolean running = false;
+    private boolean freezeCleanupApplied = false;
     private final int aiTps;
 
     private final Consumer<String> logger;
@@ -105,6 +106,30 @@ public class AIService implements Runnable {
         long currentTime = System.currentTimeMillis();
         GameMode currentMode = gameState.getGameMode();
 
+        if (gameState.shouldFreezeAi()) {
+            List<Player> allAIs = gameState.getAllCharacters().stream()
+                    .filter(p -> p != null && p.isAI && !p.isControlledByPlayer())
+                    .collect(Collectors.toList());
+            if (!freezeCleanupApplied) {
+                for (Player ai : allAIs) {
+                    TEAM_DEATHMATCHcontrol tdmController = ai.getTdmController();
+                    if (tdmController != null)
+                        tdmController.cancelPendingActions();
+                    ZOMBIEcontrol zombieController = ai.getZombieController();
+                    if (zombieController != null)
+                        zombieController.cancelPendingActions();
+                }
+                aiShortTermMemory.clear();
+                aiPerceptionTimestamps.clear();
+                freezeCleanupApplied = true;
+            }
+            for (Player ai : allAIs) {
+                aiInputMailbox.put(ai.id, neutralInput(ai));
+            }
+            return;
+        }
+        freezeCleanupApplied = false;
+
         // --- 1. 获取并刷新本 Tick 的声音信息 (所有 AI 共用) ---
         List<SoundEvent> sounds = gameState.getAndClearAiSoundEvents();
         List<SoundEvent> history = gameState.getAiSoundHistory();
@@ -121,16 +146,6 @@ public class AIService implements Runnable {
         // 遍历 memory 中的所有 ID，如果它不在活着且是 AI 的集合中，则彻底移除
         aiShortTermMemory.keySet().removeIf(id -> !aliveAiIds.contains(id));
         aiPerceptionTimestamps.keySet().removeIf(id -> !aliveAiIds.contains(id));
-
-        if (gameState.isAiFrozen()) {
-            List<Player> allAIs = gameState.getAllCharacters().stream()
-                    .filter(p -> p != null && p.isAI && !p.isControlledByPlayer())
-                    .collect(Collectors.toList());
-            for (Player ai : allAIs) {
-                aiInputMailbox.put(ai.id, new AIInput(new ArrayList<>(), ai.angle, false, false, false));
-            }
-            return;
-        }
 
         // 基础权威快照
         List<Player.PlayerSnapshot> authoritativeSnapshots = gameState.getAllCharacters().stream()
@@ -155,6 +170,10 @@ public class AIService implements Runnable {
 
             aiThreadPool.submit(() -> {
                 try {
+                    if (gameState.shouldFreezeAi()) {
+                        aiInputMailbox.put(ai.id, neutralInput(ai));
+                        return;
+                    }
                     AIWorldView perception;
                     if (ai.getDifficulty() == AIDifficulty.REALISTIC) {
                         perception = processRealisticPerception(ai, authoritativeSnapshots, currentTime);
@@ -299,20 +318,29 @@ public class AIService implements Runnable {
                         }
                     }
 
-                    if (ai.getDifficulty() == AIDifficulty.REALISTIC) {
+                    // 任务提交后比赛可能已经结束；旧决策绝不能覆盖冻结输入。
+                    if (gameState.shouldFreezeAi()) {
+                        aiInputMailbox.put(ai.id, neutralInput(ai));
+                    } else if (ai.getDifficulty() == AIDifficulty.REALISTIC) {
                         injectRealisticInput(ai, finalInput);
                     } else {
                         aiInputMailbox.put(ai.id, finalInput);
                     }
 
                 } catch (Exception e) {
-                    System.err.println("AI Service Error [" + ai.name + "]: " + e.getMessage());
-                    e.printStackTrace();
-                    aiInputMailbox.put(ai.id, new AIInput(new ArrayList<>(), ai.angle, false, false, false));
+                    if (!gameState.shouldFreezeAi()) {
+                        System.err.println("AI Service Error [" + ai.name + "]: " + e.getMessage());
+                        e.printStackTrace();
+                    }
+                    aiInputMailbox.put(ai.id, neutralInput(ai));
                 }
             });
         }
 
+    }
+
+    private AIInput neutralInput(Player ai) {
+        return new AIInput(new ArrayList<>(), ai.angle, false, false, false);
     }
 
     /**
