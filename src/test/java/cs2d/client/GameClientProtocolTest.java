@@ -183,6 +183,27 @@ class GameClientProtocolTest {
         assertEquals(canvasScreenCoordinate, nodeScreenCoordinate, 0.000_000_1);
     }
 
+    @Test
+    void residentStaticMapCullingKeepsOnlyIntersectingTiles() {
+        assertTrue(GameClient.boundsIntersect(0, 0, 1024, 1024,
+                900, 500, 2500, 1400));
+        assertTrue(GameClient.boundsIntersect(0, 0, 1024, 1024,
+                1024, 1024, 1600, 1400));
+        assertFalse(GameClient.boundsIntersect(0, 0, 1024, 1024,
+                1025, 0, 1600, 900));
+        assertFalse(GameClient.boundsIntersect(0, 0, 1024, 1024,
+                0, 1025, 900, 1600));
+    }
+
+    @Test
+    void dropWeaponIsSentOnlyOnFirstPressInSupportedModes() {
+        assertTrue(GameClient.shouldSendDropWeapon("DEMOLITION", true));
+        assertTrue(GameClient.shouldSendDropWeapon("TEAM_DEATHMATCH", true));
+        assertFalse(GameClient.shouldSendDropWeapon("TEAM_DEATHMATCH", false));
+        assertFalse(GameClient.shouldSendDropWeapon("DEATHMATCH", true));
+        assertFalse(GameClient.shouldSendDropWeapon(null, true));
+    }
+
     private static List<Point2D> legacySimplify(List<Point2D> points, double angleTolerance) {
         List<Point2D> simplified = new java.util.ArrayList<>();
         simplified.add(points.get(0));

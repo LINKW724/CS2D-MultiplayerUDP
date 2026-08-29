@@ -151,6 +151,7 @@ public class GameClient extends Application {
     private static final boolean USE_RESIDENT_STATIC_MAP_LAYER = Boolean.parseBoolean(
             System.getProperty("cs2d.staticMapLayer", "false"));
     private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
+    private final List<ResidentObstacleTileNode> residentObstacleTileNodes = new ArrayList<>();
     private Image obstacleOverviewImage = null;
     private Group residentStaticMapLayer;
     private Group residentObstacleTileLayer;
@@ -158,6 +159,7 @@ public class GameClient extends Application {
     private final Affine residentStaticMapTransform = new Affine();
     private Node gameRenderNode;
     private volatile boolean residentStaticMapReady = false;
+    private int residentVisibleTileCount = 0;
     /** 同一服务端会话可能有多个已经在途的map_data分片，只初始化一次相同地图。 */
     private String initializedMapSignature = null;
 
@@ -447,6 +449,11 @@ public class GameClient extends Application {
     private StackPane gameContainer; // 游戏主界面容器
     private BorderPane buyMenuPane; // 购买菜单界面
     private StackPane scoreboardPane; // 记分板界面
+    private ScrollPane scoreboardScrollPane;
+    private VBox scoreboardContent;
+    private String scoreboardStructureKey;
+    private final Map<String, Label> scoreboardSectionLabels = new HashMap<>();
+    private final Map<String, List<Label>> scoreboardPlayerLabels = new HashMap<>();
     private VBox tdmWeaponSelectorPane; // 团队死斗模式的武器选择界面
     private VBox settingsPane; // 设置界面
     private Label connectionStatusLabel; // 连接状态标签
@@ -2211,6 +2218,7 @@ public class GameClient extends Application {
                                         : "tiles")
                                 : "canvas";
                         int staticMapCachedTiles = obstacleCacheTiles.size();
+                        int staticMapVisibleTiles = residentVisibleTileCount;
 
                         diagnosticsExecutor.execute(() -> {
                             RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
@@ -2231,8 +2239,9 @@ public class GameClient extends Application {
                             System.out.printf("            GC %d次 / 停顿%dms | Heap %.1f/%.1f MiB%n",
                                     runtime.gcCollections(), runtime.gcPauseMillis(),
                                     runtime.heapUsedMiB(), runtime.heapCommittedMiB());
-                            System.out.printf("  [STATIC-MAP] active=%s | mode=%s | cachedTiles=%d%n",
-                                    staticMapLayerActive, staticMapLayerMode, staticMapCachedTiles);
+                            System.out.printf("  [STATIC-MAP] active=%s | mode=%s | visibleTiles=%d/%d%n",
+                                    staticMapLayerActive, staticMapLayerMode,
+                                    staticMapVisibleTiles, staticMapCachedTiles);
                             System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                             System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                             System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -4372,28 +4381,16 @@ public class GameClient extends Application {
 
     // 更新记分板UI
     private void updateScoreboardUI() {
-        // 如果最新的游戏状态为空或没有玩家，则清空记分板并返回
+        // ScrollPane 和内容根节点始终复用；常规刷新只更新 Label 文本，不触碰滚动位置。
         if (latestGameState == null || (clientPlayers.isEmpty() && clientZombies.isEmpty())) {
-            scoreboardPane.getChildren().clear();
+            scoreboardContent.getChildren().clear();
+            scoreboardStructureKey = null;
+            scoreboardSectionLabels.clear();
+            scoreboardPlayerLabels.clear();
             return;
         }
 
-        // 创建一个垂直布局容器来存放记分板内容
-        VBox scoreboardContent = new VBox(20);
-        scoreboardContent.setPadding(new Insets(40));
-        scoreboardContent.setAlignment(Pos.TOP_CENTER);
-        scoreboardContent.setMaxWidth(CANVAS_WIDTH * 0.9);
-
         boolean finalScoreboard = isFinalScoreboardState(clientState);
-
-        // 普通 TAB 和最终结算复用相同计分内容，最终结算额外显示赛果与返回按钮。
-        Label title = new Label(finalScoreboard ? "Final Scoreboard" : "Scoreboard");
-        title.setFont(titleFont);
-        title.setStyle("-fx-text-fill: yellow;");
-        scoreboardContent.getChildren().add(title);
-        if (finalScoreboard) {
-            scoreboardContent.getChildren().add(createFinalResultLabel());
-        }
 
         // 获取并排序所有人类玩家数据
         List<JsonObject> playersData = clientPlayers.values().stream()
@@ -4415,6 +4412,7 @@ public class GameClient extends Application {
 
         // 获取游戏模式
         String mode = getString(latestGameState, "mode");
+        List<ScoreboardSection> sections = new ArrayList<>();
         if ("ZOMBIE_MODE".equals(mode)) {
             // 幸存者列表 (非 ZOMBIE 队伍的人类)
             List<JsonObject> survivors = playersData.stream()
@@ -4437,12 +4435,12 @@ public class GameClient extends Application {
                 return Integer.compare(getInt(p2, "kills"), getInt(p1, "kills"));
             });
 
-            addTeamSection(scoreboardContent, survivors, "Survivors", "#63b3ed", mode);
+            sections.add(new ScoreboardSection("survivors", survivors, "Survivors", "#63b3ed"));
             if (!zombies.isEmpty()) {
-                addTeamSection(scoreboardContent, zombies, "Zombies", "#48BB78", mode);
+                sections.add(new ScoreboardSection("zombies", zombies, "Zombies", "#48BB78"));
             }
         } else if ("DEATHMATCH".equals(mode)) {
-            addTeamSection(scoreboardContent, playersData, "Deathmatch", "#F6E05E", mode);
+            sections.add(new ScoreboardSection("deathmatch", playersData, "Deathmatch", "#F6E05E"));
         } else {
             // TDM, DEMO
             List<JsonObject> ctPlayers = playersData.stream().filter(p -> "CT".equals(getString(p, "team")))
@@ -4455,9 +4453,48 @@ public class GameClient extends Application {
             int tScore = "TEAM_DEATHMATCH".equals(mode) ? tPlayers.stream().mapToInt(p -> getInt(p, "kills")).sum()
                     : getInt(latestGameState, "tScore");
 
-            addTeamSection(scoreboardContent, ctPlayers, "Counter-Terrorists   [ " + ctScore + " ]", "#63b3ed", mode);
-            addTeamSection(scoreboardContent, tPlayers, "Terrorists   [ " + tScore + " ]", "#f56565", mode);
+            sections.add(new ScoreboardSection("ct", ctPlayers,
+                    "Counter-Terrorists   [ " + ctScore + " ]", "#63b3ed"));
+            sections.add(new ScoreboardSection("t", tPlayers,
+                    "Terrorists   [ " + tScore + " ]", "#f56565"));
         }
+
+        String structureKey = createScoreboardStructureKey(finalScoreboard, mode, sections);
+        if (!structureKey.equals(scoreboardStructureKey)) {
+            rebuildScoreboardContent(finalScoreboard, mode, sections);
+            scoreboardStructureKey = structureKey;
+        } else {
+            refreshScoreboardData(sections);
+        }
+    }
+
+    private String createScoreboardStructureKey(boolean finalScoreboard, String mode,
+            List<ScoreboardSection> sections) {
+        StringBuilder key = new StringBuilder(mode).append('|').append(finalScoreboard);
+        for (ScoreboardSection section : sections) {
+            key.append('|').append(section.key());
+            for (JsonObject player : section.players())
+                key.append(':').append(getString(player, "id"));
+        }
+        return key.toString();
+    }
+
+    private void rebuildScoreboardContent(boolean finalScoreboard, String mode,
+            List<ScoreboardSection> sections) {
+        double retainedScrollPosition = scoreboardScrollPane.getVvalue();
+        scoreboardSectionLabels.clear();
+        scoreboardPlayerLabels.clear();
+        scoreboardContent.getChildren().clear();
+
+        Label title = new Label(finalScoreboard ? "Final Scoreboard" : "Scoreboard");
+        title.setFont(titleFont);
+        title.setStyle("-fx-text-fill: yellow;");
+        scoreboardContent.getChildren().add(title);
+        if (finalScoreboard)
+            scoreboardContent.getChildren().add(createFinalResultLabel());
+
+        for (ScoreboardSection section : sections)
+            addTeamSection(scoreboardContent, section, mode);
 
         if (finalScoreboard) {
             Button backButton = new Button("Back to Lobby");
@@ -4466,28 +4503,34 @@ public class GameClient extends Application {
             backButton.setOnAction(e -> setClientState(cs2d.client.GameClient.ClientState.LOBBY));
             scoreboardContent.getChildren().add(backButton);
         }
+        scoreboardScrollPane.setVvalue(retainedScrollPosition);
+    }
 
-        ScrollPane scrollPane = new ScrollPane(scoreboardContent);
-        scrollPane.setFitToWidth(true);
-        scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
-        scoreboardPane.getChildren().setAll(scrollPane);
+    private void refreshScoreboardData(List<ScoreboardSection> sections) {
+        for (ScoreboardSection section : sections) {
+            Label sectionLabel = scoreboardSectionLabels.get(section.key());
+            if (sectionLabel != null)
+                sectionLabel.setText(section.title());
+            for (JsonObject player : section.players())
+                updateScoreboardPlayerLabels(player);
+        }
     }
 
     private static boolean isFinalScoreboardState(cs2d.client.GameClient.ClientState state) {
         return state == cs2d.client.GameClient.ClientState.GAME_OVER;
     }
 
-    private void addTeamSection(VBox container, List<JsonObject> players, String title, String color, String mode) {
-        Label teamLabel = new Label(title);
+    private void addTeamSection(VBox container, ScoreboardSection section, String mode) {
+        Label teamLabel = new Label(section.title());
         teamLabel.setFont(Font.font("Orbitron", FontWeight.BOLD, 24));
-        teamLabel.setStyle("-fx-text-fill: " + color + ";");
+        teamLabel.setStyle("-fx-text-fill: " + section.color() + ";");
+        scoreboardSectionLabels.put(section.key(), teamLabel);
         container.getChildren().add(teamLabel);
-        container.getChildren().add(createTeamTableNode(players, title, color, mode));
+        container.getChildren().add(createTeamTableNode(section.players(), section.color(), mode));
     }
 
     // 为一个队伍创建一个分数表格节点
-    private GridPane createTeamTableNode(List<JsonObject> players, String teamName, String teamColor, String mode) {
+    private GridPane createTeamTableNode(List<JsonObject> players, String teamColor, String mode) {
         GridPane grid = new GridPane(); // 创建一个网格布局
         grid.setStyle("-fx-border-color: #4a5568; -fx-border-width: 0 0 1 0;"); // 设置底部边框
         grid.setHgap(10);
@@ -4521,56 +4564,59 @@ public class GameClient extends Application {
         int rowIndex = 1;
         for (JsonObject p : players) {
             String playerId = getString(p, "id");
-            String name = getString(p, "name");
-            String weaponName = getString(p, "weaponName");
-            if (weaponName == null || weaponName.isEmpty())
-                weaponName = "KNIFE";
-
-            // 数据提取
-            int killsVal = getInt(p, "kills");
-            int deathsVal = getInt(p, "deaths");
-            int dmgVal = (int) getDouble(p, "damageDealt");
-            double shotsFired = getDouble(p, "totalShotsFired");
-            double shotsHit = getDouble(p, "totalShotsHit");
-            int headshotsVal = getInt(p, "totalHeadshots");
-
-            // [最终修正] 遵循用户指定的积分规则：
-            // 伤害1 + 1分，击杀1 + 50分，爆头杀额外 + 20分，死亡 - 50分
-            int localScore = dmgVal + (killsVal * 50) + (headshotsVal * 20) - (deathsVal * 50);
-
-            String acc = (shotsFired > 0) ? String.format("%.1f%%", (shotsHit / shotsFired) * 100) : "0.0%";
-            String hsRate = (shotsHit > 0) ? String.format("%.1f%%", ((double) headshotsVal / shotsHit) * 100) : "0.0%";
-            String playerPing = (myPlayerId != null && playerId.equals(myPlayerId)) ? String.valueOf(ping) : "N/A";
-
-            // 1. 名字列 (Column 0)
-            Label nameLabel = new Label(name);
+            Label nameLabel = new Label();
             nameLabel.setFont(scoreboardFont);
-            String playerTeam = getString(p, "team");
-            if (myPlayerId != null && playerId.equals(myPlayerId))
-                nameLabel.setTextFill(PRIMARY_GREEN);
-            else if ("CT".equals(playerTeam))
-                nameLabel.setTextFill(PRIMARY_BLUE);
-            else if ("T".equals(playerTeam))
-                nameLabel.setTextFill(PRIMARY_RED);
-            else if ("ZOMBIE".equals(playerTeam))
-                nameLabel.setTextFill(Color.PURPLE);
-            else
-                nameLabel.setTextFill(Color.YELLOW);
             grid.add(nameLabel, 0, rowIndex);
 
-            // 2. 统计数据列 (1-8) - 严格对应表头顺序
-            grid.add(createStatLabel(String.valueOf(localScore)), 1, rowIndex);
-            grid.add(createStatLabel(weaponName), 2, rowIndex);
-            grid.add(createStatLabel(String.valueOf(killsVal)), 3, rowIndex);
-            grid.add(createStatLabel(String.valueOf(deathsVal)), 4, rowIndex);
-            grid.add(createStatLabel(String.valueOf(dmgVal)), 5, rowIndex);
-            grid.add(createStatLabel(acc), 6, rowIndex);
-            grid.add(createStatLabel(hsRate), 7, rowIndex);
-            grid.add(createStatLabel(playerPing), 8, rowIndex);
+            List<Label> labels = new ArrayList<>(9);
+            labels.add(nameLabel);
+            for (int column = 1; column < 9; column++) {
+                Label statLabel = createStatLabel("");
+                labels.add(statLabel);
+                grid.add(statLabel, column, rowIndex);
+            }
+            scoreboardPlayerLabels.put(playerId, labels);
+            updateScoreboardPlayerLabels(p);
 
             rowIndex++;
         }
         return grid;
+    }
+
+    private void updateScoreboardPlayerLabels(JsonObject player) {
+        String playerId = getString(player, "id");
+        List<Label> labels = scoreboardPlayerLabels.get(playerId);
+        if (labels == null || labels.size() != 9)
+            return;
+
+        String weaponName = getString(player, "weaponName");
+        if (weaponName == null || weaponName.isEmpty())
+            weaponName = "KNIFE";
+        int kills = getInt(player, "kills");
+        int deaths = getInt(player, "deaths");
+        int damage = (int) getDouble(player, "damageDealt");
+        double shotsFired = getDouble(player, "totalShotsFired");
+        double shotsHit = getDouble(player, "totalShotsHit");
+        int headshots = getInt(player, "totalHeadshots");
+        int localScore = damage + (kills * 50) + (headshots * 20) - (deaths * 50);
+
+        labels.get(0).setText(getString(player, "name"));
+        String team = getString(player, "team");
+        labels.get(0).setTextFill(myPlayerId != null && playerId.equals(myPlayerId) ? PRIMARY_GREEN
+                : "CT".equals(team) ? PRIMARY_BLUE
+                        : "T".equals(team) ? PRIMARY_RED
+                                : "ZOMBIE".equals(team) ? Color.PURPLE : Color.YELLOW);
+        labels.get(1).setText(String.valueOf(localScore));
+        labels.get(2).setText(weaponName);
+        labels.get(3).setText(String.valueOf(kills));
+        labels.get(4).setText(String.valueOf(deaths));
+        labels.get(5).setText(String.valueOf(damage));
+        labels.get(6).setText(shotsFired > 0 ? String.format("%.1f%%", (shotsHit / shotsFired) * 100) : "0.0%");
+        labels.get(7).setText(shotsHit > 0 ? String.format("%.1f%%", (headshots / shotsHit) * 100) : "0.0%");
+        labels.get(8).setText(myPlayerId != null && playerId.equals(myPlayerId) ? String.valueOf(ping) : "N/A");
+    }
+
+    private record ScoreboardSection(String key, List<JsonObject> players, String title, String color) {
     }
 
     private Label createStatLabel(String text) {
@@ -5550,7 +5596,7 @@ public class GameClient extends Application {
     // 为场景设置输入监听器
     private void setupInputListeners(Scene scene) {
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> { // 添加键盘按下事件过滤器
-            keysDown.add(event.getCode()); // 将按下的键添加到集合中
+            boolean firstPress = keysDown.add(event.getCode()); // 自动重复按键不会重复触发一次性动作
             if (clientState != cs2d.client.GameClient.ClientState.PLAYING
                     && clientState != cs2d.client.GameClient.ClientState.LOBBY
                     && clientState != cs2d.client.GameClient.ClientState.GAME_OVER)
@@ -5632,7 +5678,7 @@ public class GameClient extends Application {
                     break;
                 case G:
                     if (clientState == cs2d.client.GameClient.ClientState.PLAYING && latestGameState != null)
-                        if ("DEMOLITION".equals(mode) || "TEAM_DEATHMATCH".equals(mode))
+                        if (shouldSendDropWeapon(mode, firstPress))
                             sendMessage(createJsonMessage("dropWeapon")); // 发送丢弃武器消息
                     break;
                 case B:
@@ -5721,10 +5767,6 @@ public class GameClient extends Application {
                 }
                 tabPressTime = 0;
                 tabIsLongPress = false;
-            }
-
-            if (event.getCode() == KeyCode.G) { // G键丢弃武器
-                sendMessage(createJsonMessage("dropWeapon"));
             }
 
             if (event.getCode() == KeyCode.E && isInteracting) { // 如果释放E键
@@ -6047,6 +6089,19 @@ public class GameClient extends Application {
         scoreboardPane = new StackPane();
         scoreboardPane.setStyle(panelStyle);
         scoreboardPane.setVisible(false);
+        scoreboardContent = new VBox(20);
+        scoreboardContent.setPadding(new Insets(40));
+        scoreboardContent.setAlignment(Pos.TOP_CENTER);
+        scoreboardContent.setMaxWidth(CANVAS_WIDTH * 0.9);
+        scoreboardScrollPane = new ScrollPane(scoreboardContent);
+        scoreboardScrollPane.setFitToWidth(true);
+        scoreboardScrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER);
+        scoreboardScrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        scoreboardPane.getChildren().add(scoreboardScrollPane);
+    }
+
+    static boolean shouldSendDropWeapon(String mode, boolean firstPress) {
+        return firstPress && ("DEMOLITION".equals(mode) || "TEAM_DEATHMATCH".equals(mode));
     }
 
     // 打开初始武器选择界面
@@ -9838,12 +9893,14 @@ public class GameClient extends Application {
 
         Group tileLayer = new Group();
         tileLayer.setManaged(false);
+        residentObstacleTileNodes.clear();
         for (ObstacleCacheTile tile : obstacleCacheTiles) {
             ImageView tileView = new ImageView(tile.image());
             tileView.setX(tile.x());
             tileView.setY(tile.y());
             tileView.setManaged(false);
             tileLayer.getChildren().add(tileView);
+            residentObstacleTileNodes.add(new ResidentObstacleTileNode(tile.bounds(), tileView));
         }
 
         ImageView overviewView = null;
@@ -9886,6 +9943,27 @@ public class GameClient extends Application {
         if (residentObstacleOverviewView != null)
             setVisibleIfChanged(residentObstacleOverviewView, useOverview);
 
+        if (useOverview) {
+            residentVisibleTileCount = 0;
+        } else {
+            double safeScale = Math.max(camera.scale, 0.0001);
+            double padding = 2.0 / safeScale;
+            double minX = camera.x - camera.offsetX / safeScale - padding;
+            double minY = camera.y - camera.offsetY / safeScale - padding;
+            double maxX = camera.x + (CANVAS_WIDTH - camera.offsetX) / safeScale + padding;
+            double maxY = camera.y + (CANVAS_HEIGHT - camera.offsetY) / safeScale + padding;
+            int visibleTiles = 0;
+            for (ResidentObstacleTileNode tileNode : residentObstacleTileNodes) {
+                Rectangle2D bounds = tileNode.bounds();
+                boolean visible = boundsIntersect(bounds.getMinX(), bounds.getMinY(), bounds.getMaxX(), bounds.getMaxY(),
+                        minX, minY, maxX, maxY);
+                setVisibleIfChanged(tileNode.view(), visible);
+                if (visible)
+                    visibleTiles++;
+            }
+            residentVisibleTileCount = visibleTiles;
+        }
+
         double translateX = staticMapLayerTranslation(camera.x, camera.scale, camera.offsetX);
         double translateY = staticMapLayerTranslation(camera.y, camera.scale, camera.offsetY);
         if (Double.compare(residentStaticMapTransform.getMxx(), camera.scale) != 0
@@ -9900,6 +9978,14 @@ public class GameClient extends Application {
 
     static double staticMapLayerTranslation(double cameraOrigin, double scale, double offset) {
         return offset - cameraOrigin * scale;
+    }
+
+    static boolean boundsIntersect(double minX1, double minY1, double maxX1, double maxY1,
+            double minX2, double minY2, double maxX2, double maxY2) {
+        return maxX1 >= minX2 && maxX2 >= minX1 && maxY1 >= minY2 && maxY2 >= minY1;
+    }
+
+    private record ResidentObstacleTileNode(Rectangle2D bounds, ImageView view) {
     }
 
     /** 为全图模式生成一张不超过2048的屏幕级概览纹理，高清跟随模式仍使用原始分块。 */
