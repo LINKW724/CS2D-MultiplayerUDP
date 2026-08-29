@@ -402,6 +402,11 @@ public class GameClient extends Application {
     private static final int INPUT_SEND_RATE = 120;
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
+    private static final boolean USE_COMPOSITED_FOG_LAYER = Boolean.parseBoolean(
+            System.getProperty("cs2d.compositedFog", "false"));
+    private static final Color FOLLOW_FOG_COLOR = Color.rgb(26, 32, 44, 0.85);
+    private static final Color GLOBAL_FOG_COLOR = Color.rgb(26, 32, 44, 0.5);
+    private static final Color FOG_BASE_COLOR = Color.rgb(26, 32, 44);
     static final int FOV_RAY_COUNT = 106 * 16;
     private static final double FOV_RADIANS = Math.toRadians(106.0);
     private static final double FOV_ANGLE_STEP = FOV_RADIANS / (FOV_RAY_COUNT - 1);
@@ -419,6 +424,11 @@ public class GameClient extends Application {
     private StackPane rootPane; // 根布局容器
     private Canvas canvas; // 游戏绘图区域
     private GraphicsContext gc; // 画布的图形上下文，用于绘图
+    private Canvas fogCanvas;
+    private GraphicsContext fogGc;
+    private Canvas screenOverlayCanvas;
+    private GraphicsContext screenOverlayGc;
+    private StackPane renderLayers;
     private VBox ipEntryPane; // IP输入界面
     private VBox serverBrowserPane; // [新增] 服务器浏览器界面
     private final Map<String, JsonObject> discoveredServers = new ConcurrentHashMap<>(); // [新增] 发现的服务器
@@ -1669,7 +1679,9 @@ public class GameClient extends Application {
         // 【核心新增】在效果开始的瞬间，对Canvas进行快照
         // 这会捕获当前帧的游戏画面，并存入我们新加的变量中
         if (canvas != null) {
-            this.flashbangSnapshot = canvas.snapshot(null, null);
+            this.flashbangSnapshot = renderLayers != null
+                    ? renderLayers.snapshot(null, null)
+                    : canvas.snapshot(null, null);
         }
 
         // 后续逻辑保持不变
@@ -2351,24 +2363,38 @@ public class GameClient extends Application {
 
         // --- 4. 计时迷雾绘制 ---
         long fogStartTime = System.nanoTime();
-        gc.save();
-        drawFog(frameFovPoints); // 绘制战争迷雾
-
-        gc.restore();
+        if (USE_COMPOSITED_FOG_LAYER) {
+            drawFogComposited(frameFovPoints);
+        } else {
+            setVisibleIfChanged(fogCanvas, false);
+            gc.save();
+            drawFogLegacy(frameFovPoints);
+            gc.restore();
+        }
         long fogEndTime = System.nanoTime();
         perfTimeFogDraw += (fogEndTime - fogStartTime); // 累加 [3]
 
         // --- 5. 计时 HUD 绘制 ---
         long hudStartTime = System.nanoTime();
-        gc.save();
-        drawCrosshairAndAimLine(); // 绘制准星
-        if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
-            drawOffscreenIndicators();
-        }
-        gc.restore();
+        screenOverlayGc.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        GraphicsContext worldGc = gc;
+        gc = screenOverlayGc;
+        try {
+            screenOverlayGc.save();
+            try {
+                drawCrosshairAndAimLine(); // 绘制准星
+                if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
+                    drawOffscreenIndicators();
+                }
+            } finally {
+                screenOverlayGc.restore();
+            }
 
-        // 最终覆盖层: 闪光弹效果
-        drawFlashbangEffect();
+            // 最终覆盖层: 闪光弹效果
+            drawFlashbangEffect();
+        } finally {
+            gc = worldGc;
+        }
         long hudEndTime = System.nanoTime();
         perfTimeHudDraw += (hudEndTime - hudStartTime); // 累加 [4]
 
@@ -4938,6 +4964,17 @@ public class GameClient extends Application {
         gameContainer.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT); // 设置最大大小
         canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT); // 创建一个画布
         gc = canvas.getGraphicsContext2D(); // 获取画布的图形上下文
+        fogCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+        fogGc = fogCanvas.getGraphicsContext2D();
+        fogCanvas.setMouseTransparent(true);
+        screenOverlayCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+        screenOverlayGc = screenOverlayCanvas.getGraphicsContext2D();
+        screenOverlayCanvas.setMouseTransparent(true);
+        renderLayers = new StackPane(canvas, fogCanvas, screenOverlayCanvas);
+        renderLayers.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+        renderLayers.setPickOnBounds(false);
+        System.out.printf("[Render] Fog pipeline: %s (experimental opt-in: -Dcs2d.compositedFog=true)%n",
+                USE_COMPOSITED_FOG_LAYER ? "layered clipped-clear" : "legacy EVEN_ODD");
 
         // 创建各种UI元素
         createBuyMenuUI();
@@ -4948,7 +4985,7 @@ public class GameClient extends Application {
         gameContainer.setPickOnBounds(false);
 
         // 将所有UI元素添加到游戏容器中
-        gameContainer.getChildren().addAll(canvas, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
+        gameContainer.getChildren().addAll(renderLayers, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
         gameContainer.setVisible(false); // 初始时隐藏游戏容器
     }
 
@@ -8046,17 +8083,41 @@ public class GameClient extends Application {
         return lines;
     }
 
-    // 绘制战争迷雾
-    // 绘制战争迷雾
-    private void drawFog(List<Point2D> currentFovPoints) {
-
-        // if (fovPoints.isEmpty()) { // [旧]
-        if (currentFovPoints.isEmpty()) { // [新]
+    /** 新路径：独立透明Canvas先填充迷雾，再通过FOV裁剪清出等价的透明孔洞。 */
+    private void drawFogComposited(List<Point2D> currentFovPoints) {
+        if (currentFovPoints.isEmpty()) {
+            setVisibleIfChanged(fogCanvas, false);
             return;
         }
 
-        Color fogColor = "follow".equals(cameraMode) ? Color.rgb(26, 32, 44, 0.85) : Color.rgb(26, 32, 44, 0.5);
-        gc.setFill(fogColor);
+        setVisibleIfChanged(fogCanvas, true);
+        double fogOpacity = fogOpacityForCameraMode(cameraMode);
+        if (Double.compare(fogCanvas.getOpacity(), fogOpacity) != 0)
+            fogCanvas.setOpacity(fogOpacity);
+
+        fogGc.save();
+        try {
+            // 不透明底色会覆盖上一帧的透明孔洞；节点opacity负责最终0.85/0.5混合，
+            // 因此无需每帧先执行一次全屏clearRect。
+            fogGc.setFill(FOG_BASE_COLOR);
+            fogGc.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+            fogGc.setFillRule(FillRule.NON_ZERO);
+            fogGc.beginPath();
+            appendScreenSpaceFovPath(fogGc, currentFovPoints);
+            fogGc.clip();
+            fogGc.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        } finally {
+            fogGc.restore();
+        }
+    }
+
+    /** 原路径保留用于同版本A/B测试和显卡/JavaFX兼容回退。 */
+    private void drawFogLegacy(List<Point2D> currentFovPoints) {
+        if (currentFovPoints.isEmpty())
+            return;
+
+        gc.setFill(currentFogColor());
         gc.setFillRule(FillRule.EVEN_ODD);
         gc.beginPath();
         gc.moveTo(0, 0);
@@ -8064,19 +8125,30 @@ public class GameClient extends Application {
         gc.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
         gc.lineTo(0, CANVAS_HEIGHT);
         gc.closePath();
-
-        // [新] 2. 遍历本地引用
-        Point2D firstPoint = camera.worldToScreen(currentFovPoints.get(0).getX(), currentFovPoints.get(0).getY());
-        gc.moveTo(firstPoint.getX(), firstPoint.getY());
-        // [新] 3. 使用 for-i 循环，因为 CopyOnWriteArrayList 的迭代器较慢
-        for (int i = 1; i < currentFovPoints.size(); i++) {
-            Point2D p = camera.worldToScreen(currentFovPoints.get(i).getX(), currentFovPoints.get(i).getY());
-            gc.lineTo(p.getX(), p.getY());
-        }
-
-        gc.closePath();
+        appendScreenSpaceFovPath(gc, currentFovPoints);
         gc.fill();
         gc.setFillRule(FillRule.NON_ZERO);
+    }
+
+    private Color currentFogColor() {
+        return "follow".equals(cameraMode) ? FOLLOW_FOG_COLOR : GLOBAL_FOG_COLOR;
+    }
+
+    static double fogOpacityForCameraMode(String mode) {
+        return "follow".equals(mode) ? 0.85 : 0.5;
+    }
+
+    /** 直接使用相机基础数值转换坐标，避免每个最终顶点创建临时Point2D。 */
+    private void appendScreenSpaceFovPath(GraphicsContext targetGc, List<Point2D> currentFovPoints) {
+        Point2D first = currentFovPoints.get(0);
+        targetGc.moveTo((first.getX() - camera.x) * camera.scale + camera.offsetX,
+                (first.getY() - camera.y) * camera.scale + camera.offsetY);
+        for (int i = 1; i < currentFovPoints.size(); i++) {
+            Point2D point = currentFovPoints.get(i);
+            targetGc.lineTo((point.getX() - camera.x) * camera.scale + camera.offsetX,
+                    (point.getY() - camera.y) * camera.scale + camera.offsetY);
+        }
+        targetGc.closePath();
     }
 
     private int calculateLocalScoreForSorting(JsonObject p) {
