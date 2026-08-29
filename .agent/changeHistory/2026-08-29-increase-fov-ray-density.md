@@ -19,7 +19,7 @@
 - Updated the FOV precision invariant to require exactly 1696 rays.
 - Existing ray-range and exact intersection tests continue to cover the unchanged geometry.
 
-### `.agent/changeHistory/2026-08-29-increase-fov-ray-density.md` (+48 / -0)
+### `.agent/changeHistory/2026-08-29-increase-fov-ray-density.md` (+50 / -0)
 
 - Records the baseline, scope, expected performance impact, validation, and rollback path.
 

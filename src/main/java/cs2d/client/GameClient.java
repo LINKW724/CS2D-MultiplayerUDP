@@ -399,6 +399,15 @@ public class GameClient extends Application {
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
     static final int FOV_RAY_COUNT = 106 * 16;
+    private static final double FOV_RADIANS = Math.toRadians(106.0);
+    private static final double FOV_ANGLE_STEP = FOV_RADIANS / (FOV_RAY_COUNT - 1);
+    private static final double FOV_RAY_LENGTH = 8000.0;
+    private static final double FOV_SIMPLIFY_ANGLE_TOLERANCE = Math.toRadians(1.0);
+    private static final double[] FOV_RELATIVE_COSINES = createFovRelativeDirections(false);
+    private static final double[] FOV_RELATIVE_SINES = createFovRelativeDirections(true);
+    private static final int DYNAMIC_ELLIPSE_SEGMENTS = 16;
+    private static final double[] DYNAMIC_ELLIPSE_UNIT_X = createUnitCircleCoordinates(false);
+    private static final double[] DYNAMIC_ELLIPSE_UNIT_Y = createUnitCircleCoordinates(true);
     private static final int MAX_NETWORK_MESSAGES_PER_RENDER_FRAME = 512;
 
     // --- JavaFX UI 元素 ---
@@ -447,6 +456,13 @@ public class GameClient extends Application {
     });
     private final AtomicReference<cs2d.client.GameClient.FovRequest> pendingFovRequest = new AtomicReference<>();
     private final AtomicBoolean fovWorkerRunning = new AtomicBoolean(false);
+    // 只有单一FOV worker访问这些缓冲区，可跨帧复用，避免1696射线产生高频临时数组。
+    private final double[] fovRayDirectionsX = new double[FOV_RAY_COUNT];
+    private final double[] fovRayDirectionsY = new double[FOV_RAY_COUNT];
+    private final double[] fovClosestDistances = new double[FOV_RAY_COUNT];
+    private final List<cs2d.client.GameClient.StaticObstacle> fovCandidateObstacles = new ArrayList<>();
+    private long[] fovCandidateRayRanges = new long[0];
+    private double[] dynamicFovEdgeCoordinates = new double[0];
     // 一个专用的 handleServerMessage 单线程池
     private final ExecutorService stateUpdateExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "State-Update-Thread");
@@ -7635,105 +7651,98 @@ public class GameClient extends Application {
         Point2D sourcePos = request.sourcePos();
         double sourceAngle = request.sourceAngle();
         List<JsonObject> dynamicObstacles = request.dynamicObstacles();
-        final double fovRadians = Math.toRadians(106.0); // FOV 106
-
-        final int NUM_FOV_RAYS = FOV_RAY_COUNT; // 1696条射线：每度16条，保留精确边求交
-
-        final double RAY_LENGTH = 8000.0;
-        final double angleStep = fovRadians / (NUM_FOV_RAYS - 1);
-        final double startAngle = sourceAngle - fovRadians / 2.0;
-
-        List<Point2D> newFovPolygon = new ArrayList<>(NUM_FOV_RAYS + 1);
-        newFovPolygon.add(sourcePos);
 
         // --- 计时器（用于日志） ---
         long frameQueryTime = 0;
         long frameEdgeExtractTime = 0;
         long frameIntersectionTime = 0;
 
-        List<Point2D[]> dynamicEdges = new ArrayList<>();
         long extractStartTime = System.nanoTime();
-        for (JsonObject dynObs : dynamicObstacles) {
-            dynamicEdges.addAll(extractEdgesFromObstacle(dynObs));
-        }
-        double[] dynamicEdgeCoordinates = flattenEdgeCoordinates(dynamicEdges);
+        int dynamicEdgeCoordinateCount = prepareDynamicFovEdges(dynamicObstacles);
         frameEdgeExtractTime += (System.nanoTime() - extractStartTime);
 
         // [性能修复] 1. 一次性查询 FOV 区域的所有静态障碍物
         long queryStartTime = System.nanoTime();
-        List<cs2d.client.GameClient.StaticObstacle> candidateStaticObstacles = new ArrayList<>();
+        fovCandidateObstacles.clear();
         if (quadtreeRootNode != null) {
             Rectangle2D fovBounds = new Rectangle2D(
-                    sourcePos.getX() - RAY_LENGTH, sourcePos.getY() - RAY_LENGTH,
-                    RAY_LENGTH * 2, RAY_LENGTH * 2);
-            quadtreeRootNode.queryBounds(candidateStaticObstacles, fovBounds);
+                    sourcePos.getX() - FOV_RAY_LENGTH, sourcePos.getY() - FOV_RAY_LENGTH,
+                    FOV_RAY_LENGTH * 2, FOV_RAY_LENGTH * 2);
+            quadtreeRootNode.queryBounds(fovCandidateObstacles, fovBounds);
         }
-        // queryBounds只是一个宽泛的正方形查询；在当前地图上它会返回全部744个障碍物。
-        // 用包围圆对106度视锥做保守筛选：只减少必定不可能命中的候选，不改变射线数量、
-        // 角度或最终交点精度。
-        candidateStaticObstacles.removeIf(obstacle -> !obstacleMayIntersectFov(
-                obstacle.bounds, sourcePos.getX(), sourcePos.getY(), sourceAngle,
-                fovRadians / 2.0, RAY_LENGTH));
+        // 查询结果可能覆盖全图；一次性计算每个障碍物可能覆盖的离散射线范围并缓存。
+        // 旧路径先做视锥判断，求交前又重复计算同一组中心/距离/角半径数据。
+        ensureFovCandidateRangeCapacity(fovCandidateObstacles.size());
+        int retainedCandidates = 0;
+        for (int i = 0; i < fovCandidateObstacles.size(); i++) {
+            cs2d.client.GameClient.StaticObstacle obstacle = fovCandidateObstacles.get(i);
+            long rayRange = fovRayIndexRange(obstacle.bounds, sourcePos.getX(), sourcePos.getY(), sourceAngle,
+                    FOV_RADIANS / 2.0, FOV_ANGLE_STEP, FOV_RAY_COUNT, FOV_RAY_LENGTH);
+            if (rayRange >= 0) {
+                fovCandidateObstacles.set(retainedCandidates, obstacle);
+                fovCandidateRayRanges[retainedCandidates] = rayRange;
+                retainedCandidates++;
+            }
+        }
+        if (retainedCandidates < fovCandidateObstacles.size())
+            fovCandidateObstacles.subList(retainedCandidates, fovCandidateObstacles.size()).clear();
         frameQueryTime += (System.nanoTime() - queryStartTime);
 
         long intersectStartTime = System.nanoTime();
         final double sourceX = sourcePos.getX();
         final double sourceY = sourcePos.getY();
-        double[] rayDirectionsX = new double[NUM_FOV_RAYS];
-        double[] rayDirectionsY = new double[NUM_FOV_RAYS];
-        double[] closestDistances = new double[NUM_FOV_RAYS];
-        for (int i = 0; i < NUM_FOV_RAYS; i++) {
-            double currentAngle = startAngle + i * angleStep;
-            rayDirectionsX[i] = Math.cos(currentAngle);
-            rayDirectionsY[i] = Math.sin(currentAngle);
-            closestDistances[i] = RAY_LENGTH;
-        }
+        populateFovRayDirections(sourceAngle, fovRayDirectionsX, fovRayDirectionsY);
+        Arrays.fill(fovClosestDistances, FOV_RAY_LENGTH);
 
         // 每个障碍物只检查其包围圆可能覆盖的连续射线区间。旧实现让每条射线检查
         // 所有候选障碍物；本实现仅跳过数学上不可能命中的射线，最终交点算法不变。
-        for (cs2d.client.GameClient.StaticObstacle obs : candidateStaticObstacles) {
-            long rayRange = fovRayIndexRange(obs.bounds, sourceX, sourceY, sourceAngle,
-                    fovRadians / 2.0, angleStep, NUM_FOV_RAYS, RAY_LENGTH);
-            if (rayRange < 0)
-                continue;
+        for (int obstacleIndex = 0; obstacleIndex < fovCandidateObstacles.size(); obstacleIndex++) {
+            cs2d.client.GameClient.StaticObstacle obs = fovCandidateObstacles.get(obstacleIndex);
+            long rayRange = fovCandidateRayRanges[obstacleIndex];
             int firstRay = (int) (rayRange >>> 32);
             int lastRay = (int) rayRange;
             double[] edges = obs.edgeCoordinates;
             for (int rayIndex = firstRay; rayIndex <= lastRay; rayIndex++) {
                 for (int edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 4) {
                     double hitDistance = raySegmentIntersectionDistance(sourceX, sourceY,
-                            rayDirectionsX[rayIndex], rayDirectionsY[rayIndex], closestDistances[rayIndex],
+                            fovRayDirectionsX[rayIndex], fovRayDirectionsY[rayIndex],
+                            fovClosestDistances[rayIndex],
                             edges[edgeIndex], edges[edgeIndex + 1], edges[edgeIndex + 2], edges[edgeIndex + 3]);
-                    if (hitDistance < closestDistances[rayIndex])
-                        closestDistances[rayIndex] = hitDistance;
+                    if (hitDistance < fovClosestDistances[rayIndex])
+                        fovClosestDistances[rayIndex] = hitDistance;
                 }
             }
         }
 
-        for (int i = 0; i < NUM_FOV_RAYS; i++) {
-            for (int edgeIndex = 0; edgeIndex < dynamicEdgeCoordinates.length; edgeIndex += 4) {
+        for (int i = 0; i < FOV_RAY_COUNT; i++) {
+            for (int edgeIndex = 0; edgeIndex < dynamicEdgeCoordinateCount; edgeIndex += 4) {
                 double hitDistance = raySegmentIntersectionDistance(sourceX, sourceY,
-                        rayDirectionsX[i], rayDirectionsY[i], closestDistances[i],
-                        dynamicEdgeCoordinates[edgeIndex], dynamicEdgeCoordinates[edgeIndex + 1],
-                        dynamicEdgeCoordinates[edgeIndex + 2], dynamicEdgeCoordinates[edgeIndex + 3]);
-                if (hitDistance < closestDistances[i])
-                    closestDistances[i] = hitDistance;
+                        fovRayDirectionsX[i], fovRayDirectionsY[i], fovClosestDistances[i],
+                        dynamicFovEdgeCoordinates[edgeIndex], dynamicFovEdgeCoordinates[edgeIndex + 1],
+                        dynamicFovEdgeCoordinates[edgeIndex + 2], dynamicFovEdgeCoordinates[edgeIndex + 3]);
+                if (hitDistance < fovClosestDistances[i])
+                    fovClosestDistances[i] = hitDistance;
             }
-
-            newFovPolygon.add(new Point2D(sourceX + rayDirectionsX[i] * closestDistances[i],
-                    sourceY + rayDirectionsY[i] * closestDistances[i]));
         } // 结束射线循环
 
         frameIntersectionTime += (System.nanoTime() - intersectStartTime);
-        int rawVertexCount = newFovPolygon.size();
+        int rawVertexCount = FOV_RAY_COUNT + 1;
 
-        // [性能修复] 3. 开启多边形抽稀减轻 Canvas 绘制负担 (1.0° 角度容差)
-        newFovPolygon = simplifyPolygon(newFovPolygon, Math.toRadians(1.0));
+        // 直接从基础数组生成最终保留顶点，避免先创建1697个Point2D再丢弃绝大多数。
+        List<Point2D> newFovPolygon = simplifyFovRays(sourcePos, fovRayDirectionsX,
+                fovRayDirectionsY, fovClosestDistances, FOV_SIMPLIFY_ANGLE_TOLERANCE);
 
         long totalNanos = System.nanoTime() - totalStartTime;
         return new FovComputationResult(Collections.unmodifiableList(newFovPolygon), totalNanos,
                 frameQueryTime, frameEdgeExtractTime, frameIntersectionTime,
-                candidateStaticObstacles.size(), rawVertexCount, newFovPolygon.size());
+                fovCandidateObstacles.size(), rawVertexCount, newFovPolygon.size());
+    }
+
+    private void ensureFovCandidateRangeCapacity(int requiredCapacity) {
+        if (fovCandidateRayRanges.length >= requiredCapacity)
+            return;
+        int expandedCapacity = Math.max(requiredCapacity, Math.max(64, fovCandidateRayRanges.length * 2));
+        fovCandidateRayRanges = new long[expandedCapacity];
     }
 
     /**
@@ -7802,6 +7811,110 @@ public class GameClient extends Application {
         return angle;
     }
 
+    private static double[] createFovRelativeDirections(boolean sine) {
+        double[] directions = new double[FOV_RAY_COUNT];
+        double firstAngle = -FOV_RADIANS * 0.5;
+        for (int i = 0; i < directions.length; i++) {
+            double angle = firstAngle + i * FOV_ANGLE_STEP;
+            directions[i] = sine ? Math.sin(angle) : Math.cos(angle);
+        }
+        return directions;
+    }
+
+    static void populateFovRayDirections(double sourceAngle, double[] directionsX, double[] directionsY) {
+        int count = Math.min(FOV_RAY_COUNT, Math.min(directionsX.length, directionsY.length));
+        double sourceCosine = Math.cos(sourceAngle);
+        double sourceSine = Math.sin(sourceAngle);
+        for (int i = 0; i < count; i++) {
+            double relativeCosine = FOV_RELATIVE_COSINES[i];
+            double relativeSine = FOV_RELATIVE_SINES[i];
+            directionsX[i] = sourceCosine * relativeCosine - sourceSine * relativeSine;
+            directionsY[i] = sourceSine * relativeCosine + sourceCosine * relativeSine;
+        }
+    }
+
+    private static double[] createUnitCircleCoordinates(boolean sine) {
+        double[] coordinates = new double[DYNAMIC_ELLIPSE_SEGMENTS];
+        for (int i = 0; i < coordinates.length; i++) {
+            double angle = (i / (double) DYNAMIC_ELLIPSE_SEGMENTS) * Math.PI * 2.0;
+            coordinates[i] = sine ? Math.sin(angle) : Math.cos(angle);
+        }
+        return coordinates;
+    }
+
+    /** 将动态障碍直接写入worker复用的基础数组，返回有效坐标数量。 */
+    private int prepareDynamicFovEdges(List<JsonObject> obstacles) {
+        int edgeCount = 0;
+        for (JsonObject obstacle : obstacles) {
+            String type = getString(obstacle, "type");
+            if ("RECTANGLE".equals(type)) {
+                edgeCount += 4;
+            } else if ("ELLIPSE".equals(type)) {
+                edgeCount += DYNAMIC_ELLIPSE_SEGMENTS;
+            } else if ("POLYGON".equals(type) && obstacle.has("xPoints") && obstacle.has("yPoints")) {
+                JsonArray xPoints = obstacle.getAsJsonArray("xPoints");
+                JsonArray yPoints = obstacle.getAsJsonArray("yPoints");
+                if (xPoints != null && yPoints != null && xPoints.size() > 1 && xPoints.size() == yPoints.size())
+                    edgeCount += xPoints.size();
+            }
+        }
+
+        int requiredCoordinates = edgeCount * 4;
+        if (dynamicFovEdgeCoordinates.length < requiredCoordinates) {
+            int expandedLength = Math.max(requiredCoordinates, Math.max(64, dynamicFovEdgeCoordinates.length * 2));
+            dynamicFovEdgeCoordinates = new double[expandedLength];
+        }
+
+        int cursor = 0;
+        for (JsonObject obstacle : obstacles) {
+            String type = getString(obstacle, "type");
+            double x = getDouble(obstacle, "x");
+            double y = getDouble(obstacle, "y");
+            double width = getDouble(obstacle, "w");
+            double height = getDouble(obstacle, "h");
+            if ("RECTANGLE".equals(type)) {
+                cursor = writeEdge(dynamicFovEdgeCoordinates, cursor, x, y, x + width, y);
+                cursor = writeEdge(dynamicFovEdgeCoordinates, cursor, x + width, y, x + width, y + height);
+                cursor = writeEdge(dynamicFovEdgeCoordinates, cursor, x + width, y + height, x, y + height);
+                cursor = writeEdge(dynamicFovEdgeCoordinates, cursor, x, y + height, x, y);
+            } else if ("POLYGON".equals(type) && obstacle.has("xPoints") && obstacle.has("yPoints")) {
+                JsonArray xPoints = obstacle.getAsJsonArray("xPoints");
+                JsonArray yPoints = obstacle.getAsJsonArray("yPoints");
+                if (xPoints != null && yPoints != null && xPoints.size() > 1 && xPoints.size() == yPoints.size()) {
+                    for (int i = 0; i < xPoints.size(); i++) {
+                        int next = (i + 1) % xPoints.size();
+                        cursor = writeEdge(dynamicFovEdgeCoordinates, cursor,
+                                xPoints.get(i).getAsDouble(), yPoints.get(i).getAsDouble(),
+                                xPoints.get(next).getAsDouble(), yPoints.get(next).getAsDouble());
+                    }
+                }
+            } else if ("ELLIPSE".equals(type)) {
+                double centerX = x + width * 0.5;
+                double centerY = y + height * 0.5;
+                double radiusX = width * 0.5;
+                double radiusY = height * 0.5;
+                for (int i = 0; i < DYNAMIC_ELLIPSE_SEGMENTS; i++) {
+                    int next = (i + 1) % DYNAMIC_ELLIPSE_SEGMENTS;
+                    cursor = writeEdge(dynamicFovEdgeCoordinates, cursor,
+                            centerX + radiusX * DYNAMIC_ELLIPSE_UNIT_X[i],
+                            centerY + radiusY * DYNAMIC_ELLIPSE_UNIT_Y[i],
+                            centerX + radiusX * DYNAMIC_ELLIPSE_UNIT_X[next],
+                            centerY + radiusY * DYNAMIC_ELLIPSE_UNIT_Y[next]);
+                }
+            }
+        }
+        return cursor;
+    }
+
+    private static int writeEdge(double[] coordinates, int cursor,
+            double startX, double startY, double endX, double endY) {
+        coordinates[cursor++] = startX;
+        coordinates[cursor++] = startY;
+        coordinates[cursor++] = endX;
+        coordinates[cursor++] = endY;
+        return cursor;
+    }
+
     private static double[] flattenEdgeCoordinates(List<Point2D[]> edges) {
         double[] coordinates = new double[edges.size() * 4];
         int index = 0;
@@ -7836,48 +7949,48 @@ public class GameClient extends Application {
         return Double.POSITIVE_INFINITY;
     }
 
-    // 没什么用
-    // 多边形顶点简化（抽稀）算法 - 共线点消除
-    private List<Point2D> simplifyPolygon(List<Point2D> points, double angleTolerance) {
-        if (points == null || points.size() <= 3)
-            return points;
+    /** 与旧轮廓抽稀判定等价，但只为最终保留点创建Point2D。 */
+    static List<Point2D> simplifyFovRays(Point2D source, double[] directionsX,
+            double[] directionsY, double[] distances, double angleTolerance) {
+        int rayCount = Math.min(directionsX.length, Math.min(directionsY.length, distances.length));
+        List<Point2D> simplified = new ArrayList<>(Math.min(rayCount + 1, 128));
+        simplified.add(source);
+        if (rayCount == 0)
+            return simplified;
+        if (rayCount <= 2) {
+            for (int i = 0; i < rayCount; i++)
+                simplified.add(new Point2D(source.getX() + directionsX[i] * distances[i],
+                        source.getY() + directionsY[i] * distances[i]));
+            return simplified;
+        }
 
-        List<Point2D> simplified = new ArrayList<>();
-        simplified.add(points.get(0));
-
-        for (int i = 1; i < points.size() - 1; i++) {
-            Point2D prev = simplified.get(simplified.size() - 1);
-            Point2D curr = points.get(i);
-            Point2D next = points.get(i + 1);
-
-            double dx1 = curr.getX() - prev.getX();
-            double dy1 = curr.getY() - prev.getY();
-            double dx2 = next.getX() - curr.getX();
-            double dy2 = next.getY() - curr.getY();
-
-            // 过滤掉几乎完全重合的点
-            if (Math.abs(dx1) < 0.1 && Math.abs(dy1) < 0.1)
+        double previousX = source.getX();
+        double previousY = source.getY();
+        for (int rayIndex = 0; rayIndex < rayCount - 1; rayIndex++) {
+            double currentX = source.getX() + directionsX[rayIndex] * distances[rayIndex];
+            double currentY = source.getY() + directionsY[rayIndex] * distances[rayIndex];
+            double nextX = source.getX() + directionsX[rayIndex + 1] * distances[rayIndex + 1];
+            double nextY = source.getY() + directionsY[rayIndex + 1] * distances[rayIndex + 1];
+            double incomingX = currentX - previousX;
+            double incomingY = currentY - previousY;
+            if (Math.abs(incomingX) < 0.1 && Math.abs(incomingY) < 0.1)
                 continue;
 
-            // 计算 prev->curr 和 curr->next 的向量角度
-            double angle1 = Math.atan2(dy1, dx1);
-            double angle2 = Math.atan2(dy2, dx2);
-
-            // 计算角度差 (处理 -PI 和 PI 的缠绕)
-            double diff = Math.abs(angle1 - angle2);
-            if (diff > Math.PI) {
-                diff = 2 * Math.PI - diff;
-            }
-
-            // 如果方向变化大于设定的容差（说明遇到墙角或障碍物边缘），才保留该点
-            // 否则认为它是同一面墙上的中间点，直接丢弃！
-            if (diff > angleTolerance) {
-                simplified.add(curr);
+            double outgoingX = nextX - currentX;
+            double outgoingY = nextY - currentY;
+            double cross = incomingX * outgoingY - incomingY * outgoingX;
+            double dot = incomingX * outgoingX + incomingY * outgoingY;
+            double directionChange = Math.abs(Math.atan2(cross, dot));
+            if (directionChange > angleTolerance) {
+                simplified.add(new Point2D(currentX, currentY));
+                previousX = currentX;
+                previousY = currentY;
             }
         }
-        // 确保终点被包含
-        simplified.add(points.get(points.size() - 1));
 
+        int lastRay = rayCount - 1;
+        simplified.add(new Point2D(source.getX() + directionsX[lastRay] * distances[lastRay],
+                source.getY() + directionsY[lastRay] * distances[lastRay]));
         return simplified;
     }
 

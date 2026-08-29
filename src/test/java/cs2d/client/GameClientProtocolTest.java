@@ -97,6 +97,73 @@ class GameClientProtocolTest {
     }
 
     @Test
+    void precomputedFovDirectionsMatchDirectTrigonometry() {
+        double sourceAngle = 1.2345;
+        double[] directionsX = new double[GameClient.FOV_RAY_COUNT];
+        double[] directionsY = new double[GameClient.FOV_RAY_COUNT];
+        GameClient.populateFovRayDirections(sourceAngle, directionsX, directionsY);
+
+        double fov = Math.toRadians(106.0);
+        double step = fov / (GameClient.FOV_RAY_COUNT - 1);
+        for (int i = 0; i < GameClient.FOV_RAY_COUNT; i += 127) {
+            double directAngle = sourceAngle - fov * 0.5 + i * step;
+            assertEquals(Math.cos(directAngle), directionsX[i], 1.0e-12);
+            assertEquals(Math.sin(directAngle), directionsY[i], 1.0e-12);
+        }
+    }
+
+    @Test
+    void primitiveFovSimplificationMatchesLegacyPointAlgorithm() {
+        int rayCount = GameClient.FOV_RAY_COUNT;
+        Point2D source = new Point2D(321.25, 654.75);
+        double[] directionsX = new double[rayCount];
+        double[] directionsY = new double[rayCount];
+        double[] distances = new double[rayCount];
+        GameClient.populateFovRayDirections(-0.731, directionsX, directionsY);
+        List<Point2D> raw = new java.util.ArrayList<>(rayCount + 1);
+        raw.add(source);
+        for (int i = 0; i < rayCount; i++) {
+            distances[i] = 600 + (i / 37 % 5) * 140 + Math.sin(i * 0.17) * 3;
+            raw.add(new Point2D(source.getX() + directionsX[i] * distances[i],
+                    source.getY() + directionsY[i] * distances[i]));
+        }
+
+        double tolerance = Math.toRadians(1.0);
+        List<Point2D> expected = legacySimplify(raw, tolerance);
+        List<Point2D> actual = GameClient.simplifyFovRays(
+                source, directionsX, directionsY, distances, tolerance);
+
+        assertEquals(expected.size(), actual.size());
+        for (int i = 0; i < expected.size(); i++) {
+            assertEquals(expected.get(i).getX(), actual.get(i).getX(), 1.0e-9);
+            assertEquals(expected.get(i).getY(), actual.get(i).getY(), 1.0e-9);
+        }
+    }
+
+    private static List<Point2D> legacySimplify(List<Point2D> points, double angleTolerance) {
+        List<Point2D> simplified = new java.util.ArrayList<>();
+        simplified.add(points.get(0));
+        for (int i = 1; i < points.size() - 1; i++) {
+            Point2D previous = simplified.get(simplified.size() - 1);
+            Point2D current = points.get(i);
+            Point2D next = points.get(i + 1);
+            double dx1 = current.getX() - previous.getX();
+            double dy1 = current.getY() - previous.getY();
+            if (Math.abs(dx1) < 0.1 && Math.abs(dy1) < 0.1)
+                continue;
+            double angle1 = Math.atan2(dy1, dx1);
+            double angle2 = Math.atan2(next.getY() - current.getY(), next.getX() - current.getX());
+            double difference = Math.abs(angle1 - angle2);
+            if (difference > Math.PI)
+                difference = Math.PI * 2.0 - difference;
+            if (difference > angleTolerance)
+                simplified.add(current);
+        }
+        simplified.add(points.get(points.size() - 1));
+        return simplified;
+    }
+
+    @Test
     void duplicateMapPayloadsHaveTheSameSignature() {
         JsonObject map = new JsonObject();
         map.addProperty("sessionId", "session-a");
