@@ -356,6 +356,10 @@ public class GameClient extends Application {
     private Label moneyLabel, hpLabel, armorLabel, weaponLabel, ammoLabel;
 
     private HBox equipBox; // 用于显示玩家装备图标的容器
+    /** 装备栏只在实际内容变化时重建，避免每帧触发SVG、CSS和布局失效。 */
+    private String renderedEquipmentHudSignature;
+    /** null表示尚未应用过全局HUD可见性。 */
+    private Boolean renderedHudGlobalVisibility;
     private Label buyPrompt, changeWeaponPrompt; // 用于显示购买和换枪提示的标签
     // 击杀信息
     private VBox killFeedVBox; // 专门用于存放击杀信息UI的容器
@@ -589,6 +593,9 @@ public class GameClient extends Application {
     private double perfTimeFogDraw = 0;
     /** [4] 性能日志间隔内的HUD绘制耗时 (纳秒) */
     private double perfTimeHudDraw = 0;
+    /** HUD缓存命中审计：稳定状态下应远小于渲染帧数。 */
+    private long perfEquipmentHudRebuilds = 0;
+    private long perfHudVisibilityPasses = 0;
 
     // --- [新] 网络消息处理 (Message Handling) 耗时 ---
     /** [M] 消息处理总耗时 */
@@ -2171,6 +2178,10 @@ public class GameClient extends Application {
                         long fovFinalVertices = fovFinalVertexCount.sumThenReset();
                         long fovMaxNanos = fovMaxCalculationNanos.getAndSet(0);
                         long fovLatestVertices = fovLatestFinalVertexCount.get();
+                        long equipmentHudRebuilds = perfEquipmentHudRebuilds;
+                        long hudVisibilityPasses = perfHudVisibilityPasses;
+                        perfEquipmentHudRebuilds = 0;
+                        perfHudVisibilityPasses = 0;
                         double fovBackgroundAvgMs = fovCalculations == 0 ? 0.0
                                 : fovTotalNanos / (double) fovCalculations / 1_000_000.0;
 
@@ -2207,6 +2218,8 @@ public class GameClient extends Application {
                                     fovCalculations == 0 ? 0.0 : fovRawVertices / (double) fovCalculations,
                                     fovCalculations == 0 ? 0.0 : fovFinalVertices / (double) fovCalculations,
                                     fovLatestVertices);
+                            System.out.printf("  [HUD-CACHE] 装备节点重建 %d | 全局可见性遍历 %d\n",
+                                    equipmentHudRebuilds, hudVisibilityPasses);
                             System.out.println("  --- (消息处理 [M] 的详细分解) ---");
                             System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
                             System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
@@ -8098,6 +8111,11 @@ public class GameClient extends Application {
             node.setStyle(style);
     }
 
+    private static void setVisibleIfChanged(Node node, boolean visible) {
+        if (node.isVisible() != visible)
+            node.setVisible(visible);
+    }
+
     private void updateHUDLabels(StackPane interactionBarContainer, Pane interactionProgressBar) {
         if (latestGameState == null || (clientState != cs2d.client.GameClient.ClientState.PLAYING
                 && clientState != cs2d.client.GameClient.ClientState.GAME_OVER)) {
@@ -8367,6 +8385,13 @@ public class GameClient extends Application {
     }
 
     private void updateEquipmentIcons(JsonObject meData) {
+        String equipmentSignature = createEquipmentHudSignature(meData);
+        if (Objects.equals(renderedEquipmentHudSignature, equipmentSignature)) {
+            setVisibleIfChanged(equipBox, !equipBox.getChildren().isEmpty());
+            return;
+        }
+        renderedEquipmentHudSignature = equipmentSignature;
+        perfEquipmentHudRebuilds++;
         equipBox.getChildren().clear();
 
         String myTeam = getString(meData, "team");
@@ -8407,7 +8432,6 @@ public class GameClient extends Application {
                         svgIcon.setFill(Color.YELLOW);
                         svgIcon.setScaleX(0.8);
                         svgIcon.setScaleY(0.8);
-                        svgIcon.setEffect(new javafx.scene.effect.DropShadow(10, Color.YELLOW));
                         svgIcon.setEffect(SELECTED_EQUIP_EFFECT);
                     } else {
                         svgIcon.setFill(teamIconColor);
@@ -8441,7 +8465,34 @@ public class GameClient extends Application {
             }
         }
 
-        equipBox.setVisible(!equipBox.getChildren().isEmpty());
+        setVisibleIfChanged(equipBox, !equipBox.getChildren().isEmpty());
+    }
+
+    /** 只包含装备栏可见状态；玩家位置、血量等变化不会让SVG节点树失效。 */
+    static String createEquipmentHudSignature(JsonObject playerData) {
+        if (playerData == null)
+            return "none";
+
+        StringBuilder signature = new StringBuilder(128);
+        signature.append(getString(playerData, "team")).append('|')
+                .append(getInt(playerData, "currentSlot")).append('|')
+                .append(getBool(playerData, "hasKevlar")).append('|')
+                .append(getBool(playerData, "hasHelmet")).append('|')
+                .append(getBool(playerData, "hasDefuseKit"));
+
+        JsonArray equipment = playerData.has("equipment") && playerData.get("equipment").isJsonArray()
+                ? playerData.getAsJsonArray("equipment")
+                : null;
+        if (equipment != null) {
+            for (JsonElement element : equipment) {
+                if (!element.isJsonObject())
+                    continue;
+                JsonObject item = element.getAsJsonObject();
+                signature.append('|').append(getString(item, "name"))
+                        .append(':').append(getInt(item, "count"));
+            }
+        }
+        return signature.toString();
     }
 
     private void updateInteractionBar(JsonObject meData, StackPane interactionBarContainer,
@@ -8461,8 +8512,12 @@ public class GameClient extends Application {
     }
 
     private void setHUDVisibility(boolean visible) {
+        if (Objects.equals(renderedHudGlobalVisibility, visible))
+            return;
+        renderedHudGlobalVisibility = visible;
+        perfHudVisibilityPasses++;
         for (Node node : ((AnchorPane) gameContainer.getChildren().get(1)).getChildren()) {
-            node.setVisible(visible);
+            setVisibleIfChanged(node, visible);
         }
     }
 

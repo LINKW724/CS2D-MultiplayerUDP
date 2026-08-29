@@ -140,6 +140,35 @@ class GameClientProtocolTest {
         }
     }
 
+    @Test
+    void equipmentHudSignatureChangesOnlyWhenVisibleEquipmentStateChanges() {
+        JsonObject player = new JsonObject();
+        player.addProperty("team", "CT");
+        player.addProperty("currentSlot", 1);
+        player.addProperty("hasKevlar", true);
+        player.addProperty("hasHelmet", false);
+        player.addProperty("hasDefuseKit", true);
+        JsonArray equipment = new JsonArray();
+        JsonObject flashbang = new JsonObject();
+        flashbang.addProperty("name", "FLASHBANG");
+        flashbang.addProperty("count", 2);
+        equipment.add(flashbang);
+        player.add("equipment", equipment);
+
+        String initial = GameClient.createEquipmentHudSignature(player);
+        JsonObject unrelatedChange = player.deepCopy();
+        unrelatedChange.addProperty("health", 37);
+        assertEquals(initial, GameClient.createEquipmentHudSignature(unrelatedChange));
+
+        JsonObject selectedItemChange = player.deepCopy();
+        selectedItemChange.addProperty("currentSlot", 6);
+        assertFalse(initial.equals(GameClient.createEquipmentHudSignature(selectedItemChange)));
+
+        JsonObject countChange = player.deepCopy();
+        countChange.getAsJsonArray("equipment").get(0).getAsJsonObject().addProperty("count", 1);
+        assertFalse(initial.equals(GameClient.createEquipmentHudSignature(countChange)));
+    }
+
     private static List<Point2D> legacySimplify(List<Point2D> points, double angleTolerance) {
         List<Point2D> simplified = new java.util.ArrayList<>();
         simplified.add(points.get(0));
