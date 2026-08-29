@@ -169,6 +169,20 @@ class GameClientProtocolTest {
         assertFalse(initial.equals(GameClient.createEquipmentHudSignature(countChange)));
     }
 
+    @Test
+    void residentStaticMapTransformMatchesCanvasCameraTransform() {
+        double cameraOrigin = 125.5;
+        double scale = 0.75;
+        double offset = 42.0;
+        double worldCoordinate = 900.0;
+
+        double nodeScreenCoordinate = worldCoordinate * scale
+                + GameClient.staticMapLayerTranslation(cameraOrigin, scale, offset);
+        double canvasScreenCoordinate = (worldCoordinate - cameraOrigin) * scale + offset;
+
+        assertEquals(canvasScreenCoordinate, nodeScreenCoordinate, 0.000_000_1);
+    }
+
     private static List<Point2D> legacySimplify(List<Point2D> points, double angleTolerance) {
         List<Point2D> simplified = new java.util.ArrayList<>();
         simplified.add(points.get(0));

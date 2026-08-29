@@ -19,6 +19,7 @@ import javafx.application.Platform;
 import javafx.geometry.*;
 // 导入 JavaFX 场景和节点相关的类
 import javafx.scene.Cursor;
+import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 // 导入 JavaFX 画布和图形上下文，用于2D绘图
@@ -38,7 +39,9 @@ import javafx.scene.media.AudioClip;
 import javafx.scene.paint.Color;
 // 导入 JavaFX 形状相关的类，如 SVG 路径
 import javafx.scene.shape.FillRule;
+import javafx.scene.shape.Rectangle;
 import javafx.scene.shape.SVGPath;
+import javafx.scene.transform.Affine;
 // 导入 JavaFX 文本和字体相关的类
 import javafx.scene.text.*;
 // 导入 JavaFX 窗口相关的类
@@ -78,6 +81,7 @@ import java.util.zip.GZIPInputStream;
 import java.util.zip.CRC32;
 
 import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.effect.ColorAdjust;
 
 // 定义游戏客户端的主类，它继承自 JavaFX 的 Application 类
@@ -144,8 +148,16 @@ public class GameClient extends Application {
     static final int OBSTACLE_CACHE_TILE_SIZE = 1024;
     /** 全图视角最终只占1600x900逻辑像素；2048概览纹理足够并可把20次提交合成1次。 */
     static final int OBSTACLE_OVERVIEW_MAX_SIZE = 2048;
+    private static final boolean USE_RESIDENT_STATIC_MAP_LAYER = Boolean.parseBoolean(
+            System.getProperty("cs2d.staticMapLayer", "false"));
     private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
     private Image obstacleOverviewImage = null;
+    private Group residentStaticMapLayer;
+    private Group residentObstacleTileLayer;
+    private ImageView residentObstacleOverviewView;
+    private final Affine residentStaticMapTransform = new Affine();
+    private Node gameRenderNode;
+    private volatile boolean residentStaticMapReady = false;
     /** 同一服务端会话可能有多个已经在途的map_data分片，只初始化一次相同地图。 */
     private String initializedMapSignature = null;
 
@@ -889,6 +901,7 @@ public class GameClient extends Application {
             initializedMapSignature = null;
             obstacleCacheTiles.clear();
             obstacleOverviewImage = null;
+            residentStaticMapReady = false;
             spectateTeammateIndex = 0; // 重置观战索引
             clientState = cs2d.client.GameClient.ClientState.CONNECTING; // 重置为初始状态
 
@@ -950,6 +963,7 @@ public class GameClient extends Application {
         this.initializedMapSignature = null;
         this.obstacleCacheTiles.clear();
         this.obstacleOverviewImage = null;
+        this.residentStaticMapReady = false;
         this.lastStateSequence.set(-1);
         this.chunkBuffers.clear();
         this.messageBatchQueue.clear();
@@ -1407,6 +1421,7 @@ public class GameClient extends Application {
                     initializedMapSignature = null;
                     obstacleCacheTiles.clear();
                     obstacleOverviewImage = null;
+                    residentStaticMapReady = false;
                 }
                 serverSessionId = incomingSessionId;
                 myPlayerId = getString(json, "playerId"); // 获取并保存我自己的玩家ID
@@ -1672,7 +1687,9 @@ public class GameClient extends Application {
         // 【核心新增】在效果开始的瞬间，对Canvas进行快照
         // 这会捕获当前帧的游戏画面，并存入我们新加的变量中
         if (canvas != null) {
-            this.flashbangSnapshot = canvas.snapshot(null, null);
+            this.flashbangSnapshot = gameRenderNode != null
+                    ? gameRenderNode.snapshot(null, null)
+                    : canvas.snapshot(null, null);
         }
 
         // 后续逻辑保持不变
@@ -2187,6 +2204,13 @@ public class GameClient extends Application {
                         perfHudVisibilityPasses = 0;
                         double fovBackgroundAvgMs = fovCalculations == 0 ? 0.0
                                 : fovTotalNanos / (double) fovCalculations / 1_000_000.0;
+                        boolean staticMapLayerActive = isResidentStaticMapLayerReady();
+                        String staticMapLayerMode = staticMapLayerActive
+                                ? ("full".equals(cameraMode) && residentObstacleOverviewView != null
+                                        ? "overview"
+                                        : "tiles")
+                                : "canvas";
+                        int staticMapCachedTiles = obstacleCacheTiles.size();
 
                         diagnosticsExecutor.execute(() -> {
                             RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
@@ -2207,6 +2231,8 @@ public class GameClient extends Application {
                             System.out.printf("            GC %d次 / 停顿%dms | Heap %.1f/%.1f MiB%n",
                                     runtime.gcCollections(), runtime.gcPauseMillis(),
                                     runtime.heapUsedMiB(), runtime.heapCommittedMiB());
+                            System.out.printf("  [STATIC-MAP] active=%s | mode=%s | cachedTiles=%d%n",
+                                    staticMapLayerActive, staticMapLayerMode, staticMapCachedTiles);
                             System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                             System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                             System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -2292,6 +2318,8 @@ public class GameClient extends Application {
             perfFrameCount++; // 即使是空帧也要计数
             return; // 结束绘制
         }
+
+        updateResidentStaticMapLayer();
 
         // [修复] 不再在这里计算 deltaTime，直接使用传入的参数
 
@@ -2526,36 +2554,35 @@ public class GameClient extends Application {
         double maxX = bottomRightWorld.getX();
         double maxY = bottomRightWorld.getY();
 
-        // --- B. 绘制底层静态物体 (保持不变) ---
-        gc.setFill(CARD_BACKGROUND);
-        gc.fillRect(0, 0, getDouble(mapData, "width"), getDouble(mapData, "height"));
-
         // --- [核心优化] C. 绘制障碍物分块缓存 ---
         long obstacleStartTime = System.nanoTime();
-        if ("full".equals(cameraMode) && obstacleOverviewImage != null) {
-            // 全图缩放后的目标区域不超过画布；单张概览纹理避免每帧提交全部20个高清块。
-            gc.drawImage(obstacleOverviewImage, 0, 0,
-                    getDouble(mapData, "width"), getDouble(mapData, "height"));
-        } else if (!obstacleCacheTiles.isEmpty()) {
-            // 跟随/自由视角只提交当前视口相交的高清纹理块。
-            for (ObstacleCacheTile tile : obstacleCacheTiles) {
-                if (cameraViewBounds.intersects(tile.bounds()))
-                    gc.drawImage(tile.image(), tile.x(), tile.y());
-            }
-        } else if (mapData != null && mapData.has("obstacles")) {
-            // [备用方案] (保持不变, 以防万一缓存创建失败)
-            gc.setFill(Color.web("#4a5568"));
-            JsonArray allObstacles = mapData.getAsJsonArray("obstacles");
-            allObstacles.forEach(obsEl -> {
-                if (obsEl.isJsonObject()) {
-                    JsonObject obs = obsEl.getAsJsonObject();
-                    Rectangle2D bounds = getObstacleBounds(obs);
-                    if (bounds != null && cameraViewBounds.intersects(bounds)) {
-                        drawObstacle(obs);
-                    }
+        if (!isResidentStaticMapLayerReady()) {
+            // A/B回退路径：保持原单Canvas静态地图绘制行为。
+            gc.setFill(CARD_BACKGROUND);
+            gc.fillRect(0, 0, getDouble(mapData, "width"), getDouble(mapData, "height"));
+
+            if ("full".equals(cameraMode) && obstacleOverviewImage != null) {
+                gc.drawImage(obstacleOverviewImage, 0, 0,
+                        getDouble(mapData, "width"), getDouble(mapData, "height"));
+            } else if (!obstacleCacheTiles.isEmpty()) {
+                for (ObstacleCacheTile tile : obstacleCacheTiles) {
+                    if (cameraViewBounds.intersects(tile.bounds()))
+                        gc.drawImage(tile.image(), tile.x(), tile.y());
                 }
-            });
-            System.err.println("[警告] 障碍物分块缓存为空，正在回退到慢速绘制！");
+            } else if (mapData != null && mapData.has("obstacles")) {
+                gc.setFill(Color.web("#4a5568"));
+                JsonArray allObstacles = mapData.getAsJsonArray("obstacles");
+                allObstacles.forEach(obsEl -> {
+                    if (obsEl.isJsonObject()) {
+                        JsonObject obs = obsEl.getAsJsonObject();
+                        Rectangle2D bounds = getObstacleBounds(obs);
+                        if (bounds != null && cameraViewBounds.intersects(bounds)) {
+                            drawObstacle(obs);
+                        }
+                    }
+                });
+                System.err.println("[警告] 障碍物分块缓存为空，正在回退到慢速绘制！");
+            }
         }
         perfTimeDrawWorld_Obstacles += (System.nanoTime() - obstacleStartTime); // 累加 [2a] (现在应该接近0)
         // --- [优化结束] ---
@@ -4949,6 +4976,23 @@ public class GameClient extends Application {
         canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT); // 创建一个画布
         gc = canvas.getGraphicsContext2D(); // 获取画布的图形上下文
         System.out.println("[Render] Fog pipeline: single-canvas EVEN_ODD");
+        if (USE_RESIDENT_STATIC_MAP_LAYER) {
+            residentStaticMapLayer = new Group();
+            residentStaticMapLayer.setManaged(false);
+            residentStaticMapLayer.setMouseTransparent(true);
+            residentStaticMapLayer.getTransforms().setAll(residentStaticMapTransform);
+
+            Pane renderPane = new Pane(residentStaticMapLayer, canvas);
+            renderPane.setMinSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+            renderPane.setPrefSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+            renderPane.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+            renderPane.setClip(new Rectangle(CANVAS_WIDTH, CANVAS_HEIGHT));
+            gameRenderNode = renderPane;
+            System.out.println("[Render] Static map layer: resident ImageView (A/B enabled)");
+        } else {
+            gameRenderNode = canvas;
+            System.out.println("[Render] Static map layer: Canvas fallback (enable with -Dcs2d.staticMapLayer=true)");
+        }
 
         // 创建各种UI元素
         createBuyMenuUI();
@@ -4959,7 +5003,7 @@ public class GameClient extends Application {
         gameContainer.setPickOnBounds(false);
 
         // 将所有UI元素添加到游戏容器中
-        gameContainer.getChildren().addAll(canvas, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
+        gameContainer.getChildren().addAll(gameRenderNode, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
         gameContainer.setVisible(false); // 初始时隐藏游戏容器
     }
 
@@ -9779,8 +9823,83 @@ public class GameClient extends Application {
         }
 
         obstacleOverviewImage = createObstacleOverview(mapWidth, mapHeight);
+        rebuildResidentStaticMapLayer(mapWidth, mapHeight);
         System.out.printf("[缓存] 分块烘焙完成: %d块, 障碍物块引用%d。%n",
                 obstacleCacheTiles.size(), bakedObstacleReferences);
+    }
+
+    private void rebuildResidentStaticMapLayer(double mapWidth, double mapHeight) {
+        if (!USE_RESIDENT_STATIC_MAP_LAYER || residentStaticMapLayer == null)
+            return;
+
+        residentStaticMapReady = false;
+        Rectangle background = new Rectangle(0, 0, mapWidth, mapHeight);
+        background.setFill(CARD_BACKGROUND);
+
+        Group tileLayer = new Group();
+        tileLayer.setManaged(false);
+        for (ObstacleCacheTile tile : obstacleCacheTiles) {
+            ImageView tileView = new ImageView(tile.image());
+            tileView.setX(tile.x());
+            tileView.setY(tile.y());
+            tileView.setManaged(false);
+            tileLayer.getChildren().add(tileView);
+        }
+
+        ImageView overviewView = null;
+        if (obstacleOverviewImage != null) {
+            overviewView = new ImageView(obstacleOverviewImage);
+            overviewView.setFitWidth(mapWidth);
+            overviewView.setFitHeight(mapHeight);
+            overviewView.setPreserveRatio(false);
+            overviewView.setManaged(false);
+            overviewView.setVisible(false);
+        }
+
+        residentObstacleTileLayer = tileLayer;
+        residentObstacleOverviewView = overviewView;
+        residentStaticMapLayer.getChildren().clear();
+        residentStaticMapLayer.getChildren().add(background);
+        residentStaticMapLayer.getChildren().add(tileLayer);
+        if (overviewView != null)
+            residentStaticMapLayer.getChildren().add(overviewView);
+        residentStaticMapReady = true;
+        System.out.printf("[Render] Resident static map ready: %d tile nodes, overview=%s%n",
+                tileLayer.getChildren().size(), overviewView != null);
+    }
+
+    private boolean isResidentStaticMapLayerReady() {
+        return USE_RESIDENT_STATIC_MAP_LAYER && residentStaticMapReady && residentStaticMapLayer != null;
+    }
+
+    private void updateResidentStaticMapLayer() {
+        if (!USE_RESIDENT_STATIC_MAP_LAYER || residentStaticMapLayer == null)
+            return;
+
+        boolean ready = isResidentStaticMapLayerReady();
+        setVisibleIfChanged(residentStaticMapLayer, ready);
+        if (!ready)
+            return;
+
+        boolean useOverview = "full".equals(cameraMode) && residentObstacleOverviewView != null;
+        setVisibleIfChanged(residentObstacleTileLayer, !useOverview);
+        if (residentObstacleOverviewView != null)
+            setVisibleIfChanged(residentObstacleOverviewView, useOverview);
+
+        double translateX = staticMapLayerTranslation(camera.x, camera.scale, camera.offsetX);
+        double translateY = staticMapLayerTranslation(camera.y, camera.scale, camera.offsetY);
+        if (Double.compare(residentStaticMapTransform.getMxx(), camera.scale) != 0
+                || Double.compare(residentStaticMapTransform.getMyy(), camera.scale) != 0
+                || Double.compare(residentStaticMapTransform.getTx(), translateX) != 0
+                || Double.compare(residentStaticMapTransform.getTy(), translateY) != 0) {
+            residentStaticMapTransform.setToTransform(
+                    camera.scale, 0.0, translateX,
+                    0.0, camera.scale, translateY);
+        }
+    }
+
+    static double staticMapLayerTranslation(double cameraOrigin, double scale, double offset) {
+        return offset - cameraOrigin * scale;
     }
 
     /** 为全图模式生成一张不超过2048的屏幕级概览纹理，高清跟随模式仍使用原始分块。 */
