@@ -46,7 +46,7 @@ class GameClientProtocolTest {
 
     @Test
     void fovOptimizationPreservesRayPrecisionAndIntersectionGeometry() {
-        assertEquals(424, GameClient.FOV_RAY_COUNT);
+        assertEquals(1696, GameClient.FOV_RAY_COUNT);
 
         double distance = GameClient.raySegmentIntersectionDistance(
                 0, 0, 1, 0, 100,

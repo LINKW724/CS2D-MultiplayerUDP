@@ -398,7 +398,7 @@ public class GameClient extends Application {
     private static final int INPUT_SEND_RATE = 120;
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
-    static final int FOV_RAY_COUNT = 106 * 4;
+    static final int FOV_RAY_COUNT = 106 * 16;
     private static final int MAX_NETWORK_MESSAGES_PER_RENDER_FRAME = 512;
 
     // --- JavaFX UI 元素 ---
@@ -7637,7 +7637,7 @@ public class GameClient extends Application {
         List<JsonObject> dynamicObstacles = request.dynamicObstacles();
         final double fovRadians = Math.toRadians(106.0); // FOV 106
 
-        final int NUM_FOV_RAYS = FOV_RAY_COUNT; // 保持原有424条射线精度
+        final int NUM_FOV_RAYS = FOV_RAY_COUNT; // 1696条射线：每度16条，保留精确边求交
 
         final double RAY_LENGTH = 8000.0;
         final double angleStep = fovRadians / (NUM_FOV_RAYS - 1);
