@@ -169,13 +169,6 @@ class GameClientProtocolTest {
         assertFalse(initial.equals(GameClient.createEquipmentHudSignature(countChange)));
     }
 
-    @Test
-    void layeredFogKeepsLegacyOpacityForEveryCameraMode() {
-        assertEquals(0.85, GameClient.fogOpacityForCameraMode("follow"), 0.0);
-        assertEquals(0.5, GameClient.fogOpacityForCameraMode("full"), 0.0);
-        assertEquals(0.5, GameClient.fogOpacityForCameraMode("free"), 0.0);
-    }
-
     private static List<Point2D> legacySimplify(List<Point2D> points, double angleTolerance) {
         List<Point2D> simplified = new java.util.ArrayList<>();
         simplified.add(points.get(0));

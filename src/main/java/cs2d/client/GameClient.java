@@ -402,11 +402,8 @@ public class GameClient extends Application {
     private static final int INPUT_SEND_RATE = 120;
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
-    private static final boolean USE_COMPOSITED_FOG_LAYER = Boolean.parseBoolean(
-            System.getProperty("cs2d.compositedFog", "false"));
     private static final Color FOLLOW_FOG_COLOR = Color.rgb(26, 32, 44, 0.85);
     private static final Color GLOBAL_FOG_COLOR = Color.rgb(26, 32, 44, 0.5);
-    private static final Color FOG_BASE_COLOR = Color.rgb(26, 32, 44);
     static final int FOV_RAY_COUNT = 106 * 16;
     private static final double FOV_RADIANS = Math.toRadians(106.0);
     private static final double FOV_ANGLE_STEP = FOV_RADIANS / (FOV_RAY_COUNT - 1);
@@ -424,11 +421,6 @@ public class GameClient extends Application {
     private StackPane rootPane; // 根布局容器
     private Canvas canvas; // 游戏绘图区域
     private GraphicsContext gc; // 画布的图形上下文，用于绘图
-    private Canvas fogCanvas;
-    private GraphicsContext fogGc;
-    private Canvas screenOverlayCanvas;
-    private GraphicsContext screenOverlayGc;
-    private StackPane renderLayers;
     private VBox ipEntryPane; // IP输入界面
     private VBox serverBrowserPane; // [新增] 服务器浏览器界面
     private final Map<String, JsonObject> discoveredServers = new ConcurrentHashMap<>(); // [新增] 发现的服务器
@@ -573,6 +565,7 @@ public class GameClient extends Application {
 
     /** 性能日志间隔内的总帧数 */
     private int perfFrameCount = 0;
+    private final RuntimePerformanceMonitor runtimePerformanceMonitor = new RuntimePerformanceMonitor();
     // 后台 FOV 多维度监控；LongAdder 避免计算线程与 JavaFX 线程争用。
     private final LongAdder fovRequestCount = new LongAdder();
     private final LongAdder fovCalculationCount = new LongAdder();
@@ -1679,9 +1672,7 @@ public class GameClient extends Application {
         // 【核心新增】在效果开始的瞬间，对Canvas进行快照
         // 这会捕获当前帧的游戏画面，并存入我们新加的变量中
         if (canvas != null) {
-            this.flashbangSnapshot = renderLayers != null
-                    ? renderLayers.snapshot(null, null)
-                    : canvas.snapshot(null, null);
+            this.flashbangSnapshot = canvas.snapshot(null, null);
         }
 
         // 后续逻辑保持不变
@@ -2198,16 +2189,24 @@ public class GameClient extends Application {
                                 : fovTotalNanos / (double) fovCalculations / 1_000_000.0;
 
                         diagnosticsExecutor.execute(() -> {
+                            RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
                             System.out.println("--- 客户端性能 (最终诊断) (每 ~2s 更新) ---");
                             System.out.printf("  [A] 帧间总耗时 (Real FPS Time): \t%.3f ms (约 %d FPS)\n", avg_A_TotalFrameTime,
                                     (int) (1000.0 / avg_A_TotalFrameTime));
                             System.out.printf("  [B] 帧内代码 (Code in handle()): \t%.3f ms\n", avg_B_OnFrameCodeTime);
                             System.out.printf("  [M] 消息处理 (handleServerMessage): \t%.3f ms\n", avg_M_Total);
-                            System.out.printf("  [P] JavaFX Pulse/呈现间隔 (A - B): \t%.3f ms\n", avgFramePacingWait);
+                            System.out.printf("  [PACE] 帧外间隔 (目标等待 + Pulse/Prism/系统调度): \t%.3f ms\n",
+                                    avgFramePacingWait);
                             System.out.printf("  [REAL] 目标 %d Hz | 实际 %.1f FPS | 1%% Low %.1f FPS | p99 %.3f ms | 最大 %.3f ms | 严重迟帧 %d/%d\n",
                                     TARGET_RENDER_RATE, pacing.observedFps(), pacing.onePercentLowFps(),
                                     pacing.p99Millis(), pacing.maxMillis(), pacing.severelyLateFrames(),
                                     pacing.sampleCount());
+                            System.out.printf("  [RUNTIME] 进程CPU %.1f%% | FX线程CPU %.1fms (%s) | Prism线程CPU %.1fms (%s)%n",
+                                    runtime.processCpuPercent(), runtime.fxThreadCpuMillis(), runtime.fxThreadState(),
+                                    runtime.renderThreadCpuMillis(), runtime.renderThreadState());
+                            System.out.printf("            GC %d次 / 停顿%dms | Heap %.1f/%.1f MiB%n",
+                                    runtime.gcCollections(), runtime.gcPauseMillis(),
+                                    runtime.heapUsedMiB(), runtime.heapCommittedMiB());
                             System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                             System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                             System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -2363,38 +2362,23 @@ public class GameClient extends Application {
 
         // --- 4. 计时迷雾绘制 ---
         long fogStartTime = System.nanoTime();
-        if (USE_COMPOSITED_FOG_LAYER) {
-            drawFogComposited(frameFovPoints);
-        } else {
-            setVisibleIfChanged(fogCanvas, false);
-            gc.save();
-            drawFogLegacy(frameFovPoints);
-            gc.restore();
-        }
+        gc.save();
+        drawFog(frameFovPoints);
+        gc.restore();
         long fogEndTime = System.nanoTime();
         perfTimeFogDraw += (fogEndTime - fogStartTime); // 累加 [3]
 
         // --- 5. 计时 HUD 绘制 ---
         long hudStartTime = System.nanoTime();
-        screenOverlayGc.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        GraphicsContext worldGc = gc;
-        gc = screenOverlayGc;
-        try {
-            screenOverlayGc.save();
-            try {
-                drawCrosshairAndAimLine(); // 绘制准星
-                if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
-                    drawOffscreenIndicators();
-                }
-            } finally {
-                screenOverlayGc.restore();
-            }
-
-            // 最终覆盖层: 闪光弹效果
-            drawFlashbangEffect();
-        } finally {
-            gc = worldGc;
+        gc.save();
+        drawCrosshairAndAimLine(); // 绘制准星
+        if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
+            drawOffscreenIndicators();
         }
+        gc.restore();
+
+        // 最终覆盖层: 闪光弹效果
+        drawFlashbangEffect();
         long hudEndTime = System.nanoTime();
         perfTimeHudDraw += (hudEndTime - hudStartTime); // 累加 [4]
 
@@ -4964,17 +4948,7 @@ public class GameClient extends Application {
         gameContainer.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT); // 设置最大大小
         canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT); // 创建一个画布
         gc = canvas.getGraphicsContext2D(); // 获取画布的图形上下文
-        fogCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
-        fogGc = fogCanvas.getGraphicsContext2D();
-        fogCanvas.setMouseTransparent(true);
-        screenOverlayCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
-        screenOverlayGc = screenOverlayCanvas.getGraphicsContext2D();
-        screenOverlayCanvas.setMouseTransparent(true);
-        renderLayers = new StackPane(canvas, fogCanvas, screenOverlayCanvas);
-        renderLayers.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
-        renderLayers.setPickOnBounds(false);
-        System.out.printf("[Render] Fog pipeline: %s (experimental opt-in: -Dcs2d.compositedFog=true)%n",
-                USE_COMPOSITED_FOG_LAYER ? "layered clipped-clear" : "legacy EVEN_ODD");
+        System.out.println("[Render] Fog pipeline: single-canvas EVEN_ODD");
 
         // 创建各种UI元素
         createBuyMenuUI();
@@ -4985,7 +4959,7 @@ public class GameClient extends Application {
         gameContainer.setPickOnBounds(false);
 
         // 将所有UI元素添加到游戏容器中
-        gameContainer.getChildren().addAll(renderLayers, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
+        gameContainer.getChildren().addAll(canvas, hudOverlay, buyMenuPane, scoreboardPane, tdmWeaponSelectorPane);
         gameContainer.setVisible(false); // 初始时隐藏游戏容器
     }
 
@@ -8083,37 +8057,8 @@ public class GameClient extends Application {
         return lines;
     }
 
-    /** 新路径：独立透明Canvas先填充迷雾，再通过FOV裁剪清出等价的透明孔洞。 */
-    private void drawFogComposited(List<Point2D> currentFovPoints) {
-        if (currentFovPoints.isEmpty()) {
-            setVisibleIfChanged(fogCanvas, false);
-            return;
-        }
-
-        setVisibleIfChanged(fogCanvas, true);
-        double fogOpacity = fogOpacityForCameraMode(cameraMode);
-        if (Double.compare(fogCanvas.getOpacity(), fogOpacity) != 0)
-            fogCanvas.setOpacity(fogOpacity);
-
-        fogGc.save();
-        try {
-            // 不透明底色会覆盖上一帧的透明孔洞；节点opacity负责最终0.85/0.5混合，
-            // 因此无需每帧先执行一次全屏clearRect。
-            fogGc.setFill(FOG_BASE_COLOR);
-            fogGc.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-
-            fogGc.setFillRule(FillRule.NON_ZERO);
-            fogGc.beginPath();
-            appendScreenSpaceFovPath(fogGc, currentFovPoints);
-            fogGc.clip();
-            fogGc.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        } finally {
-            fogGc.restore();
-        }
-    }
-
-    /** 原路径保留用于同版本A/B测试和显卡/JavaFX兼容回退。 */
-    private void drawFogLegacy(List<Point2D> currentFovPoints) {
+    /** 单Canvas路径，避免额外全屏纹理上传和Prism图层合成。 */
+    private void drawFog(List<Point2D> currentFovPoints) {
         if (currentFovPoints.isEmpty())
             return;
 
@@ -8132,10 +8077,6 @@ public class GameClient extends Application {
 
     private Color currentFogColor() {
         return "follow".equals(cameraMode) ? FOLLOW_FOG_COLOR : GLOBAL_FOG_COLOR;
-    }
-
-    static double fogOpacityForCameraMode(String mode) {
-        return "follow".equals(mode) ? 0.85 : 0.5;
     }
 
     /** 直接使用相机基础数值转换坐标，避免每个最终顶点创建临时Point2D。 */
