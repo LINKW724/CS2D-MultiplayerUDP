@@ -77,6 +77,23 @@ class GameClientProtocolTest {
                 new Rectangle2D(-5, -5, 10, 10), 0, 0, 0, halfFov, 8000));
         assertFalse(GameClient.obstacleMayIntersectFov(
                 new Rectangle2D(9000, -10, 20, 20), 0, 0, 0, halfFov, 8000));
+
+        double step = Math.toRadians(106.0) / (GameClient.FOV_RAY_COUNT - 1);
+        long centeredRange = GameClient.fovRayIndexRange(
+                new Rectangle2D(100, -10, 20, 20), 0, 0, 0,
+                halfFov, step, GameClient.FOV_RAY_COUNT, 8000);
+        assertTrue(centeredRange >= 0);
+        assertTrue((int) (centeredRange >>> 32) <= GameClient.FOV_RAY_COUNT / 2);
+        assertTrue((int) centeredRange >= GameClient.FOV_RAY_COUNT / 2);
+        assertEquals(-1L, GameClient.fovRayIndexRange(
+                new Rectangle2D(-120, -10, 20, 20), 0, 0, 0,
+                halfFov, step, GameClient.FOV_RAY_COUNT, 8000));
+
+        long surroundingRange = GameClient.fovRayIndexRange(
+                new Rectangle2D(-5, -5, 10, 10), 0, 0, 0,
+                halfFov, step, GameClient.FOV_RAY_COUNT, 8000);
+        assertEquals(0, (int) (surroundingRange >>> 32));
+        assertEquals(GameClient.FOV_RAY_COUNT - 1, (int) surroundingRange);
     }
 
     @Test
@@ -101,6 +118,7 @@ class GameClientProtocolTest {
         assertEquals(GameClient.createMapSignature(map), GameClient.createMapSignature(map.deepCopy()));
         assertFalse(GameClient.createMapSignature(map).equals(GameClient.createMapSignature(changed)));
         assertTrue(GameClient.OBSTACLE_CACHE_TILE_SIZE <= 4096);
+        assertTrue(GameClient.OBSTACLE_OVERVIEW_MAX_SIZE <= 4096);
     }
 
     @Test

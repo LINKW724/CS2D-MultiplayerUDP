@@ -142,7 +142,10 @@ public class GameClient extends Application {
     // --- 障碍物缓存 ---
     /** 单块远低于JavaFX 4096纹理上限，避免超大地图整图快照耗尽RTTexture。 */
     static final int OBSTACLE_CACHE_TILE_SIZE = 1024;
+    /** 全图视角最终只占1600x900逻辑像素；2048概览纹理足够并可把20次提交合成1次。 */
+    static final int OBSTACLE_OVERVIEW_MAX_SIZE = 2048;
     private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
+    private Image obstacleOverviewImage = null;
     /** 同一服务端会话可能有多个已经在途的map_data分片，只初始化一次相同地图。 */
     private String initializedMapSignature = null;
 
@@ -859,6 +862,7 @@ public class GameClient extends Application {
             fovPoints = new ArrayList<>();
             initializedMapSignature = null;
             obstacleCacheTiles.clear();
+            obstacleOverviewImage = null;
             spectateTeammateIndex = 0; // 重置观战索引
             clientState = cs2d.client.GameClient.ClientState.CONNECTING; // 重置为初始状态
 
@@ -919,6 +923,7 @@ public class GameClient extends Application {
         this.serverSessionId = null;
         this.initializedMapSignature = null;
         this.obstacleCacheTiles.clear();
+        this.obstacleOverviewImage = null;
         this.lastStateSequence.set(-1);
         this.chunkBuffers.clear();
         this.messageBatchQueue.clear();
@@ -1375,6 +1380,7 @@ public class GameClient extends Application {
                     chunkBuffers.clear();
                     initializedMapSignature = null;
                     obstacleCacheTiles.clear();
+                    obstacleOverviewImage = null;
                 }
                 serverSessionId = incomingSessionId;
                 myPlayerId = getString(json, "playerId"); // 获取并保存我自己的玩家ID
@@ -2487,8 +2493,12 @@ public class GameClient extends Application {
 
         // --- [核心优化] C. 绘制障碍物分块缓存 ---
         long obstacleStartTime = System.nanoTime();
-        if (!obstacleCacheTiles.isEmpty()) {
-            // 跟随/自由视角只提交当前视口相交的纹理块；全图视角会自然覆盖所有块。
+        if ("full".equals(cameraMode) && obstacleOverviewImage != null) {
+            // 全图缩放后的目标区域不超过画布；单张概览纹理避免每帧提交全部20个高清块。
+            gc.drawImage(obstacleOverviewImage, 0, 0,
+                    getDouble(mapData, "width"), getDouble(mapData, "height"));
+        } else if (!obstacleCacheTiles.isEmpty()) {
+            // 跟随/自由视角只提交当前视口相交的高清纹理块。
             for (ObstacleCacheTile tile : obstacleCacheTiles) {
                 if (cameraViewBounds.intersects(tile.bounds()))
                     gc.drawImage(tile.image(), tile.x(), tile.y());
@@ -7669,35 +7679,49 @@ public class GameClient extends Application {
         long intersectStartTime = System.nanoTime();
         final double sourceX = sourcePos.getX();
         final double sourceY = sourcePos.getY();
+        double[] rayDirectionsX = new double[NUM_FOV_RAYS];
+        double[] rayDirectionsY = new double[NUM_FOV_RAYS];
+        double[] closestDistances = new double[NUM_FOV_RAYS];
         for (int i = 0; i < NUM_FOV_RAYS; i++) {
             double currentAngle = startAngle + i * angleStep;
-            double rayDirectionX = Math.cos(currentAngle);
-            double rayDirectionY = Math.sin(currentAngle);
-            double closestDistance = RAY_LENGTH;
+            rayDirectionsX[i] = Math.cos(currentAngle);
+            rayDirectionsY[i] = Math.sin(currentAngle);
+            closestDistances[i] = RAY_LENGTH;
+        }
 
-            // 使用预缓存的原始double边坐标，避免每条射线/每次命中创建临时Point2D。
-            for (cs2d.client.GameClient.StaticObstacle obs : candidateStaticObstacles) {
-                double[] edges = obs.edgeCoordinates;
+        // 每个障碍物只检查其包围圆可能覆盖的连续射线区间。旧实现让每条射线检查
+        // 所有候选障碍物；本实现仅跳过数学上不可能命中的射线，最终交点算法不变。
+        for (cs2d.client.GameClient.StaticObstacle obs : candidateStaticObstacles) {
+            long rayRange = fovRayIndexRange(obs.bounds, sourceX, sourceY, sourceAngle,
+                    fovRadians / 2.0, angleStep, NUM_FOV_RAYS, RAY_LENGTH);
+            if (rayRange < 0)
+                continue;
+            int firstRay = (int) (rayRange >>> 32);
+            int lastRay = (int) rayRange;
+            double[] edges = obs.edgeCoordinates;
+            for (int rayIndex = firstRay; rayIndex <= lastRay; rayIndex++) {
                 for (int edgeIndex = 0; edgeIndex < edges.length; edgeIndex += 4) {
                     double hitDistance = raySegmentIntersectionDistance(sourceX, sourceY,
-                            rayDirectionX, rayDirectionY, closestDistance,
+                            rayDirectionsX[rayIndex], rayDirectionsY[rayIndex], closestDistances[rayIndex],
                             edges[edgeIndex], edges[edgeIndex + 1], edges[edgeIndex + 2], edges[edgeIndex + 3]);
-                    if (hitDistance < closestDistance)
-                        closestDistance = hitDistance;
+                    if (hitDistance < closestDistances[rayIndex])
+                        closestDistances[rayIndex] = hitDistance;
                 }
             }
+        }
 
+        for (int i = 0; i < NUM_FOV_RAYS; i++) {
             for (int edgeIndex = 0; edgeIndex < dynamicEdgeCoordinates.length; edgeIndex += 4) {
                 double hitDistance = raySegmentIntersectionDistance(sourceX, sourceY,
-                        rayDirectionX, rayDirectionY, closestDistance,
+                        rayDirectionsX[i], rayDirectionsY[i], closestDistances[i],
                         dynamicEdgeCoordinates[edgeIndex], dynamicEdgeCoordinates[edgeIndex + 1],
                         dynamicEdgeCoordinates[edgeIndex + 2], dynamicEdgeCoordinates[edgeIndex + 3]);
-                if (hitDistance < closestDistance)
-                    closestDistance = hitDistance;
+                if (hitDistance < closestDistances[i])
+                    closestDistances[i] = hitDistance;
             }
 
-            newFovPolygon.add(new Point2D(sourceX + rayDirectionX * closestDistance,
-                    sourceY + rayDirectionY * closestDistance));
+            newFovPolygon.add(new Point2D(sourceX + rayDirectionsX[i] * closestDistances[i],
+                    sourceY + rayDirectionsY[i] * closestDistances[i]));
         } // 结束射线循环
 
         frameIntersectionTime += (System.nanoTime() - intersectStartTime);
@@ -7735,6 +7759,39 @@ public class GameClient extends Application {
         double relativeAngle = normalizeAngle(Math.atan2(dy, dx) - sourceAngle);
         double angularRadius = Math.asin(Math.min(1.0, radius / distance));
         return Math.abs(relativeAngle) <= halfFovRadians + angularRadius;
+    }
+
+    /** 返回障碍物包围圆可能覆盖的首尾射线索引，未覆盖任何离散射线时返回-1。 */
+    static long fovRayIndexRange(Rectangle2D bounds, double sourceX, double sourceY,
+            double sourceAngle, double halfFovRadians, double angleStep, int rayCount, double rayLength) {
+        if (bounds == null || rayCount <= 0 || angleStep <= 0)
+            return -1L;
+        double centerX = (bounds.getMinX() + bounds.getMaxX()) * 0.5;
+        double centerY = (bounds.getMinY() + bounds.getMaxY()) * 0.5;
+        double radius = Math.hypot(bounds.getWidth(), bounds.getHeight()) * 0.5;
+        double dx = centerX - sourceX;
+        double dy = centerY - sourceY;
+        double distance = Math.hypot(dx, dy);
+        if (distance - radius > rayLength)
+            return -1L;
+        if (distance <= radius)
+            return packRayRange(0, rayCount - 1);
+
+        double relativeAngle = normalizeAngle(Math.atan2(dy, dx) - sourceAngle);
+        double angularRadius = Math.asin(Math.min(1.0, radius / distance));
+        double minimumAngle = Math.max(-halfFovRadians, relativeAngle - angularRadius);
+        double maximumAngle = Math.min(halfFovRadians, relativeAngle + angularRadius);
+        if (minimumAngle > maximumAngle)
+            return -1L;
+
+        int first = Math.max(0, (int) Math.ceil((minimumAngle + halfFovRadians) / angleStep - 1.0e-12));
+        int last = Math.min(rayCount - 1,
+                (int) Math.floor((maximumAngle + halfFovRadians) / angleStep + 1.0e-12));
+        return first <= last ? packRayRange(first, last) : -1L;
+    }
+
+    private static long packRayRange(int first, int last) {
+        return ((long) first << 32) | (last & 0xffffffffL);
     }
 
     private static double normalizeAngle(double angle) {
@@ -9540,8 +9597,37 @@ public class GameClient extends Application {
             }
         }
 
+        obstacleOverviewImage = createObstacleOverview(mapWidth, mapHeight);
         System.out.printf("[缓存] 分块烘焙完成: %d块, 障碍物块引用%d。%n",
                 obstacleCacheTiles.size(), bakedObstacleReferences);
+    }
+
+    /** 为全图模式生成一张不超过2048的屏幕级概览纹理，高清跟随模式仍使用原始分块。 */
+    private Image createObstacleOverview(double mapWidth, double mapHeight) {
+        if (mapWidth <= OBSTACLE_CACHE_TILE_SIZE && mapHeight <= OBSTACLE_CACHE_TILE_SIZE)
+            return null; // 小地图本来就只有一个纹理块
+
+        double overviewScale = Math.min(1.0,
+                OBSTACLE_OVERVIEW_MAX_SIZE / Math.max(mapWidth, mapHeight));
+        double overviewWidth = Math.max(1.0, Math.ceil(mapWidth * overviewScale));
+        double overviewHeight = Math.max(1.0, Math.ceil(mapHeight * overviewScale));
+        Canvas overviewCanvas = new Canvas(overviewWidth, overviewHeight);
+        GraphicsContext overviewGc = overviewCanvas.getGraphicsContext2D();
+        overviewGc.setFill(Color.web("#4a5568"));
+        overviewGc.scale(overviewScale, overviewScale);
+
+        List<cs2d.client.GameClient.StaticObstacle> queried = new ArrayList<>();
+        quadtreeRootNode.queryBounds(queried, new Rectangle2D(0, 0, mapWidth, mapHeight));
+        Set<cs2d.client.GameClient.StaticObstacle> allObstacles = new HashSet<>(queried);
+        for (cs2d.client.GameClient.StaticObstacle obstacle : allObstacles)
+            drawObstacle(overviewGc, obstacle.originalJson);
+
+        javafx.scene.SnapshotParameters overviewParams = new javafx.scene.SnapshotParameters();
+        overviewParams.setFill(Color.TRANSPARENT);
+        Image overview = overviewCanvas.snapshot(overviewParams, null);
+        System.out.printf("[缓存] 全图概览纹理: %.0fx%.0f, 单次提交覆盖%d个障碍物。%n",
+                overviewWidth, overviewHeight, allObstacles.size());
+        return overview;
     }
 
     /**
