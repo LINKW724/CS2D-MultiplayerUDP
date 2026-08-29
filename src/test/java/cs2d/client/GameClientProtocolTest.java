@@ -67,6 +67,43 @@ class GameClientProtocolTest {
     }
 
     @Test
+    void conservativeFovFilterRejectsOnlyImpossibleObstacles() {
+        double halfFov = Math.toRadians(53);
+        assertTrue(GameClient.obstacleMayIntersectFov(
+                new Rectangle2D(100, -10, 20, 20), 0, 0, 0, halfFov, 8000));
+        assertFalse(GameClient.obstacleMayIntersectFov(
+                new Rectangle2D(-120, -10, 20, 20), 0, 0, 0, halfFov, 8000));
+        assertTrue(GameClient.obstacleMayIntersectFov(
+                new Rectangle2D(-5, -5, 10, 10), 0, 0, 0, halfFov, 8000));
+        assertFalse(GameClient.obstacleMayIntersectFov(
+                new Rectangle2D(9000, -10, 20, 20), 0, 0, 0, halfFov, 8000));
+    }
+
+    @Test
+    void duplicateMapPayloadsHaveTheSameSignature() {
+        JsonObject map = new JsonObject();
+        map.addProperty("sessionId", "session-a");
+        map.addProperty("width", 4392);
+        map.addProperty("height", 3840);
+        JsonArray obstacles = new JsonArray();
+        JsonObject obstacle = new JsonObject();
+        obstacle.addProperty("type", "RECTANGLE");
+        obstacle.addProperty("x", 10);
+        obstacle.addProperty("y", 20);
+        obstacle.addProperty("w", 30);
+        obstacle.addProperty("h", 40);
+        obstacles.add(obstacle);
+        map.add("obstacles", obstacles);
+
+        JsonObject changed = map.deepCopy();
+        changed.getAsJsonArray("obstacles").get(0).getAsJsonObject().addProperty("x", 11);
+
+        assertEquals(GameClient.createMapSignature(map), GameClient.createMapSignature(map.deepCopy()));
+        assertFalse(GameClient.createMapSignature(map).equals(GameClient.createMapSignature(changed)));
+        assertTrue(GameClient.OBSTACLE_CACHE_TILE_SIZE <= 4096);
+    }
+
+    @Test
     @SuppressWarnings({ "rawtypes", "unchecked" })
     void gameOverLocksTheSharedScoreboardInFinalMode() throws Exception {
         Class<? extends Enum> stateClass = (Class<? extends Enum>) Class

@@ -140,10 +140,11 @@ public class GameClient extends Application {
     private int frameCount = 0;
 
     // --- 障碍物缓存 ---
-    /** 存储所有静态障碍物的离屏画布 */
-    private Canvas obstacleCacheCanvas = null;
-    /** 离屏画布的快照，用于每帧绘制 */
-    private Image obstacleCacheImage = null;
+    /** 单块远低于JavaFX 4096纹理上限，避免超大地图整图快照耗尽RTTexture。 */
+    static final int OBSTACLE_CACHE_TILE_SIZE = 1024;
+    private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
+    /** 同一服务端会话可能有多个已经在途的map_data分片，只初始化一次相同地图。 */
+    private String initializedMapSignature = null;
 
     // --- 记分板长按检测 ---
     private long tabPressTime = 0;
@@ -598,7 +599,7 @@ public class GameClient extends Application {
     // --- 视野/战争迷雾 ---
     private volatile List<Point2D> fovPoints = new ArrayList<>(); // 存储视野多边形的顶点
     private Point2D lastPlayerPosForFOV = new Point2D(-1, -1); // 上一次计算视野时的玩家位置
-    private Point2D lastMousePosForFOV = new Point2D(-1, -1); // 上一次计算视野时的鼠标位置
+    private double lastSourceAngleForFOV = Double.NaN; // 真正决定射线方向的上一次角度
 
     // --- 声音系统 ---
     // 存储所有预加载的音效
@@ -856,6 +857,8 @@ public class GameClient extends Application {
             latestGameState = null;
             latestFullGameState = null;
             fovPoints = new ArrayList<>();
+            initializedMapSignature = null;
+            obstacleCacheTiles.clear();
             spectateTeammateIndex = 0; // 重置观战索引
             clientState = cs2d.client.GameClient.ClientState.CONNECTING; // 重置为初始状态
 
@@ -914,6 +917,8 @@ public class GameClient extends Application {
         }
         this.mapData = null;
         this.serverSessionId = null;
+        this.initializedMapSignature = null;
+        this.obstacleCacheTiles.clear();
         this.lastStateSequence.set(-1);
         this.chunkBuffers.clear();
         this.messageBatchQueue.clear();
@@ -1287,6 +1292,13 @@ public class GameClient extends Application {
                     break;
                 // [新] 计时 [M4] Map Data
                 long mapStartTime = System.nanoTime();
+                String incomingMapSignature = createMapSignature(json);
+                if (Objects.equals(initializedMapSignature, incomingMapSignature)) {
+                    cancelStaticDataRequests();
+                    System.out.println("[CLIENT] 忽略同一会话中重复到达的 map_data，复用现有地图缓存。");
+                    perfTimeMsg_MapData += (System.nanoTime() - mapStartTime);
+                    break;
+                }
                 if (json != null) {
                     System.out.println("[CLIENT DEBUG] Handling 'map_data'. Received JSON: "
                             + json.toString().substring(0, Math.min(json.toString().length(), 200)) + "...");
@@ -1298,6 +1310,7 @@ public class GameClient extends Application {
                 this.mapData = json; // 更新本地地图数据
                 cancelStaticDataRequests();
                 initializeQuadtree();
+                initializedMapSignature = incomingMapSignature;
                 perfTimeMsg_MapData += (System.nanoTime() - mapStartTime); // 累加 [M4]
                 break;
 
@@ -1360,6 +1373,8 @@ public class GameClient extends Application {
                 if (serverSessionId != null && !serverSessionId.equals(incomingSessionId)) {
                     lastStateSequence.set(-1);
                     chunkBuffers.clear();
+                    initializedMapSignature = null;
+                    obstacleCacheTiles.clear();
                 }
                 serverSessionId = incomingSessionId;
                 myPlayerId = getString(json, "playerId"); // 获取并保存我自己的玩家ID
@@ -2327,7 +2342,7 @@ public class GameClient extends Application {
         perfFrameCount++; // 帧计数+1，用于计算平均值
     }
 
-    private record FovRequest(Point2D sourcePos, Point2D lookAtPos, double sourceAngle,
+    private record FovRequest(Point2D sourcePos, double sourceAngle,
             List<JsonObject> dynamicObstacles) {
     }
 
@@ -2368,10 +2383,12 @@ public class GameClient extends Application {
 
         // --- 3. 计算当前位置和目标位置 (逻辑不变) ---
         Point2D sourcePos = new Point2D(fovSource.renderX, fovSource.renderY);
-        Point2D lookAtPos = camera.screenToWorld(mouseX, mouseY);
+        double sourceAngle = fovSource.angle;
 
-        // --- 4. 缓存检查 (逻辑不变) ---
-        if (sourcePos.equals(lastPlayerPosForFOV) && lookAtPos.equals(lastMousePosForFOV)) {
+        // computeFov真正使用的是sourceAngle，不是鼠标的世界坐标。相机平移会改变
+        // lookAtPos但不会改变射线方向，旧判断会因此制造大量无意义计算。
+        if (sourcePos.equals(lastPlayerPosForFOV)
+                && Double.doubleToLongBits(sourceAngle) == Double.doubleToLongBits(lastSourceAngleForFOV)) {
             return; // 跳过计算
         }
 
@@ -2388,7 +2405,7 @@ public class GameClient extends Application {
             dynamicObstacles.add(smokeObstacle);
         });
 
-        FovRequest request = new FovRequest(sourcePos, lookAtPos, fovSource.angle,
+        FovRequest request = new FovRequest(sourcePos, sourceAngle,
                 List.copyOf(dynamicObstacles));
         FovRequest replaced = pendingFovRequest.getAndSet(request);
         fovRequestCount.increment();
@@ -2397,7 +2414,7 @@ public class GameClient extends Application {
 
         // 只有请求真正进入latest-wins邮箱后才更新缓存，避免快速转头时把未计算角度误标为已完成。
         lastPlayerPosForFOV = sourcePos;
-        lastMousePosForFOV = lookAtPos;
+        lastSourceAngleForFOV = sourceAngle;
         ensureFovWorkerRunning();
     }
 
@@ -2418,14 +2435,12 @@ public class GameClient extends Application {
                 FovComputationResult result = computeFov(request);
                 recordFovComputation(result);
 
-                // 计算期间若又来了更新角度，只保留最新请求，旧结果不再让迷雾短暂回跳。
-                if (pendingFovRequest.get() == null) {
-                    fovPoints = result.points();
-                    fovPublishedCount.increment();
-                    fovLatestFinalVertexCount.set(result.finalVertices());
-                } else {
-                    fovStaleResultCount.increment();
-                }
+                // 单worker天然按请求开始顺序完成。即使计算期间到达了更新角度，当前结果
+                // 也是目前最新的完整画面，必须立即发布；旧逻辑在持续转头时会丢掉90%以上
+                // 的完成结果，使视觉FOV只剩个位数到二十余Hz。
+                fovPoints = result.points();
+                fovPublishedCount.increment();
+                fovLatestFinalVertexCount.set(result.finalVertices());
             }
         } finally {
             fovWorkerRunning.set(false);
@@ -2470,11 +2485,14 @@ public class GameClient extends Application {
         gc.setFill(CARD_BACKGROUND);
         gc.fillRect(0, 0, getDouble(mapData, "width"), getDouble(mapData, "height"));
 
-        // --- [核心优化] C. 绘制障碍物缓存 ---
+        // --- [核心优化] C. 绘制障碍物分块缓存 ---
         long obstacleStartTime = System.nanoTime();
-        if (obstacleCacheImage != null) {
-            // [!] 这一行代码替换了之前所有的 Quadtree 查询和循环！
-            gc.drawImage(obstacleCacheImage, 0, 0);
+        if (!obstacleCacheTiles.isEmpty()) {
+            // 跟随/自由视角只提交当前视口相交的纹理块；全图视角会自然覆盖所有块。
+            for (ObstacleCacheTile tile : obstacleCacheTiles) {
+                if (cameraViewBounds.intersects(tile.bounds()))
+                    gc.drawImage(tile.image(), tile.x(), tile.y());
+            }
         } else if (mapData != null && mapData.has("obstacles")) {
             // [备用方案] (保持不变, 以防万一缓存创建失败)
             gc.setFill(Color.web("#4a5568"));
@@ -2488,7 +2506,7 @@ public class GameClient extends Application {
                     }
                 }
             });
-            System.err.println("[警告] 障碍物缓存 (obstacleCacheImage) 为 null，正在回退到慢速绘制！");
+            System.err.println("[警告] 障碍物分块缓存为空，正在回退到慢速绘制！");
         }
         perfTimeDrawWorld_Obstacles += (System.nanoTime() - obstacleStartTime); // 累加 [2a] (现在应该接近0)
         // --- [优化结束] ---
@@ -3875,12 +3893,16 @@ public class GameClient extends Application {
     // --- 复杂爆炸效果 END ---
     // 绘制一个障碍物
     private void drawObstacle(JsonObject obs) {
+        drawObstacle(gc, obs);
+    }
+
+    private void drawObstacle(GraphicsContext targetGc, JsonObject obs) {
         String type = getString(obs, "type"); // 获取障碍物类型
 
         if ("RECTANGLE".equals(type)) { // 如果是矩形
-            gc.fillRect(getDouble(obs, "x"), getDouble(obs, "y"), getDouble(obs, "w"), getDouble(obs, "h"));
+            targetGc.fillRect(getDouble(obs, "x"), getDouble(obs, "y"), getDouble(obs, "w"), getDouble(obs, "h"));
         } else if ("ELLIPSE".equals(type)) { // 如果是椭圆形
-            gc.fillOval(getDouble(obs, "x"), getDouble(obs, "y"), getDouble(obs, "w"), getDouble(obs, "h"));
+            targetGc.fillOval(getDouble(obs, "x"), getDouble(obs, "y"), getDouble(obs, "w"), getDouble(obs, "h"));
         }
 
         // --- [还原] ---
@@ -3893,7 +3915,7 @@ public class GameClient extends Application {
                 xPoints[i] = xPointsJson.get(i).getAsDouble();
             for (int i = 0; i < yPoints.length; i++)
                 yPoints[i] = yPointsJson.get(i).getAsDouble();
-            gc.fillPolygon(xPoints, yPoints, xPoints.length); // 绘制多边形
+            targetGc.fillPolygon(xPoints, yPoints, xPoints.length); // 绘制多边形
         }
     }
 
@@ -6136,6 +6158,18 @@ public class GameClient extends Application {
         return list;
     }
 
+    /** 识别同一服务端会话内重复到达的静态地图包。 */
+    static String createMapSignature(JsonObject mapJson) {
+        if (mapJson == null)
+            return "<null-map>";
+        JsonArray obstacles = mapJson.has("obstacles") && mapJson.get("obstacles").isJsonArray()
+                ? mapJson.getAsJsonArray("obstacles") : new JsonArray();
+        return getString(mapJson, "sessionId") + ':'
+                + Double.doubleToLongBits(getDouble(mapJson, "width")) + ':'
+                + Double.doubleToLongBits(getDouble(mapJson, "height")) + ':'
+                + obstacles.size() + ':' + obstacles.hashCode();
+    }
+
     // 判断一个圆是否在多边形内可见。
     private boolean isCircleVisibleInPolygon(Point2D circleCenter, double radius, List<Point2D> polygon) {
         // 如果多边形为空或玩家ID为空，则认为可见。
@@ -7624,6 +7658,12 @@ public class GameClient extends Application {
                     RAY_LENGTH * 2, RAY_LENGTH * 2);
             quadtreeRootNode.queryBounds(candidateStaticObstacles, fovBounds);
         }
+        // queryBounds只是一个宽泛的正方形查询；在当前地图上它会返回全部744个障碍物。
+        // 用包围圆对106度视锥做保守筛选：只减少必定不可能命中的候选，不改变射线数量、
+        // 角度或最终交点精度。
+        candidateStaticObstacles.removeIf(obstacle -> !obstacleMayIntersectFov(
+                obstacle.bounds, sourcePos.getX(), sourcePos.getY(), sourceAngle,
+                fovRadians / 2.0, RAY_LENGTH));
         frameQueryTime += (System.nanoTime() - queryStartTime);
 
         long intersectStartTime = System.nanoTime();
@@ -7670,6 +7710,39 @@ public class GameClient extends Application {
         return new FovComputationResult(Collections.unmodifiableList(newFovPolygon), totalNanos,
                 frameQueryTime, frameEdgeExtractTime, frameIntersectionTime,
                 candidateStaticObstacles.size(), rawVertexCount, newFovPolygon.size());
+    }
+
+    /**
+     * 用覆盖障碍物包围盒的圆做保守视锥判断。返回false时障碍物一定不可能命中FOV射线；
+     * 返回true可能是假阳性，但绝不会牺牲遮挡精度。
+     */
+    static boolean obstacleMayIntersectFov(Rectangle2D bounds, double sourceX, double sourceY,
+            double sourceAngle, double halfFovRadians, double rayLength) {
+        if (bounds == null)
+            return false;
+        double centerX = (bounds.getMinX() + bounds.getMaxX()) * 0.5;
+        double centerY = (bounds.getMinY() + bounds.getMaxY()) * 0.5;
+        double radius = Math.hypot(bounds.getWidth(), bounds.getHeight()) * 0.5;
+        double dx = centerX - sourceX;
+        double dy = centerY - sourceY;
+        double distance = Math.hypot(dx, dy);
+
+        if (distance <= radius)
+            return true; // 视点在包围圆内，障碍物可能覆盖任意射线方向
+        if (distance - radius > rayLength)
+            return false;
+
+        double relativeAngle = normalizeAngle(Math.atan2(dy, dx) - sourceAngle);
+        double angularRadius = Math.asin(Math.min(1.0, radius / distance));
+        return Math.abs(relativeAngle) <= halfFovRadians + angularRadius;
+    }
+
+    private static double normalizeAngle(double angle) {
+        while (angle <= -Math.PI)
+            angle += Math.PI * 2.0;
+        while (angle > Math.PI)
+            angle -= Math.PI * 2.0;
+        return angle;
     }
 
     private static double[] flattenEdgeCoordinates(List<Point2D[]> edges) {
@@ -9412,9 +9485,13 @@ public class GameClient extends Application {
         createObstacleCache();
     }
 
+    /** 单个静态障碍物缓存块，坐标均为世界坐标。 */
+    private record ObstacleCacheTile(double x, double y, Rectangle2D bounds, Image image) {
+    }
+
     /**
-     * 创建一个离屏画布，将所有静态障碍物“烘焙”到一张图片上。
-     * 这只在地图加载时调用一次。
+     * 将静态障碍物烘焙成小纹理块。旧实现创建4392x3840整图Canvas并再snapshot一份，
+     * 超过JavaFX 4096纹理限制且瞬时占用数百MB显存，重复map_data时会触发RTTexture空指针。
      */
     private void createObstacleCache() {
         if (mapData == null || quadtreeRootNode == null)
@@ -9422,49 +9499,49 @@ public class GameClient extends Application {
 
         double mapWidth = getDouble(mapData, "width");
         double mapHeight = getDouble(mapData, "height");
+        obstacleCacheTiles.clear();
+        int columns = Math.max(1, (int) Math.ceil(mapWidth / OBSTACLE_CACHE_TILE_SIZE));
+        int rows = Math.max(1, (int) Math.ceil(mapHeight / OBSTACLE_CACHE_TILE_SIZE));
+        System.out.printf("[缓存] 正在创建 %.0fx%.0f 障碍物分块缓存 (%dx%d, tile=%d)...%n",
+                mapWidth, mapHeight, columns, rows, OBSTACLE_CACHE_TILE_SIZE);
 
-        System.out.println("[缓存] 正在创建 " + mapWidth + "x" + mapHeight + " 的障碍物缓存...");
-
-        // 1. 创建离屏画布和它的 GraphicsContext
-        obstacleCacheCanvas = new Canvas(mapWidth, mapHeight);
-        GraphicsContext cacheGc = obstacleCacheCanvas.getGraphicsContext2D();
-
-        // 2. 设置绘制颜色
-        cacheGc.setFill(Color.web("#4a5568")); // 障碍物颜色
-
-        // 3. 从四叉树获取 *所有* 障碍物
-        // 我们查询 (0, 0, mapWidth, mapHeight) 来获取树中的每一个对象
-        List<cs2d.client.GameClient.StaticObstacle> allObstacles = new ArrayList<>();
-        quadtreeRootNode.queryBounds(allObstacles, new Rectangle2D(0, 0, mapWidth, mapHeight));
-        Set<cs2d.client.GameClient.StaticObstacle> uniqueObstacles = new HashSet<>(allObstacles); // 去重
-
-        System.out.println("[缓存] 正在烘焙 " + uniqueObstacles.size() + " 个静态障碍物...");
-
-        // 4. 将 *所有* 障碍物绘制到离屏画布上
-        for (cs2d.client.GameClient.StaticObstacle staticObs : uniqueObstacles) {
-            // [关键] 我们在这里调用 drawObstacle，
-            // 将其绘制到 *缓存的* GraphicsContext (cacheGc) 上
-            // 注意：我们必须临时将 'this.gc' 替换为 'cacheGc'
-
-            GraphicsContext originalGc = this.gc; // 保存原始的 gc
-            this.gc = cacheGc; // 临时替换
-
-            drawObstacle(staticObs.originalJson); // 调用绘制方法
-
-            this.gc = originalGc; // 还原原始的 gc
-        }
-
-        // 5. 拍下快照，存入 Image
-        // SnapshotParameters 确保背景是透明的
         javafx.scene.SnapshotParameters params = new javafx.scene.SnapshotParameters();
         params.setFill(Color.TRANSPARENT);
+        Canvas tileCanvas = new Canvas(OBSTACLE_CACHE_TILE_SIZE, OBSTACLE_CACHE_TILE_SIZE);
+        GraphicsContext tileGc = tileCanvas.getGraphicsContext2D();
+        int bakedObstacleReferences = 0;
 
-        obstacleCacheImage = obstacleCacheCanvas.snapshot(params, null);
+        for (int row = 0; row < rows; row++) {
+            double tileY = row * (double) OBSTACLE_CACHE_TILE_SIZE;
+            double tileHeight = Math.min(OBSTACLE_CACHE_TILE_SIZE, mapHeight - tileY);
+            for (int column = 0; column < columns; column++) {
+                double tileX = column * (double) OBSTACLE_CACHE_TILE_SIZE;
+                double tileWidth = Math.min(OBSTACLE_CACHE_TILE_SIZE, mapWidth - tileX);
+                Rectangle2D tileBounds = new Rectangle2D(tileX, tileY, tileWidth, tileHeight);
 
-        // 6. 释放 Canvas 资源 (可选，但推荐)
-        obstacleCacheCanvas = null;
+                List<cs2d.client.GameClient.StaticObstacle> queried = new ArrayList<>();
+                quadtreeRootNode.queryBounds(queried, tileBounds);
+                Set<cs2d.client.GameClient.StaticObstacle> tileObstacles = new HashSet<>(queried);
 
-        System.out.println("[缓存] 障碍物缓存烘焙完成！");
+                tileGc.setTransform(1, 0, 0, 1, 0, 0);
+                tileGc.clearRect(0, 0, OBSTACLE_CACHE_TILE_SIZE, OBSTACLE_CACHE_TILE_SIZE);
+                tileGc.setFill(Color.web("#4a5568"));
+                tileGc.translate(-tileX, -tileY);
+                for (cs2d.client.GameClient.StaticObstacle obstacle : tileObstacles)
+                    drawObstacle(tileGc, obstacle.originalJson);
+                tileGc.setTransform(1, 0, 0, 1, 0, 0);
+
+                params.setViewport(new Rectangle2D(0, 0, tileWidth, tileHeight));
+                Image tileImage = tileCanvas.snapshot(params, null);
+                if (tileImage != null) {
+                    obstacleCacheTiles.add(new ObstacleCacheTile(tileX, tileY, tileBounds, tileImage));
+                    bakedObstacleReferences += tileObstacles.size();
+                }
+            }
+        }
+
+        System.out.printf("[缓存] 分块烘焙完成: %d块, 障碍物块引用%d。%n",
+                obstacleCacheTiles.size(), bakedObstacleReferences);
     }
 
     /**
