@@ -51,4 +51,12 @@ class RenderFrameSchedulerTest {
                 0, 0, 1600, 900,
                 4392, 3840, 128));
     }
+
+    @Test
+    void sizesViewportFromVisibleAreaPlusFullResolutionSafetyPadding() {
+        assertEquals(2432.0, GameClient.adaptiveViewportSize(1600, 4392));
+        assertEquals(1792.0, GameClient.adaptiveViewportSize(900, 3840));
+        assertEquals(3072.0, GameClient.adaptiveViewportSize(2800, 4392));
+        assertEquals(900.0, GameClient.adaptiveViewportSize(1600, 900));
+    }
 }

@@ -69,6 +69,7 @@ import java.util.*;
 import java.util.concurrent.*;
 // 导入 Java 的函数式接口类
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
@@ -82,8 +83,12 @@ import java.util.zip.CRC32;
 
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.PixelBuffer;
+import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
 import javafx.scene.effect.ColorAdjust;
+
+import java.nio.IntBuffer;
 
 // 定义游戏客户端的主类，它继承自 JavaFX 的 Application 类
 public class GameClient extends Application {
@@ -149,20 +154,27 @@ public class GameClient extends Application {
     static final int OBSTACLE_CACHE_TILE_SIZE = 1024;
     /** 全图视角最终只占1600x900逻辑像素；2048概览纹理足够并可把20次提交合成1次。 */
     static final int OBSTACLE_OVERVIEW_MAX_SIZE = 2048;
-    /** 普通视角合并后的单纹理保持1世界像素=1纹理像素，不降低障碍物精度。 */
+    /** 普通视角合并纹理的硬上限；实际尺寸按可见区加安全边距计算，仍保持1:1像素。 */
     static final int OBSTACLE_VIEWPORT_CACHE_SIZE = 3072;
     static final double OBSTACLE_VIEWPORT_REBUILD_MARGIN = 128.0;
+    static final double OBSTACLE_VIEWPORT_SAFETY_PADDING = 384.0;
+    static final double OBSTACLE_VIEWPORT_SIZE_QUANTUM = 128.0;
+    private static final double FOG_TEXTURE_MARGIN = 192.0;
     private static final boolean USE_RESIDENT_STATIC_MAP_LAYER = Boolean.parseBoolean(
             System.getProperty("cs2d.staticMapLayer", "true"));
     private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
-    private final List<ResidentObstacleTileNode> residentObstacleTileNodes = new ArrayList<>();
     private Image obstacleOverviewImage = null;
     private Group residentStaticMapLayer;
-    private Group residentObstacleTileLayer;
     private ImageView residentObstacleOverviewView;
-    private ImageView residentObstacleViewportView;
-    private Canvas residentObstacleViewportCanvas;
-    private WritableImage residentObstacleViewportImage;
+    private ImageView residentObstacleViewportFrontView;
+    private ImageView residentObstacleViewportBackView;
+    private volatile ViewportBufferSet residentViewportBuffers;
+    private final AtomicReference<ViewportBuildRequest> pendingViewportBuild = new AtomicReference<>();
+    private volatile ViewportBuildRequest activeViewportBuild;
+    private final AtomicBoolean viewportWorkerRunning = new AtomicBoolean(false);
+    private final AtomicLong viewportBuildSequence = new AtomicLong();
+    private final LongAdder perfStaticViewportBuildReplacements = new LongAdder();
+    private final LongAdder perfStaticViewportBackgroundNanos = new LongAdder();
     private double residentViewportOriginX;
     private double residentViewportOriginY;
     private double residentViewportWidth;
@@ -171,6 +183,21 @@ public class GameClient extends Application {
     private boolean residentViewportActive;
     private String residentStaticMapMode = "canvas";
     private final Affine residentStaticMapTransform = new Affine();
+    private final Affine fogLayerTransform = new Affine();
+    private Canvas fogCanvas;
+    private GraphicsContext fogGc;
+    private Canvas hudCanvas;
+    private GraphicsContext hudGc;
+    private List<Point2D> rasterizedFogGeometry = List.of();
+    private double fogRasterCameraX;
+    private double fogRasterCameraY;
+    private double fogRasterScale = 1.0;
+    private double fogRasterOffsetX;
+    private double fogRasterOffsetY;
+    private Color fogRasterColor;
+    private double[] fogScreenCoordinates = new double[0];
+    private long perfFogRasterizations;
+    private long perfFogTransformOnlyFrames;
     private Node gameRenderNode;
     private volatile boolean residentStaticMapReady = false;
     private int residentVisibleTileCount = 0;
@@ -443,6 +470,7 @@ public class GameClient extends Application {
     private static final double FOV_RADIANS = Math.toRadians(106.0);
     private static final double FOV_ANGLE_STEP = FOV_RADIANS / (FOV_RAY_COUNT - 1);
     private static final double FOV_RAY_LENGTH = 8000.0;
+    private static final double TWO_PI = Math.PI * 2.0;
     private static final double FOV_SIMPLIFY_ANGLE_TOLERANCE = Math.toRadians(1.0);
     private static final double[] FOV_RELATIVE_COSINES = createFovRelativeDirections(false);
     private static final double[] FOV_RELATIVE_SINES = createFovRelativeDirections(true);
@@ -498,6 +526,11 @@ public class GameClient extends Application {
     private final ExecutorService fovExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "FOV-Calculator-Thread");
         t.setDaemon(true); // 设为守护线程
+        return t;
+    });
+    private final ExecutorService staticViewportExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Static-Viewport-Composer");
+        t.setDaemon(true);
         return t;
     });
     private final AtomicReference<cs2d.client.GameClient.FovRequest> pendingFovRequest = new AtomicReference<>();
@@ -894,6 +927,7 @@ public class GameClient extends Application {
 
         // --- 关闭 FOV 线程池 ---
         fovExecutor.shutdownNow();
+        staticViewportExecutor.shutdownNow();
         pcmAudioMixer.close();
 
         // 如果套接字存在且未关闭，则关闭它
@@ -964,7 +998,8 @@ public class GameClient extends Application {
             me = null;
             latestGameState = null;
             latestFullGameState = null;
-            fovPoints = new ArrayList<>();
+            fovPoints = List.of();
+            clearCachedFogLayer();
             initializedMapSignature = null;
             obstacleCacheTiles.clear();
             obstacleOverviewImage = null;
@@ -2371,9 +2406,16 @@ public class GameClient extends Application {
                         int staticMapVisibleTiles = residentVisibleTileCount;
                         long staticViewportRebuilds = perfStaticViewportRebuilds;
                         long staticViewportTileBlits = perfStaticViewportTileBlits;
+                        long staticViewportReplacements = perfStaticViewportBuildReplacements.sumThenReset();
+                        long staticViewportBackgroundNanos = perfStaticViewportBackgroundNanos.sumThenReset();
+                        ViewportBufferSet viewportBuffers = residentViewportBuffers;
+                        int staticViewportWidth = viewportBuffers == null ? 0 : viewportBuffers.width;
+                        int staticViewportHeight = viewportBuffers == null ? 0 : viewportBuffers.height;
                         long playerSpriteDraws = perfPlayerSpriteDraws;
                         long droppedWeaponSpriteDraws = perfDroppedWeaponSpriteDraws;
                         long spriteBuilds = perfSpriteBuilds;
+                        long fogRasterizations = perfFogRasterizations;
+                        long fogTransformOnlyFrames = perfFogTransformOnlyFrames;
                         int playerSpriteCacheSize = playerSpriteCache.size();
                         int droppedWeaponSpriteCacheSize = droppedWeaponSpriteCache.size();
                         boolean staticViewportActive = residentViewportActive;
@@ -2382,6 +2424,8 @@ public class GameClient extends Application {
                         perfPlayerSpriteDraws = 0;
                         perfDroppedWeaponSpriteDraws = 0;
                         perfSpriteBuilds = 0;
+                        perfFogRasterizations = 0;
+                        perfFogTransformOnlyFrames = 0;
 
                         diagnosticsExecutor.execute(() -> {
                             RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
@@ -2407,10 +2451,19 @@ public class GameClient extends Application {
                                     staticMapVisibleTiles, staticMapCachedTiles);
                             System.out.printf("  [STATIC-VIEWPORT] 重建 %d | 合并块 %d | active=%s%n",
                                     staticViewportRebuilds, staticViewportTileBlits, staticViewportActive);
+                            System.out.printf("                    后台 %.3f ms | 覆盖请求 %d | 缓冲 %dx%d%n",
+                                    staticViewportRebuilds == 0 ? 0.0
+                                            : staticViewportBackgroundNanos / (double) staticViewportRebuilds / 1_000_000.0,
+                                    staticViewportReplacements, staticViewportWidth, staticViewportHeight);
                             System.out.printf("  [SPRITE-CACHE] 玩家绘制 %d | 地面武器绘制 %d | 新建纹理 %d"
                                             + " | 玩家缓存 %d | 武器缓存 %d%n",
                                     playerSpriteDraws, droppedWeaponSpriteDraws, spriteBuilds,
                                     playerSpriteCacheSize, droppedWeaponSpriteCacheSize);
+                            System.out.printf("  [FOG-CACHE] 光栅化 %d | 仅变换 %d | 复用率 %.1f%%%n",
+                                    fogRasterizations, fogTransformOnlyFrames,
+                                    fogRasterizations + fogTransformOnlyFrames == 0 ? 0.0
+                                            : fogTransformOnlyFrames * 100.0
+                                                    / (fogRasterizations + fogTransformOnlyFrames));
                             System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                             System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                             System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -2494,11 +2547,16 @@ public class GameClient extends Application {
 
         // 清除整个画布
         gc.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        if (hudGc != null) {
+            hudGc.setTransform(1, 0, 0, 1, 0, 0);
+            hudGc.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+        }
         // 如果地图数据为空，或者客户端不在游戏/游戏结束状态
         if (mapData == null || (clientState != cs2d.client.GameClient.ClientState.PLAYING
                 && clientState != cs2d.client.GameClient.ClientState.GAME_OVER)) {
             gc.setFill(BACKGROUND_DARK); // 设置填充色为深色背景
             gc.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT); // 绘制背景
+            clearCachedFogLayer();
 
             // [新] 在退出前累加耗时
             long drawEndTime = System.nanoTime();
@@ -2576,25 +2634,30 @@ public class GameClient extends Application {
 
         gc.restore(); // 结束世界坐标绘制
 
-        // --- 4. 计时迷雾绘制 ---
+        // --- 4. 计时迷雾图层更新 ---
         long fogStartTime = System.nanoTime();
-        gc.save();
-        drawFog(frameFovPoints);
-        gc.restore();
+        updateCachedFogLayer(frameFovPoints);
         long fogEndTime = System.nanoTime();
         perfTimeFogDraw += (fogEndTime - fogStartTime); // 累加 [3]
 
         // --- 5. 计时 HUD 绘制 ---
         long hudStartTime = System.nanoTime();
-        gc.save();
-        drawCrosshairAndAimLine(); // 绘制准星
-        if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
-            drawOffscreenIndicators();
-        }
-        gc.restore();
+        GraphicsContext worldGc = gc;
+        if (hudGc != null)
+            gc = hudGc;
+        try {
+            gc.save();
+            drawCrosshairAndAimLine(); // 绘制准星
+            if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
+                drawOffscreenIndicators();
+            }
+            gc.restore();
 
-        // 最终覆盖层: 闪光弹效果
-        drawFlashbangEffect();
+            // 最终覆盖层: 闪光弹效果
+            drawFlashbangEffect();
+        } finally {
+            gc = worldGc;
+        }
         long hudEndTime = System.nanoTime();
         perfTimeHudDraw += (hudEndTime - hudStartTime); // 累加 [4]
 
@@ -2744,7 +2807,7 @@ public class GameClient extends Application {
 
         // --- [核心优化] C. 绘制障碍物分块缓存 ---
         long obstacleStartTime = System.nanoTime();
-        if (!isResidentStaticMapLayerReady()) {
+        if (!isResidentStaticMapLayerReady() || "tiles".equals(residentStaticMapMode)) {
             // A/B回退路径：保持原单Canvas静态地图绘制行为。
             gc.setFill(CARD_BACKGROUND);
             gc.fillRect(0, 0, getDouble(mapData, "width"), getDouble(mapData, "height"));
@@ -5238,24 +5301,34 @@ public class GameClient extends Application {
         gameContainer.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT); // 设置最大大小
         canvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT); // 创建一个画布
         gc = canvas.getGraphicsContext2D(); // 获取画布的图形上下文
-        System.out.println("[Render] Fog pipeline: single-canvas EVEN_ODD");
+        fogCanvas = new Canvas(CANVAS_WIDTH + FOG_TEXTURE_MARGIN * 2.0,
+                CANVAS_HEIGHT + FOG_TEXTURE_MARGIN * 2.0);
+        fogCanvas.setManaged(false);
+        fogCanvas.setMouseTransparent(true);
+        fogCanvas.getTransforms().setAll(fogLayerTransform);
+        fogGc = fogCanvas.getGraphicsContext2D();
+        hudCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
+        hudCanvas.setManaged(false);
+        hudCanvas.setMouseTransparent(true);
+        hudGc = hudCanvas.getGraphicsContext2D();
+        System.out.println("[Render] Fog pipeline: persistent canvas + camera transform");
+        Pane renderPane = new Pane();
         if (USE_RESIDENT_STATIC_MAP_LAYER) {
             residentStaticMapLayer = new Group();
             residentStaticMapLayer.setManaged(false);
             residentStaticMapLayer.setMouseTransparent(true);
             residentStaticMapLayer.getTransforms().setAll(residentStaticMapTransform);
-
-            Pane renderPane = new Pane(residentStaticMapLayer, canvas);
-            renderPane.setMinSize(CANVAS_WIDTH, CANVAS_HEIGHT);
-            renderPane.setPrefSize(CANVAS_WIDTH, CANVAS_HEIGHT);
-            renderPane.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
-            renderPane.setClip(new Rectangle(CANVAS_WIDTH, CANVAS_HEIGHT));
-            gameRenderNode = renderPane;
+            renderPane.getChildren().add(residentStaticMapLayer);
             System.out.println("[Render] Static map layer: resident ImageView (A/B enabled)");
         } else {
-            gameRenderNode = canvas;
             System.out.println("[Render] Static map layer: Canvas fallback (enable with -Dcs2d.staticMapLayer=true)");
         }
+        renderPane.getChildren().addAll(canvas, fogCanvas, hudCanvas);
+        renderPane.setMinSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+        renderPane.setPrefSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+        renderPane.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
+        renderPane.setClip(new Rectangle(CANVAS_WIDTH, CANVAS_HEIGHT));
+        gameRenderNode = renderPane;
 
         // 创建各种UI元素
         createBuyMenuUI();
@@ -8045,7 +8118,7 @@ public class GameClient extends Application {
         int retainedCandidates = 0;
         for (int i = 0; i < fovCandidateObstacles.size(); i++) {
             cs2d.client.GameClient.StaticObstacle obstacle = fovCandidateObstacles.get(i);
-            long rayRange = fovRayIndexRange(obstacle.bounds, sourcePos.getX(), sourcePos.getY(), sourceAngle,
+            long rayRange = fovRayIndexRange(obstacle, sourcePos.getX(), sourcePos.getY(), sourceAngle,
                     FOV_RADIANS / 2.0, FOV_ANGLE_STEP, FOV_RAY_COUNT, FOV_RAY_LENGTH);
             if (rayRange >= 0) {
                 fovCandidateObstacles.set(retainedCandidates, obstacle);
@@ -8147,14 +8220,31 @@ public class GameClient extends Application {
         double centerX = (bounds.getMinX() + bounds.getMaxX()) * 0.5;
         double centerY = (bounds.getMinY() + bounds.getMaxY()) * 0.5;
         double radius = Math.hypot(bounds.getWidth(), bounds.getHeight()) * 0.5;
+        return fovRayIndexRange(centerX, centerY, radius, sourceX, sourceY,
+                sourceAngle, halfFovRadians, angleStep, rayCount, rayLength);
+    }
+
+    private static long fovRayIndexRange(StaticObstacle obstacle, double sourceX, double sourceY,
+            double sourceAngle, double halfFovRadians, double angleStep, int rayCount, double rayLength) {
+        if (obstacle == null || rayCount <= 0 || angleStep <= 0)
+            return -1L;
+        return fovRayIndexRange(obstacle.centerX, obstacle.centerY, obstacle.boundingRadius,
+                sourceX, sourceY, sourceAngle, halfFovRadians, angleStep, rayCount, rayLength);
+    }
+
+    private static long fovRayIndexRange(double centerX, double centerY, double radius,
+            double sourceX, double sourceY, double sourceAngle, double halfFovRadians,
+            double angleStep, int rayCount, double rayLength) {
         double dx = centerX - sourceX;
         double dy = centerY - sourceY;
-        double distance = Math.hypot(dx, dy);
-        if (distance - radius > rayLength)
+        double distanceSquared = dx * dx + dy * dy;
+        double maximumCenterDistance = rayLength + radius;
+        if (distanceSquared > maximumCenterDistance * maximumCenterDistance)
             return -1L;
-        if (distance <= radius)
+        if (distanceSquared <= radius * radius)
             return packRayRange(0, rayCount - 1);
 
+        double distance = Math.sqrt(distanceSquared);
         double relativeAngle = normalizeAngle(Math.atan2(dy, dx) - sourceAngle);
         double angularRadius = Math.asin(Math.min(1.0, radius / distance));
         double minimumAngle = Math.max(-halfFovRadians, relativeAngle - angularRadius);
@@ -8172,11 +8262,17 @@ public class GameClient extends Application {
         return ((long) first << 32) | (last & 0xffffffffL);
     }
 
-    private static double normalizeAngle(double angle) {
-        while (angle <= -Math.PI)
-            angle += Math.PI * 2.0;
-        while (angle > Math.PI)
-            angle -= Math.PI * 2.0;
+    static double normalizeAngle(double angle) {
+        // atan2与玩家朝向之差在正常协议范围内只需一次修正；异常大角度才走低频remainder回退。
+        if (angle <= -Math.PI) {
+            angle += TWO_PI;
+            if (angle <= -Math.PI)
+                angle = Math.IEEEremainder(angle, TWO_PI);
+        } else if (angle > Math.PI) {
+            angle -= TWO_PI;
+            if (angle > Math.PI)
+                angle = Math.IEEEremainder(angle, TWO_PI);
+        }
         return angle;
     }
 
@@ -8402,39 +8498,116 @@ public class GameClient extends Application {
         return lines;
     }
 
-    /** 单Canvas路径，避免额外全屏纹理上传和Prism图层合成。 */
-    private void drawFog(List<Point2D> currentFovPoints) {
-        if (currentFovPoints.isEmpty())
+    /**
+     * 迷雾只在新的不可变FOV快照发布时重新光栅化。FOV未变化的显示帧仅更新
+     * Canvas节点的仿射变换，因此不会在JavaFX fullspeed pulse下重复提交同一条Marlin路径。
+     */
+    private void updateCachedFogLayer(List<Point2D> currentFovPoints) {
+        if (fogCanvas == null || fogGc == null || currentFovPoints == null || currentFovPoints.isEmpty()) {
+            clearCachedFogLayer();
             return;
+        }
 
-        gc.setFill(currentFogColor());
-        gc.setFillRule(FillRule.EVEN_ODD);
-        gc.beginPath();
-        gc.moveTo(0, 0);
-        gc.lineTo(CANVAS_WIDTH, 0);
-        gc.lineTo(CANVAS_WIDTH, CANVAS_HEIGHT);
-        gc.lineTo(0, CANVAS_HEIGHT);
-        gc.closePath();
-        appendScreenSpaceFovPath(gc, currentFovPoints);
-        gc.fill();
-        gc.setFillRule(FillRule.NON_ZERO);
+        Color fogColor = currentFogColor();
+        boolean geometryChanged = currentFovPoints != rasterizedFogGeometry
+                || !Objects.equals(fogColor, fogRasterColor)
+                || !cachedFogTransformCoversViewport();
+        if (geometryChanged) {
+            rasterizeFogGeometry(currentFovPoints, fogColor);
+            perfFogRasterizations++;
+        } else {
+            perfFogTransformOnlyFrames++;
+        }
+        updateFogLayerTransform();
+        setVisibleIfChanged(fogCanvas, true);
+    }
+
+    private void rasterizeFogGeometry(List<Point2D> currentFovPoints, Color fogColor) {
+        int requiredCoordinates = currentFovPoints.size() * 2;
+        if (fogScreenCoordinates.length < requiredCoordinates)
+            fogScreenCoordinates = new double[Math.max(requiredCoordinates, fogScreenCoordinates.length * 2 + 32)];
+
+        fogRasterCameraX = camera.x;
+        fogRasterCameraY = camera.y;
+        fogRasterScale = Math.max(camera.scale, 0.0001);
+        fogRasterOffsetX = camera.offsetX;
+        fogRasterOffsetY = camera.offsetY;
+        for (int i = 0; i < currentFovPoints.size(); i++) {
+            Point2D point = currentFovPoints.get(i);
+            fogScreenCoordinates[i * 2] = (point.getX() - fogRasterCameraX) * fogRasterScale
+                    + fogRasterOffsetX + FOG_TEXTURE_MARGIN;
+            fogScreenCoordinates[i * 2 + 1] = (point.getY() - fogRasterCameraY) * fogRasterScale
+                    + fogRasterOffsetY + FOG_TEXTURE_MARGIN;
+        }
+
+        double fogWidth = fogCanvas.getWidth();
+        double fogHeight = fogCanvas.getHeight();
+        fogGc.setTransform(1, 0, 0, 1, 0, 0);
+        fogGc.clearRect(0, 0, fogWidth, fogHeight);
+        fogGc.setFill(fogColor);
+        fogGc.setFillRule(FillRule.EVEN_ODD);
+        fogGc.beginPath();
+        fogGc.moveTo(0, 0);
+        fogGc.lineTo(fogWidth, 0);
+        fogGc.lineTo(fogWidth, fogHeight);
+        fogGc.lineTo(0, fogHeight);
+        fogGc.closePath();
+        fogGc.moveTo(fogScreenCoordinates[0], fogScreenCoordinates[1]);
+        for (int i = 1; i < currentFovPoints.size(); i++)
+            fogGc.lineTo(fogScreenCoordinates[i * 2], fogScreenCoordinates[i * 2 + 1]);
+        fogGc.closePath();
+        fogGc.fill();
+        fogGc.setFillRule(FillRule.NON_ZERO);
+        rasterizedFogGeometry = currentFovPoints;
+        fogRasterColor = fogColor;
+    }
+
+    private void updateFogLayerTransform() {
+        double currentScale = Math.max(camera.scale, 0.0001);
+        double ratio = currentScale / fogRasterScale;
+        double translateX = fogLayerTranslation(camera.x, currentScale, camera.offsetX,
+                fogRasterCameraX, fogRasterScale, fogRasterOffsetX, FOG_TEXTURE_MARGIN);
+        double translateY = fogLayerTranslation(camera.y, currentScale, camera.offsetY,
+                fogRasterCameraY, fogRasterScale, fogRasterOffsetY, FOG_TEXTURE_MARGIN);
+        fogLayerTransform.setToTransform(ratio, 0.0, translateX, 0.0, ratio, translateY);
+    }
+
+    private boolean cachedFogTransformCoversViewport() {
+        if (rasterizedFogGeometry.isEmpty())
+            return false;
+        double currentScale = Math.max(camera.scale, 0.0001);
+        double ratio = currentScale / fogRasterScale;
+        double translateX = fogLayerTranslation(camera.x, currentScale, camera.offsetX,
+                fogRasterCameraX, fogRasterScale, fogRasterOffsetX, FOG_TEXTURE_MARGIN);
+        double translateY = fogLayerTranslation(camera.y, currentScale, camera.offsetY,
+                fogRasterCameraY, fogRasterScale, fogRasterOffsetY, FOG_TEXTURE_MARGIN);
+        return translateX <= 0.0 && translateY <= 0.0
+                && translateX + fogCanvas.getWidth() * ratio >= CANVAS_WIDTH
+                && translateY + fogCanvas.getHeight() * ratio >= CANVAS_HEIGHT;
+    }
+
+    static double fogLayerTranslation(double currentCameraOrigin, double currentScale, double currentOffset,
+            double rasterCameraOrigin, double rasterScale, double rasterOffset, double textureMargin) {
+        double ratio = currentScale / rasterScale;
+        double rasterIntercept = rasterOffset - rasterCameraOrigin * rasterScale;
+        double currentIntercept = currentOffset - currentCameraOrigin * currentScale;
+        return currentIntercept - ratio * rasterIntercept - ratio * textureMargin;
+    }
+
+    private void clearCachedFogLayer() {
+        if (fogCanvas == null)
+            return;
+        if (fogCanvas.isVisible()) {
+            fogGc.setTransform(1, 0, 0, 1, 0, 0);
+            fogGc.clearRect(0, 0, fogCanvas.getWidth(), fogCanvas.getHeight());
+            fogCanvas.setVisible(false);
+        }
+        rasterizedFogGeometry = List.of();
+        fogRasterColor = null;
     }
 
     private Color currentFogColor() {
         return "follow".equals(cameraMode) ? FOLLOW_FOG_COLOR : GLOBAL_FOG_COLOR;
-    }
-
-    /** 直接使用相机基础数值转换坐标，避免每个最终顶点创建临时Point2D。 */
-    private void appendScreenSpaceFovPath(GraphicsContext targetGc, List<Point2D> currentFovPoints) {
-        Point2D first = currentFovPoints.get(0);
-        targetGc.moveTo((first.getX() - camera.x) * camera.scale + camera.offsetX,
-                (first.getY() - camera.y) * camera.scale + camera.offsetY);
-        for (int i = 1; i < currentFovPoints.size(); i++) {
-            Point2D point = currentFovPoints.get(i);
-            targetGc.lineTo((point.getX() - camera.x) * camera.scale + camera.offsetX,
-                    (point.getY() - camera.y) * camera.scale + camera.offsetY);
-        }
-        targetGc.closePath();
     }
 
     private int calculateLocalScoreForSorting(JsonObject p) {
@@ -10069,7 +10242,41 @@ public class GameClient extends Application {
     }
 
     /** 单个静态障碍物缓存块，坐标均为世界坐标。 */
-    private record ObstacleCacheTile(double x, double y, Rectangle2D bounds, Image image) {
+    private record ObstacleCacheTile(double x, double y, Rectangle2D bounds, Image image,
+            int pixelWidth, int pixelHeight, int[] argbPrePixels) {
+    }
+
+    private static final class ViewportPixelSlot {
+        final int[] pixels;
+        final PixelBuffer<IntBuffer> pixelBuffer;
+        final WritableImage image;
+
+        ViewportPixelSlot(int width, int height) {
+            pixels = new int[width * height];
+            pixelBuffer = new PixelBuffer<>(width, height, IntBuffer.wrap(pixels),
+                    PixelFormat.getIntArgbPreInstance());
+            image = new WritableImage(pixelBuffer);
+        }
+    }
+
+    private static final class ViewportBufferSet {
+        final int width;
+        final int height;
+        final ViewportPixelSlot[] slots;
+        final AtomicInteger frontIndex = new AtomicInteger(0);
+
+        ViewportBufferSet(int width, int height) {
+            this.width = width;
+            this.height = height;
+            this.slots = new ViewportPixelSlot[] {
+                    new ViewportPixelSlot(width, height), new ViewportPixelSlot(width, height)
+            };
+        }
+    }
+
+    private record ViewportBuildRequest(long sequence, String mapSignature,
+            double originX, double originY, double width, double height,
+            ViewportBufferSet buffers, List<ObstacleCacheTile> tiles) {
     }
 
     /**
@@ -10117,7 +10324,16 @@ public class GameClient extends Application {
                 params.setViewport(new Rectangle2D(0, 0, tileWidth, tileHeight));
                 Image tileImage = tileCanvas.snapshot(params, null);
                 if (tileImage != null) {
-                    obstacleCacheTiles.add(new ObstacleCacheTile(tileX, tileY, tileBounds, tileImage));
+                    int pixelWidth = Math.max(1, (int) Math.ceil(tileWidth));
+                    int pixelHeight = Math.max(1, (int) Math.ceil(tileHeight));
+                    int[] pixels = new int[pixelWidth * pixelHeight];
+                    tileImage.getPixelReader().getPixels(0, 0, pixelWidth, pixelHeight,
+                            PixelFormat.getIntArgbPreInstance(), pixels, 0, pixelWidth);
+                    PixelBuffer<IntBuffer> tilePixelBuffer = new PixelBuffer<>(pixelWidth, pixelHeight,
+                            IntBuffer.wrap(pixels), PixelFormat.getIntArgbPreInstance());
+                    WritableImage residentTileImage = new WritableImage(tilePixelBuffer);
+                    obstacleCacheTiles.add(new ObstacleCacheTile(tileX, tileY, tileBounds, residentTileImage,
+                            pixelWidth, pixelHeight, pixels));
                     bakedObstacleReferences += tileObstacles.size();
                 }
             }
@@ -10138,17 +10354,6 @@ public class GameClient extends Application {
         Rectangle background = new Rectangle(0, 0, mapWidth, mapHeight);
         background.setFill(CARD_BACKGROUND);
 
-        Group tileLayer = new Group();
-        tileLayer.setManaged(false);
-        residentObstacleTileNodes.clear();
-        for (ObstacleCacheTile tile : obstacleCacheTiles) {
-            ImageView tileView = new ImageView(tile.image());
-            tileView.setX(tile.x());
-            tileView.setY(tile.y());
-            tileView.setManaged(false);
-            tileLayer.getChildren().add(tileView);
-            residentObstacleTileNodes.add(new ResidentObstacleTileNode(tile.bounds(), tileView));
-        }
 
         ImageView overviewView = null;
         if (obstacleOverviewImage != null) {
@@ -10160,22 +10365,29 @@ public class GameClient extends Application {
             overviewView.setVisible(false);
         }
 
-        ImageView viewportView = new ImageView();
-        viewportView.setManaged(false);
-        viewportView.setVisible(false);
+        ImageView viewportFrontView = createViewportImageView();
+        ImageView viewportBackView = createViewportImageView();
 
-        residentObstacleTileLayer = tileLayer;
         residentObstacleOverviewView = overviewView;
-        residentObstacleViewportView = viewportView;
+        residentObstacleViewportFrontView = viewportFrontView;
+        residentObstacleViewportBackView = viewportBackView;
         residentStaticMapLayer.getChildren().clear();
         residentStaticMapLayer.getChildren().add(background);
-        residentStaticMapLayer.getChildren().add(tileLayer);
-        residentStaticMapLayer.getChildren().add(viewportView);
+        residentStaticMapLayer.getChildren().add(viewportFrontView);
+        residentStaticMapLayer.getChildren().add(viewportBackView);
         if (overviewView != null)
             residentStaticMapLayer.getChildren().add(overviewView);
         residentStaticMapReady = true;
-        System.out.printf("[Render] Resident static map ready: %d tile nodes, overview=%s%n",
-                tileLayer.getChildren().size(), overviewView != null);
+        System.out.printf("[Render] Resident static map ready: 2 viewport nodes (double-buffered), overview=%s%n",
+                overviewView != null);
+    }
+
+    private static ImageView createViewportImageView() {
+        ImageView view = new ImageView();
+        view.setManaged(false);
+        view.setMouseTransparent(true);
+        view.setVisible(false);
+        return view;
     }
 
     private boolean isResidentStaticMapLayerReady() {
@@ -10200,8 +10412,7 @@ public class GameClient extends Application {
         double maxY = camera.y + (CANVAS_HEIGHT - camera.offsetY) / safeScale + padding;
         boolean useViewport = !useOverview && ensureResidentObstacleViewport(minX, minY, maxX, maxY);
 
-        setVisibleIfChanged(residentObstacleTileLayer, !useOverview && !useViewport);
-        setVisibleIfChanged(residentObstacleViewportView, useViewport);
+        setViewportViewsVisible(useViewport);
         if (residentObstacleOverviewView != null)
             setVisibleIfChanged(residentObstacleOverviewView, useOverview);
         residentViewportActive = useViewport;
@@ -10214,11 +10425,10 @@ public class GameClient extends Application {
         } else {
             residentStaticMapMode = "tiles";
             int visibleTiles = 0;
-            for (ResidentObstacleTileNode tileNode : residentObstacleTileNodes) {
-                Rectangle2D bounds = tileNode.bounds();
+            for (ObstacleCacheTile tile : obstacleCacheTiles) {
+                Rectangle2D bounds = tile.bounds();
                 boolean visible = boundsIntersect(bounds.getMinX(), bounds.getMinY(), bounds.getMaxX(), bounds.getMaxY(),
                         minX, minY, maxX, maxY);
-                setVisibleIfChanged(tileNode.view(), visible);
                 if (visible)
                     visibleTiles++;
             }
@@ -10239,7 +10449,8 @@ public class GameClient extends Application {
 
     private boolean ensureResidentObstacleViewport(double viewMinX, double viewMinY,
             double viewMaxX, double viewMaxY) {
-        if (residentObstacleViewportView == null || mapData == null || obstacleCacheTiles.isEmpty())
+        if (residentObstacleViewportFrontView == null || residentObstacleViewportBackView == null
+                || mapData == null || obstacleCacheTiles.isEmpty())
             return false;
         double mapWidth = getDouble(mapData, "width");
         double mapHeight = getDouble(mapData, "height");
@@ -10253,8 +10464,8 @@ public class GameClient extends Application {
                 || viewWidth > OBSTACLE_VIEWPORT_CACHE_SIZE || viewHeight > OBSTACLE_VIEWPORT_CACHE_SIZE)
             return false;
 
-        double cacheWidth = Math.min(OBSTACLE_VIEWPORT_CACHE_SIZE, mapWidth);
-        double cacheHeight = Math.min(OBSTACLE_VIEWPORT_CACHE_SIZE, mapHeight);
+        double cacheWidth = adaptiveViewportSize(viewWidth, mapWidth);
+        double cacheHeight = adaptiveViewportSize(viewHeight, mapHeight);
         if (residentViewportValid && viewportContainsWithMargin(
                 residentViewportOriginX, residentViewportOriginY,
                 residentViewportWidth, residentViewportHeight,
@@ -10267,61 +10478,173 @@ public class GameClient extends Application {
                 mapWidth, cacheWidth);
         double originY = clampViewportOrigin(Math.floor((viewMinY + viewMaxY - cacheHeight) * 0.5),
                 mapHeight, cacheHeight);
-        rebuildResidentObstacleViewport(originX, originY, cacheWidth, cacheHeight);
-        return residentViewportValid;
+        requestResidentObstacleViewportBuild(originX, originY, cacheWidth, cacheHeight);
+        // 相机仍在旧纹理真实覆盖范围内时继续显示前缓冲；后台完成后再无缝切换。
+        return residentViewportValid && viewportContainsWithMargin(
+                residentViewportOriginX, residentViewportOriginY,
+                residentViewportWidth, residentViewportHeight,
+                viewMinX, viewMinY, viewMaxX, viewMaxY,
+                mapWidth, mapHeight, 0.0);
     }
 
-    private void rebuildResidentObstacleViewport(double originX, double originY,
+    private void requestResidentObstacleViewportBuild(double originX, double originY,
             double width, double height) {
         if (width <= 0 || height <= 0)
             return;
         int pixelWidth = Math.max(1, (int) Math.ceil(width));
         int pixelHeight = Math.max(1, (int) Math.ceil(height));
-        if (residentObstacleViewportCanvas == null
-                || (int) residentObstacleViewportCanvas.getWidth() != pixelWidth
-                || (int) residentObstacleViewportCanvas.getHeight() != pixelHeight) {
-            residentObstacleViewportCanvas = new Canvas(pixelWidth, pixelHeight);
-            residentObstacleViewportImage = new WritableImage(pixelWidth, pixelHeight);
+        ViewportBufferSet buffers = residentViewportBuffers;
+        if (buffers == null || buffers.width != pixelWidth || buffers.height != pixelHeight) {
+            buffers = new ViewportBufferSet(pixelWidth, pixelHeight);
+            residentViewportBuffers = buffers;
         }
+        ViewportBuildRequest request = new ViewportBuildRequest(viewportBuildSequence.incrementAndGet(),
+                initializedMapSignature, originX, originY, width, height,
+                buffers, List.copyOf(obstacleCacheTiles));
+        if (sameViewportBuild(activeViewportBuild, request)
+                || sameViewportBuild(pendingViewportBuild.get(), request))
+            return;
+        ViewportBuildRequest replaced = pendingViewportBuild.getAndSet(request);
+        if (replaced != null)
+            perfStaticViewportBuildReplacements.increment();
+        ensureViewportWorkerRunning();
+    }
 
-        GraphicsContext viewportGc = residentObstacleViewportCanvas.getGraphicsContext2D();
-        viewportGc.setTransform(1, 0, 0, 1, 0, 0);
-        viewportGc.clearRect(0, 0, pixelWidth, pixelHeight);
-        Rectangle2D viewportBounds = new Rectangle2D(originX, originY, width, height);
+    private void ensureViewportWorkerRunning() {
+        if (!viewportWorkerRunning.compareAndSet(false, true))
+            return;
+        try {
+            staticViewportExecutor.execute(this::composeLatestViewportInBackground);
+        } catch (RejectedExecutionException ignored) {
+            viewportWorkerRunning.set(false);
+        }
+    }
+
+    private void composeLatestViewportInBackground() {
+        ViewportBuildRequest request = pendingViewportBuild.getAndSet(null);
+        if (request == null) {
+            viewportWorkerRunning.set(false);
+            return;
+        }
+        activeViewportBuild = request;
+        long start = System.nanoTime();
+        ViewportBufferSet buffers = request.buffers();
+        int backIndex = 1 - buffers.frontIndex.get();
+        int[] target = buffers.slots[backIndex].pixels;
+        Arrays.fill(target, 0);
+        int blits = composeViewportPixels(request, target, buffers.width, buffers.height);
+        long elapsed = System.nanoTime() - start;
+        Platform.runLater(() -> publishComposedViewport(request, backIndex, blits, elapsed));
+    }
+
+    private static int composeViewportPixels(ViewportBuildRequest request, int[] target,
+            int targetWidth, int targetHeight) {
+        int originX = (int) request.originX();
+        int originY = (int) request.originY();
+        int maxX = originX + targetWidth;
+        int maxY = originY + targetHeight;
         int blits = 0;
-        for (ObstacleCacheTile tile : obstacleCacheTiles) {
-            if (!viewportBounds.intersects(tile.bounds()))
+        for (ObstacleCacheTile tile : request.tiles()) {
+            int tileX = (int) tile.x();
+            int tileY = (int) tile.y();
+            int copyMinX = Math.max(originX, tileX);
+            int copyMinY = Math.max(originY, tileY);
+            int copyMaxX = Math.min(maxX, tileX + tile.pixelWidth());
+            int copyMaxY = Math.min(maxY, tileY + tile.pixelHeight());
+            int copyWidth = copyMaxX - copyMinX;
+            int copyHeight = copyMaxY - copyMinY;
+            if (copyWidth <= 0 || copyHeight <= 0)
                 continue;
-            viewportGc.drawImage(tile.image(), tile.x() - originX, tile.y() - originY);
+            int sourceX = copyMinX - tileX;
+            int sourceY = copyMinY - tileY;
+            int destinationX = copyMinX - originX;
+            int destinationY = copyMinY - originY;
+            for (int row = 0; row < copyHeight; row++) {
+                System.arraycopy(tile.argbPrePixels(), (sourceY + row) * tile.pixelWidth() + sourceX,
+                        target, (destinationY + row) * targetWidth + destinationX, copyWidth);
+            }
             blits++;
         }
-        javafx.scene.SnapshotParameters parameters = new javafx.scene.SnapshotParameters();
-        parameters.setFill(Color.TRANSPARENT);
-        parameters.setViewport(new Rectangle2D(0, 0, pixelWidth, pixelHeight));
-        residentObstacleViewportCanvas.snapshot(parameters, residentObstacleViewportImage);
-        residentObstacleViewportView.setImage(residentObstacleViewportImage);
-        residentObstacleViewportView.setX(originX);
-        residentObstacleViewportView.setY(originY);
-        residentViewportOriginX = originX;
-        residentViewportOriginY = originY;
-        residentViewportWidth = width;
-        residentViewportHeight = height;
-        residentViewportValid = true;
-        residentVisibleTileCount = blits;
-        perfStaticViewportRebuilds++;
-        perfStaticViewportTileBlits += blits;
+        return blits;
+    }
+
+    private void publishComposedViewport(ViewportBuildRequest request, int backIndex,
+            int blits, long elapsedNanos) {
+        try {
+            if (residentViewportBuffers != request.buffers()
+                    || !Objects.equals(initializedMapSignature, request.mapSignature()))
+                return;
+            ViewportPixelSlot slot = request.buffers().slots[backIndex];
+            slot.pixelBuffer.updateBuffer(ignored -> null);
+            ImageView backView = backIndex == 0 ? residentObstacleViewportFrontView : residentObstacleViewportBackView;
+            ImageView frontView = backIndex == 0 ? residentObstacleViewportBackView : residentObstacleViewportFrontView;
+            backView.setImage(slot.image);
+            backView.setX(request.originX());
+            backView.setY(request.originY());
+            setVisibleIfChanged(backView, residentViewportActive);
+            setVisibleIfChanged(frontView, false);
+            request.buffers().frontIndex.set(backIndex);
+            residentViewportOriginX = request.originX();
+            residentViewportOriginY = request.originY();
+            residentViewportWidth = request.width();
+            residentViewportHeight = request.height();
+            residentViewportValid = true;
+            residentVisibleTileCount = blits;
+            perfStaticViewportRebuilds++;
+            perfStaticViewportTileBlits += blits;
+            perfStaticViewportBackgroundNanos.add(elapsedNanos);
+        } finally {
+            activeViewportBuild = null;
+            viewportWorkerRunning.set(false);
+            if (pendingViewportBuild.get() != null)
+                ensureViewportWorkerRunning();
+        }
+    }
+
+    private static boolean sameViewportBuild(ViewportBuildRequest left, ViewportBuildRequest right) {
+        return left != null && right != null && left.buffers() == right.buffers()
+                && Double.compare(left.originX(), right.originX()) == 0
+                && Double.compare(left.originY(), right.originY()) == 0
+                && Double.compare(left.width(), right.width()) == 0
+                && Double.compare(left.height(), right.height()) == 0
+                && Objects.equals(left.mapSignature(), right.mapSignature());
+    }
+
+    private void setViewportViewsVisible(boolean visible) {
+        ViewportBufferSet buffers = residentViewportBuffers;
+        if (!visible || buffers == null || !residentViewportValid) {
+            setVisibleIfChanged(residentObstacleViewportFrontView, false);
+            setVisibleIfChanged(residentObstacleViewportBackView, false);
+            return;
+        }
+        int frontIndex = buffers.frontIndex.get();
+        setVisibleIfChanged(residentObstacleViewportFrontView, frontIndex == 0);
+        setVisibleIfChanged(residentObstacleViewportBackView, frontIndex == 1);
     }
 
     private void invalidateResidentStaticViewport() {
+        viewportBuildSequence.incrementAndGet();
+        pendingViewportBuild.set(null);
+        activeViewportBuild = null;
         residentViewportValid = false;
         residentViewportActive = false;
         residentStaticMapMode = "canvas";
-        if (residentObstacleViewportView != null) {
-            residentObstacleViewportView.setVisible(false);
-            residentObstacleViewportView.setImage(null);
+        if (residentObstacleViewportFrontView != null) {
+            residentObstacleViewportFrontView.setVisible(false);
+            residentObstacleViewportFrontView.setImage(null);
         }
-        residentObstacleViewportImage = null;
-        residentObstacleViewportCanvas = null;
+        if (residentObstacleViewportBackView != null) {
+            residentObstacleViewportBackView.setVisible(false);
+            residentObstacleViewportBackView.setImage(null);
+        }
+        residentViewportBuffers = null;
+    }
+
+    static double adaptiveViewportSize(double viewSize, double mapSize) {
+        double requested = viewSize + OBSTACLE_VIEWPORT_SAFETY_PADDING * 2.0;
+        double quantized = Math.ceil(requested / OBSTACLE_VIEWPORT_SIZE_QUANTUM)
+                * OBSTACLE_VIEWPORT_SIZE_QUANTUM;
+        return Math.min(mapSize, Math.min(OBSTACLE_VIEWPORT_CACHE_SIZE, quantized));
     }
 
     static double clampViewportOrigin(double desiredOrigin, double mapSize, double cacheSize) {
@@ -10347,9 +10670,6 @@ public class GameClient extends Application {
     static boolean boundsIntersect(double minX1, double minY1, double maxX1, double maxY1,
             double minX2, double minY2, double maxX2, double maxY2) {
         return maxX1 >= minX2 && maxX2 >= minX1 && maxY1 >= minY2 && maxY2 >= minY1;
-    }
-
-    private record ResidentObstacleTileNode(Rectangle2D bounds, ImageView view) {
     }
 
     /** 为全图模式生成一张不超过2048的屏幕级概览纹理，高清跟随模式仍使用原始分块。 */
@@ -11101,12 +11421,18 @@ public class GameClient extends Application {
         final List<Point2D[]> edges;
         /** 同一批边的原始坐标缓存，供高频射线求交使用，避免临时对象分配。 */
         final double[] edgeCoordinates;
+        final double centerX;
+        final double centerY;
+        final double boundingRadius;
 
         StaticObstacle(JsonObject originalJson, Rectangle2D bounds, List<Point2D[]> edges) {
             this.originalJson = originalJson;
             this.bounds = bounds;
             this.edges = edges;
             this.edgeCoordinates = flattenEdgeCoordinates(edges);
+            this.centerX = (bounds.getMinX() + bounds.getMaxX()) * 0.5;
+            this.centerY = (bounds.getMinY() + bounds.getMaxY()) * 0.5;
+            this.boundingRadius = Math.hypot(bounds.getWidth(), bounds.getHeight()) * 0.5;
         }
     }
 }

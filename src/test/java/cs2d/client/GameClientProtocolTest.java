@@ -113,6 +113,33 @@ class GameClientProtocolTest {
     }
 
     @Test
+    void fastAngleNormalizationMatchesWrappedAngleBoundaries() {
+        assertEquals(Math.PI, GameClient.normalizeAngle(-Math.PI), 1.0e-12);
+        assertEquals(-Math.PI + 0.25, GameClient.normalizeAngle(Math.PI + 0.25), 1.0e-12);
+        assertEquals(Math.PI - 0.25, GameClient.normalizeAngle(-Math.PI - 0.25), 1.0e-12);
+        assertEquals(0.125, GameClient.normalizeAngle(Math.PI * 8.0 + 0.125), 1.0e-12);
+    }
+
+    @Test
+    void cachedFogTransformKeepsWorldPointAlignedWithCurrentCamera() {
+        double world = 930.25;
+        double rasterCamera = 400.0;
+        double rasterScale = 1.0;
+        double rasterOffset = 800.0;
+        double currentCamera = 475.0;
+        double currentScale = 1.25;
+        double currentOffset = 800.0;
+        double margin = 192.0;
+        double ratio = currentScale / rasterScale;
+        double cachedCoordinate = (world - rasterCamera) * rasterScale + rasterOffset + margin;
+        double translated = cachedCoordinate * ratio + GameClient.fogLayerTranslation(
+                currentCamera, currentScale, currentOffset,
+                rasterCamera, rasterScale, rasterOffset, margin);
+        double direct = (world - currentCamera) * currentScale + currentOffset;
+        assertEquals(direct, translated, 1.0e-9);
+    }
+
+    @Test
     void primitiveFovSimplificationMatchesLegacyPointAlgorithm() {
         int rayCount = GameClient.FOV_RAY_COUNT;
         Point2D source = new Point2D(321.25, 654.75);
