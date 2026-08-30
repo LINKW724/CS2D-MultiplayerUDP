@@ -16,16 +16,20 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.CRC32;
 
 /**
- * 专职的网络广播器。
- * [同步优化] 现在不再使用独立线程计时，而是由主游戏循环(gameLoop)直接调用。
- * 这确保了网络包的发送与物理模拟(Tick)完全同步，彻底解决了掉落物和玩家的“周期性抽动”问题。
+ * 专职的网络广播器。游戏线程只在确定的Tick捕获独立Json快照；序列化、压缩、
+ * 分片和UDP发送由单一latest-wins工作线程完成，慢发送不会阻塞120Hz世界模拟。
  */
 public class NetworkBroadcaster {
 
@@ -35,6 +39,14 @@ public class NetworkBroadcaster {
     private final Gson gson = new Gson();
     private final String sessionId;
     private final AtomicLong sequenceCounter = new AtomicLong();
+    private final AtomicReference<BroadcastJob> pendingBroadcast = new AtomicReference<>();
+    private final AtomicBoolean broadcastWorkerRunning = new AtomicBoolean(false);
+    private final LongAdder coalescedBroadcasts = new LongAdder();
+    private final ExecutorService broadcastExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "Server-Network-Broadcaster");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     // 从 GameServer 传入的共享资源 (必须是线程安全的)
     private DatagramSocket socket;
@@ -51,6 +63,10 @@ public class NetworkBroadcaster {
     private volatile double perfTimeJsonSerialization = 0.0;
     private volatile double perfTimeChunkPreparation = 0.0;
     private volatile double perfTimeParallelSend = 0.0;
+    private volatile double perfTimeSnapshotCapture = 0.0;
+
+    private record BroadcastJob(JsonObject state, List<InetSocketAddress> recipients, boolean forcedFull) {
+    }
 
     public NetworkBroadcaster(GameState gameState, Consumer<String> logger, String sessionId) {
         this.gameState = gameState;
@@ -68,102 +84,98 @@ public class NetworkBroadcaster {
         this.playerBytesSentInInterval = playerBytesSentInInterval;
     }
 
-    /**
-     * [同步化修复] 现在由 GameServer 的 gameLoop 调用。
-     * 这样发送的数据包将与服务器物理 tick 完全同步。
-     */
+    /** 由游戏线程调用：只捕获当前Tick的独立快照并投递，不执行阻塞网络工作。 */
     public void broadcast(long serverTick) {
+        captureAndEnqueue(serverTick, false);
+    }
+
+    private void captureAndEnqueue(long serverTick, boolean forcedFull) {
+        if (addressToPlayerId == null || addressToPlayerId.isEmpty())
+            return;
+        long captureStartedAt = System.nanoTime();
         try {
-            if (addressToPlayerId == null || addressToPlayerId.isEmpty()) {
-                return;
-            }
-
-            long cycleStartTime = System.nanoTime();
-            long stepStartTime = cycleStartTime;
-
-            // --- 2. 序列化 ---
-            String stateJson;
-            JsonObject state;
-            try {
-                latestServerTick = serverTick;
-                long currentSnapshot = ++snapshotCounter;
-                if (currentSnapshot % FULL_UPDATE_EVERY_SNAPSHOTS == 0) {
-                    state = gameState.getFullUpdateJson();
-                } else {
-                    state = gameState.getSmallUpdateJson();
-                }
-                decorateState(state, serverTick);
-                stateJson = gson.toJson(state);
-            } catch (Exception e) {
-                logger.accept("[Broadcaster] JSON 序列化失败 (可能存在并发修改): " + e.toString());
-                e.printStackTrace(); // 在服务器终端打印详细堆栈
-                return; // 如果序列化失败，跳过这一帧，防止后续逻辑出错
-            }
-            long stepEndJson = System.nanoTime();
-            double jsonSerTimeMs = (stepEndJson - stepStartTime) / 1_000_000.0;
-            // --- 3. 预准备数据 ---
-            stepStartTime = System.nanoTime();
-            final String finalStateJson = stateJson; 
-            boolean needsChunking = finalStateJson.length() > 1024;
-            List<String> preparedChunks = null; 
-
-            if (needsChunking) {
-                preparedChunks = prepareChunks(finalStateJson, state);
-            }
-            long stepEndChunkPrep = System.nanoTime();
-            double chunkPrepTimeMs = needsChunking ? (stepEndChunkPrep - stepStartTime) / 1_000_000.0 : 0;
-
-            final List<String> finalPreparedChunks = preparedChunks;
-            final boolean finalNeedsChunking = needsChunking;
-
-            // --- 4. 顺序发送（避免为少量UDP客户端进入公共ForkJoinPool） ---
-            stepStartTime = System.nanoTime();
-            for (InetSocketAddress address : addressToPlayerId.keySet()) {
-                try {
-                    if (finalNeedsChunking) {
-                        sendLargeMessageChunks(finalPreparedChunks, address);
-                    } else {
-                        send(finalStateJson, address);
-                    }
-                } catch (Exception e) {
-                    // 单个客户端发送失败不能中断其余客户端
-                }
-            }
-            long stepEndSend = System.nanoTime();
-            double parallelSendTimeMs = (stepEndSend - stepStartTime) / 1_000_000.0;
-
-            long cycleEndTime = System.nanoTime();
-            this.perfTimeNetworkSend = (cycleEndTime - cycleStartTime) / 1_000_000.0;
-            this.perfTimeJsonSerialization = jsonSerTimeMs;
-            this.perfTimeChunkPreparation = chunkPrepTimeMs;
-            this.perfTimeParallelSend = parallelSendTimeMs;
-
-        } catch (Throwable t) {
-            // 捕获所有致命错误，防止主循环线程挂掉
-            System.err.println("!!! NetworkBroadcaster 发生致命异常 !!!");
-            t.printStackTrace();
-            logger.accept("NetworkBroadcaster.broadcast 崩溃: " + t.toString());
+            latestServerTick = serverTick;
+            long currentSnapshot = ++snapshotCounter;
+            JsonObject state = forcedFull || currentSnapshot % FULL_UPDATE_EVERY_SNAPSHOTS == 0
+                    ? gameState.getFullUpdateJson()
+                    : gameState.getSmallUpdateJson();
+            decorateState(state, serverTick);
+            List<InetSocketAddress> recipients = List.copyOf(addressToPlayerId.keySet());
+            enqueueLatest(new BroadcastJob(state, recipients, forcedFull));
+        } catch (RuntimeException e) {
+            logger.accept("[Broadcaster] 捕获世界快照失败: " + e);
+        } finally {
+            perfTimeSnapshotCapture = (System.nanoTime() - captureStartedAt) / 1_000_000.0;
         }
     }
 
-    /** 仅由游戏主线程调用，立即发送带新序号的完整快照。 */
-    public void broadcastFullUpdate() {
-        if (addressToPlayerId == null || addressToPlayerId.isEmpty())
+    private void enqueueLatest(BroadcastJob job) {
+        BroadcastJob existing = pendingBroadcast.get();
+        if (shouldPreservePendingForcedFull(existing != null && existing.forcedFull(), job.forcedFull()))
+            return;
+        BroadcastJob replaced = pendingBroadcast.getAndSet(job);
+        if (replaced != null)
+            coalescedBroadcasts.increment();
+        ensureBroadcastWorkerRunning();
+    }
+
+    static boolean shouldPreservePendingForcedFull(boolean existingForcedFull, boolean incomingForcedFull) {
+        return existingForcedFull && !incomingForcedFull;
+    }
+
+    private void ensureBroadcastWorkerRunning() {
+        if (!broadcastWorkerRunning.compareAndSet(false, true))
             return;
         try {
-            JsonObject state = gameState.getFullUpdateJson();
-            decorateState(state, latestServerTick);
-            String stateJson = gson.toJson(state);
-            List<String> chunks = stateJson.length() > 1024 ? prepareChunks(stateJson, state) : null;
-            for (InetSocketAddress address : addressToPlayerId.keySet()) {
-                if (chunks != null)
-                    sendLargeMessageChunks(chunks, address);
+            broadcastExecutor.execute(this::drainLatestBroadcasts);
+        } catch (RejectedExecutionException ignored) {
+            broadcastWorkerRunning.set(false);
+        }
+    }
+
+    private void drainLatestBroadcasts() {
+        try {
+            BroadcastJob job;
+            while ((job = pendingBroadcast.getAndSet(null)) != null)
+                serializeAndSend(job);
+        } finally {
+            broadcastWorkerRunning.set(false);
+            if (pendingBroadcast.get() != null)
+                ensureBroadcastWorkerRunning();
+        }
+    }
+
+    private void serializeAndSend(BroadcastJob job) {
+        long cycleStartedAt = System.nanoTime();
+        try {
+            long stepStartedAt = cycleStartedAt;
+            String stateJson = gson.toJson(job.state());
+            long jsonFinishedAt = System.nanoTime();
+
+            boolean needsChunking = stateJson.length() > 1024;
+            List<String> preparedChunks = needsChunking ? prepareChunks(stateJson, job.state()) : null;
+            long chunksFinishedAt = System.nanoTime();
+
+            for (InetSocketAddress address : job.recipients()) {
+                if (needsChunking)
+                    sendLargeMessageChunks(preparedChunks, address);
                 else
                     send(stateJson, address);
             }
-        } catch (RuntimeException e) {
-            logger.accept("[Broadcaster] 强制全量广播失败: " + e.getMessage());
+            long sendFinishedAt = System.nanoTime();
+            perfTimeJsonSerialization = (jsonFinishedAt - stepStartedAt) / 1_000_000.0;
+            perfTimeChunkPreparation = needsChunking
+                    ? (chunksFinishedAt - jsonFinishedAt) / 1_000_000.0 : 0.0;
+            perfTimeParallelSend = (sendFinishedAt - chunksFinishedAt) / 1_000_000.0;
+            perfTimeNetworkSend = (sendFinishedAt - cycleStartedAt) / 1_000_000.0;
+        } catch (Throwable t) {
+            logger.accept("[Broadcaster] 后台广播失败: " + t);
         }
+    }
+
+    /** 仅由游戏主线程调用，捕获一份不会被普通小快照覆盖的完整状态。 */
+    public void broadcastFullUpdate() {
+        captureAndEnqueue(latestServerTick, true);
     }
 
     private void decorateState(JsonObject state, long serverTick) {
@@ -265,8 +277,15 @@ public class NetworkBroadcaster {
         return bos.toByteArray();
     }
 
+    public void shutdown() {
+        pendingBroadcast.set(null);
+        broadcastExecutor.shutdownNow();
+    }
+
     public double getPerfTimeNetworkSend() { return perfTimeNetworkSend; }
     public double getPerfTimeJsonSerialization() { return perfTimeJsonSerialization; }
     public double getPerfTimeChunkPreparation() { return perfTimeChunkPreparation; }
     public double getPerfTimeParallelSend() { return perfTimeParallelSend; }
+    public double getPerfTimeSnapshotCapture() { return perfTimeSnapshotCapture; }
+    public long getAndResetCoalescedBroadcasts() { return coalescedBroadcasts.sumThenReset(); }
 }

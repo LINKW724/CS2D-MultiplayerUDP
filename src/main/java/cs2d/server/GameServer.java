@@ -164,6 +164,8 @@ public class GameServer {
      */
     public void stopServer() {
         running = false;
+        if (networkBroadcaster != null)
+            networkBroadcaster.shutdown();
         if (socket != null && !socket.isClosed()) {
             socket.close();
         }
@@ -604,10 +606,10 @@ public class GameServer {
             double deviation = avgFrameTime - targetFrameTime;
 
             System.out.printf("性能监控: 平均循环间隔 %.3f ms, 平均Tick工作耗时 %.3f ms, 目标 %.3f ms, "
-                            + "间隔偏差 %.3f ms, 丢弃过期追帧 %d, 网络[总计 %.3f/JSON %.3f/分片 %.3f/发送 %.3f ms]\n",
+                            + "间隔偏差 %.3f ms, 丢弃过期追帧 %d, 网络[捕获 %.3f/后台总计 %.3f/JSON %.3f/分片 %.3f/发送 %.3f ms/合并旧快照 %d]\n",
                     avgFrameTime, avgTickWorkTime, targetFrameTime, deviation, droppedCatchUpTicks,
-                    getPerfTimeNetworkSend(), getPerfTimeJsonSerialization(),
-                    getPerfTimeChunkPreparation(), getPerfTimeParallelSend());
+                    getPerfTimeSnapshotCapture(), getPerfTimeNetworkSend(), getPerfTimeJsonSerialization(),
+                    getPerfTimeChunkPreparation(), getPerfTimeParallelSend(), getAndResetCoalescedBroadcasts());
 
             frameTimeSum = 0;
             frameCount = 0;
@@ -687,6 +689,14 @@ public class GameServer {
 
     public double getPerfTimeNetworkSend() {
         return (networkBroadcaster != null) ? networkBroadcaster.getPerfTimeNetworkSend() : 0.0;
+    }
+
+    public double getPerfTimeSnapshotCapture() {
+        return (networkBroadcaster != null) ? networkBroadcaster.getPerfTimeSnapshotCapture() : 0.0;
+    }
+
+    public long getAndResetCoalescedBroadcasts() {
+        return (networkBroadcaster != null) ? networkBroadcaster.getAndResetCoalescedBroadcasts() : 0L;
     }
 
     public double getPerfTimeJsonSerialization() {

@@ -46,6 +46,14 @@ class NetworkProtocolTest {
     }
 
     @Test
+    void forcedFullSnapshotCannotBeOverwrittenByRoutineSmallSnapshot() {
+        assertTrue(NetworkBroadcaster.shouldPreservePendingForcedFull(true, false));
+        assertFalse(NetworkBroadcaster.shouldPreservePendingForcedFull(false, false));
+        assertFalse(NetworkBroadcaster.shouldPreservePendingForcedFull(false, true));
+        assertFalse(NetworkBroadcaster.shouldPreservePendingForcedFull(true, true));
+    }
+
+    @Test
     void kevlarOwnerPaysOnlyHelmetUpgradeDifference() {
         assertEquals(350, GameState.calculatePurchaseCost(Item.KEVLAR_HELMET, true, false));
         assertEquals(1000, GameState.calculatePurchaseCost(Item.KEVLAR_HELMET, false, false));
