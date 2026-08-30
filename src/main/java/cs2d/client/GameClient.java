@@ -149,7 +149,7 @@ public class GameClient extends Application {
     /** 全图视角最终只占1600x900逻辑像素；2048概览纹理足够并可把20次提交合成1次。 */
     static final int OBSTACLE_OVERVIEW_MAX_SIZE = 2048;
     private static final boolean USE_RESIDENT_STATIC_MAP_LAYER = Boolean.parseBoolean(
-            System.getProperty("cs2d.staticMapLayer", "false"));
+            System.getProperty("cs2d.staticMapLayer", "true"));
     private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
     private final List<ResidentObstacleTileNode> residentObstacleTileNodes = new ArrayList<>();
     private Image obstacleOverviewImage = null;
@@ -505,7 +505,7 @@ public class GameClient extends Application {
     // 用于处理连接和重连的定时任务执行器
     private final ScheduledExecutorService connectionExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    // 网络线程只入队；JavaFX线程在每个渲染帧边界消费，避免8ms批处理时钟与165Hz渲染互相拍频。
+    // 网络线程先完成UDP分片重组，再只把完整消息入队；JavaFX线程在165Hz帧边界消费。
     private final ConcurrentLinkedQueue<String> messageBatchQueue = new ConcurrentLinkedQueue<>();
 
     private int drainNetworkMessagesForRenderFrame() {
@@ -627,7 +627,9 @@ public class GameClient extends Application {
     /** [M2] Small Update 耗时 */
     private double perfTimeMsg_SmallUpdate = 0;
     /** [M3] Chunk (分片) 耗时 */
-    private double perfTimeMsg_Chunk = 0;
+    private final LongAdder perfTimeMsgChunkNanos = new LongAdder();
+    private final LongAdder perfChunkDatagrams = new LongAdder();
+    private final LongAdder perfCompletedChunkMessages = new LongAdder();
     /** [M4] Map Data 耗时 */
     private double perfTimeMsg_MapData = 0;
     /** [M5] Events (声音/击杀) 耗时 */
@@ -652,8 +654,30 @@ public class GameClient extends Application {
     // --- 声音系统 ---
     // 存储所有预加载的音效
     private final Map<String, AudioClip> sounds = new ConcurrentHashMap<>();
+    /** MP3会进入JavaFX MediaPlayer后端；远程语音必须串行，避免每次重叠播放创建原生线程群。 */
+    private final Set<String> mediaBackedSoundKeys = ConcurrentHashMap.newKeySet();
+    private final MediaSoundGate mediaSoundGate = new MediaSoundGate(TimeUnit.MILLISECONDS.toNanos(250));
+    private volatile AudioClip activeMediaBackedWorldSound;
+    private final LongAdder mediaBackedWorldSoundsPlayed = new LongAdder();
+    private final LongAdder mediaBackedWorldSoundsSuppressed = new LongAdder();
     // 声音能传播的最大距离
     private static final double MAX_SOUND_DISTANCE = 800;
+
+    static final class MediaSoundGate {
+        private final long minimumIntervalNanos;
+        private long nextAllowedNanos;
+
+        MediaSoundGate(long minimumIntervalNanos) {
+            this.minimumIntervalNanos = Math.max(0L, minimumIntervalNanos);
+        }
+
+        synchronized boolean tryAcquire(long nowNanos, boolean previousSoundStillPlaying) {
+            if (previousSoundStillPlaying || nowNanos < nextAllowedNanos)
+                return false;
+            nextAllowedNanos = nowNanos + minimumIntervalNanos;
+            return true;
+        }
+    }
 
     // --- UI 字体与样式 ---
     // 定义各种UI元素的字体
@@ -1083,8 +1107,8 @@ public class GameClient extends Application {
                 // 将接收到的字节数据转换为UTF-8编码的字符串
                 String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
 
-                // 网络线程只负责入队；渲染线程会在下一次165Hz帧边界统一消费。
-                messageBatchQueue.offer(message);
+                // UDP分片的JSON解析、校验、拼接和解压在接收线程完成；FX线程只消费完整消息。
+                queueIncomingDatagram(message);
 
             } catch (SocketException e) { // 捕获套接字异常
                 // 如果程序仍在运行，说明是意外关闭，打印错误
@@ -1095,6 +1119,31 @@ public class GameClient extends Application {
                 if (running)
                     System.err.println("Error in listen thread: " + e.getMessage());
             }
+        }
+    }
+
+    private void queueIncomingDatagram(String message) {
+        lastServerMessageTime = System.nanoTime();
+        if (message == null)
+            return;
+        if (!message.startsWith("{\"type\":\"chunk\"")) {
+            messageBatchQueue.offer(message);
+            return;
+        }
+
+        long chunkStartTime = System.nanoTime();
+        perfChunkDatagrams.increment();
+        try {
+            JsonObject chunk = gson.fromJson(message, JsonObject.class);
+            String fullMessage = assembleChunkMessage(chunk);
+            if (fullMessage != null) {
+                perfCompletedChunkMessages.increment();
+                messageBatchQueue.offer(fullMessage);
+            }
+        } catch (RuntimeException e) {
+            System.err.println("解析UDP分片时出错: " + e.getMessage());
+        } finally {
+            perfTimeMsgChunkNanos.add(System.nanoTime() - chunkStartTime);
         }
     }
 
@@ -1270,69 +1319,10 @@ public class GameClient extends Application {
         if ("chunk".equals(type)) {
             // [新] 计时 [M3] Chunk
             long chunkStartTime = System.nanoTime();
-            String id = getString(json, "id");
-            int index = getInt(json, "index");
-            int total = getInt(json, "total");
-            String data = getString(json, "data");
-            String checksum = getString(json, "checksum");
-
-            if (serverSessionId != null && !hasCurrentSession(json)) {
-                if (id != null)
-                    chunkBuffers.remove(id);
-                return;
-            }
-            if (json.has("sequence") && json.get("sequence").isJsonPrimitive()
-                    && json.getAsJsonPrimitive("sequence").isNumber()
-                    && json.get("sequence").getAsLong() <= lastStateSequence.get()) {
-                if (id != null)
-                    chunkBuffers.remove(id);
-                return;
-            }
-
-            cleanupExpiredChunkBuffers();
-            if (id == null || id.isBlank() || id.length() > 128
-                    || total < 1 || total > MAX_CHUNK_COUNT
-                    || index < 0 || index >= total
-                    || data == null || data.length() > MAX_CHUNK_DATA_LENGTH
-                    || checksum == null || !checksum.matches("[0-9a-fA-F]{1,16}")) {
-                if (id != null)
-                    chunkBuffers.remove(id);
-                System.err.println("[CLIENT] 丢弃无效 UDP 分片");
-                return;
-            }
-
-            if (!chunkBuffers.containsKey(id) && chunkBuffers.size() >= MAX_CHUNK_BUFFERS) {
-                evictOldestChunkBuffer();
-            }
-
-            // 获取或为此消息ID创建一个缓冲区
-            cs2d.client.GameClient.ChunkBuffer buffer = chunkBuffers.computeIfAbsent(id,
-                    k -> new cs2d.client.GameClient.ChunkBuffer(total, checksum));
-
-            if (!buffer.matches(total, checksum)) {
-                chunkBuffers.remove(id, buffer);
-                System.err.println("[CLIENT] 丢弃元数据冲突的 UDP 分片: " + id);
-                return;
-            }
-
-            // 添加分片并检查消息是否完整
-            boolean isComplete = buffer.addChunk(index, data);
-
-            if (isComplete) {
-                // 如果完整，获取完整的消息并递归处理它
-                chunkBuffers.remove(id); // 清理缓冲区
-                try {
-                    String fullMessage = buffer.getFullMessage();
-                    // 解析重组后的消息并再次调用此处理程序
-                    // [修改] 递归调用时也传递 String
-                    // JsonObject fullJson = gson.fromJson(fullMessage, JsonObject.class); // [旧]
-                    // handleServerMessage(fullJson); // [旧]
-                    handleServerMessage(fullMessage); // [新]
-                } catch (Exception e) {
-                    System.err.println("解析重组消息时出错: " + e.getMessage());
-                }
-            }
-            perfTimeMsg_Chunk += (System.nanoTime() - chunkStartTime); // 累加 [M3]
+            String fullMessage = assembleChunkMessage(json);
+            if (fullMessage != null)
+                handleServerMessage(fullMessage);
+            perfTimeMsgChunkNanos.add(System.nanoTime() - chunkStartTime); // 累加 [M3]
             perfTimeMsgHandling += (System.nanoTime() - msgHandleStartTime); // 累加总耗时
             return; // 对于分片消息，在此处停止处理
         }
@@ -1631,6 +1621,59 @@ public class GameClient extends Application {
                 && json.has("protocolVersion")
                 && getInt(json, "protocolVersion") == SUPPORTED_PROTOCOL_VERSION
                 && serverSessionId.equals(getString(json, "sessionId"));
+    }
+
+    private String assembleChunkMessage(JsonObject json) {
+        String id = getString(json, "id");
+        int index = getInt(json, "index");
+        int total = getInt(json, "total");
+        String data = getString(json, "data");
+        String checksum = getString(json, "checksum");
+
+        if (serverSessionId != null && !hasCurrentSession(json)) {
+            if (id != null)
+                chunkBuffers.remove(id);
+            return null;
+        }
+        if (json.has("sequence") && json.get("sequence").isJsonPrimitive()
+                && json.getAsJsonPrimitive("sequence").isNumber()
+                && json.get("sequence").getAsLong() <= lastStateSequence.get()) {
+            if (id != null)
+                chunkBuffers.remove(id);
+            return null;
+        }
+
+        cleanupExpiredChunkBuffers();
+        if (id == null || id.isBlank() || id.length() > 128
+                || total < 1 || total > MAX_CHUNK_COUNT
+                || index < 0 || index >= total
+                || data == null || data.length() > MAX_CHUNK_DATA_LENGTH
+                || checksum == null || !checksum.matches("[0-9a-fA-F]{1,16}")) {
+            if (id != null)
+                chunkBuffers.remove(id);
+            System.err.println("[CLIENT] 丢弃无效 UDP 分片");
+            return null;
+        }
+
+        if (!chunkBuffers.containsKey(id) && chunkBuffers.size() >= MAX_CHUNK_BUFFERS)
+            evictOldestChunkBuffer();
+
+        ChunkBuffer buffer = chunkBuffers.computeIfAbsent(id, key -> new ChunkBuffer(total, checksum));
+        if (!buffer.matches(total, checksum)) {
+            chunkBuffers.remove(id, buffer);
+            System.err.println("[CLIENT] 丢弃元数据冲突的 UDP 分片: " + id);
+            return null;
+        }
+        if (!buffer.addChunk(index, data))
+            return null;
+
+        chunkBuffers.remove(id, buffer);
+        try {
+            return buffer.getFullMessage();
+        } catch (IOException e) {
+            System.err.println("解析重组消息时出错: " + e.getMessage());
+            return null;
+        }
     }
 
     private boolean acceptStatePacket(JsonObject json) {
@@ -2170,7 +2213,8 @@ public class GameClient extends Application {
                         // --- [新] 打印 [M] 的详细分解 ---
                         double avg_M1_Full = (perfTimeMsg_FullUpdate / perfFrameCount) / 1_000_000.0;
                         double avg_M2_Small = (perfTimeMsg_SmallUpdate / perfFrameCount) / 1_000_000.0;
-                        double avg_M3_Chunk = (perfTimeMsg_Chunk / perfFrameCount) / 1_000_000.0;
+                        double avg_M3_Chunk = (perfTimeMsgChunkNanos.sumThenReset() / (double) perfFrameCount)
+                                / 1_000_000.0;
                         double avg_M4_Map = (perfTimeMsg_MapData / perfFrameCount) / 1_000_000.0;
                         double avg_M5_Events = (perfTimeMsg_Events / perfFrameCount) / 1_000_000.0;
 
@@ -2207,6 +2251,10 @@ public class GameClient extends Application {
                         long fovLatestVertices = fovLatestFinalVertexCount.get();
                         long equipmentHudRebuilds = perfEquipmentHudRebuilds;
                         long hudVisibilityPasses = perfHudVisibilityPasses;
+                        long chunkDatagrams = perfChunkDatagrams.sumThenReset();
+                        long completedChunkMessages = perfCompletedChunkMessages.sumThenReset();
+                        long mediaSoundsPlayed = mediaBackedWorldSoundsPlayed.sumThenReset();
+                        long mediaSoundsSuppressed = mediaBackedWorldSoundsSuppressed.sumThenReset();
                         perfEquipmentHudRebuilds = 0;
                         perfHudVisibilityPasses = 0;
                         double fovBackgroundAvgMs = fovCalculations == 0 ? 0.0
@@ -2266,6 +2314,10 @@ public class GameClient extends Application {
                                     fovLatestVertices);
                             System.out.printf("  [HUD-CACHE] 装备节点重建 %d | 全局可见性遍历 %d\n",
                                     equipmentHudRebuilds, hudVisibilityPasses);
+                            System.out.printf("  [NET-CHUNK] UDP分片 %d | 完整消息 %d | 后台拼包 %.3f ms/帧\n",
+                                    chunkDatagrams, completedChunkMessages, avg_M3_Chunk);
+                            System.out.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
+                                    mediaSoundsPlayed, mediaSoundsSuppressed);
                             System.out.println("  --- (消息处理 [M] 的详细分解) ---");
                             System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
                             System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
@@ -2293,7 +2345,6 @@ public class GameClient extends Application {
                         perfTimeMsgHandling = 0;
                         perfTimeMsg_FullUpdate = 0;
                         perfTimeMsg_SmallUpdate = 0;
-                        perfTimeMsg_Chunk = 0;
                         perfTimeMsg_MapData = 0;
                         perfTimeMsg_Events = 0;
 
@@ -6427,6 +6478,8 @@ public class GameClient extends Application {
             if (resource != null) {
                 try {
                     sounds.put(key, new AudioClip(resource.toExternalForm()));
+                    if (resource.getPath().toLowerCase(Locale.ROOT).endsWith(".mp3"))
+                        mediaBackedSoundKeys.add(key);
                     System.out.println("    -> 成功加载: " + resource.getPath());
                 } catch (Exception e) {
                     System.err.println("    -> !!! 加载失败: " + key + " | 错误: " + e.getMessage());
@@ -6502,6 +6555,19 @@ public class GameClient extends Application {
         } else {
             // 如果是只给自己听的2D私有音效 (如UI、耳鸣)，使用固定的较大音量
             finalVolume = 0.7;
+        }
+
+        // 远程MP3语音使用JavaFX MediaPlayer后端；串行化可阻止原生播放器线程群重叠创建。
+        // WAV枪声不经过这里的门控，射击反馈频率保持不变。
+        if (soundPos != null && mediaBackedSoundKeys.contains(soundKey)) {
+            AudioClip active = activeMediaBackedWorldSound;
+            boolean activeStillPlaying = active != null && active.isPlaying();
+            if (!mediaSoundGate.tryAcquire(System.nanoTime(), activeStillPlaying)) {
+                mediaBackedWorldSoundsSuppressed.increment();
+                return;
+            }
+            activeMediaBackedWorldSound = clip;
+            mediaBackedWorldSoundsPlayed.increment();
         }
 
         // 播放最终计算出的音量
