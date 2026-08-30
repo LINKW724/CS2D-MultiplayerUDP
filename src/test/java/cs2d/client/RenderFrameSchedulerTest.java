@@ -30,33 +30,10 @@ class RenderFrameSchedulerTest {
     }
 
     @Test
-    void clampsSlidingViewportToMapEdgesWithoutChangingWorldResolution() {
-        assertEquals(0.0, GameClient.clampViewportOrigin(-200, 4392, 2048));
-        assertEquals(1172.0, GameClient.clampViewportOrigin(1172, 4392, 2048));
-        assertEquals(2344.0, GameClient.clampViewportOrigin(9999, 4392, 2048));
-    }
-
-    @Test
-    void keepsViewportUntilCameraEntersItsRebuildMargin() {
-        assertTrue(GameClient.viewportContainsWithMargin(
-                1000, 800, 2048, 2048,
-                1200, 1000, 2800, 1800,
-                4392, 3840, 128));
-        assertFalse(GameClient.viewportContainsWithMargin(
-                1000, 800, 2048, 2048,
-                1050, 1000, 2650, 1800,
-                4392, 3840, 128));
-        assertTrue(GameClient.viewportContainsWithMargin(
-                0, 0, 2048, 2048,
-                0, 0, 1600, 900,
-                4392, 3840, 128));
-    }
-
-    @Test
-    void sizesViewportFromVisibleAreaPlusFullResolutionSafetyPadding() {
-        assertEquals(2432.0, GameClient.adaptiveViewportSize(1600, 4392));
-        assertEquals(1792.0, GameClient.adaptiveViewportSize(900, 3840));
-        assertEquals(3072.0, GameClient.adaptiveViewportSize(2800, 4392));
-        assertEquals(900.0, GameClient.adaptiveViewportSize(1600, 900));
+    void prebuildsFixedAtlasRegionsWithoutRuntimeViewportRebuilds() {
+        assertEquals(1, GameClient.atlasRegionCount(1600, 900));
+        assertEquals(4, GameClient.atlasRegionCount(4392, 3840));
+        assertEquals(6, GameClient.atlasRegionCount(7000, 4000));
+        assertEquals(1, GameClient.atlasRegionCount(0, Double.NaN));
     }
 }
