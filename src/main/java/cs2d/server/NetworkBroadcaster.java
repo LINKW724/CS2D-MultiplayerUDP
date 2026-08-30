@@ -42,7 +42,9 @@ public class NetworkBroadcaster {
     private ConcurrentHashMap<String, InetSocketAddress> playerIdToAddress;
     private ConcurrentHashMap<String, LongAdder> playerBytesSentInInterval;
 
-    private long tickCounter = 0;
+    private long latestServerTick = 0;
+    private long snapshotCounter = 0;
+    private static final int FULL_UPDATE_EVERY_SNAPSHOTS = 3;
 
     // --- 性能日志 ---
     private volatile double perfTimeNetworkSend = 0.0;
@@ -70,7 +72,7 @@ public class NetworkBroadcaster {
      * [同步化修复] 现在由 GameServer 的 gameLoop 调用。
      * 这样发送的数据包将与服务器物理 tick 完全同步。
      */
-    public void broadcast() {
+    public void broadcast(long serverTick) {
         try {
             if (addressToPlayerId == null || addressToPlayerId.isEmpty()) {
                 return;
@@ -81,10 +83,11 @@ public class NetworkBroadcaster {
 
             // --- 2. 序列化 ---
             String stateJson;
+            JsonObject state;
             try {
-                long serverTick = ++tickCounter;
-                JsonObject state;
-                if (serverTick % 10 == 0) {
+                latestServerTick = serverTick;
+                long currentSnapshot = ++snapshotCounter;
+                if (currentSnapshot % FULL_UPDATE_EVERY_SNAPSHOTS == 0) {
                     state = gameState.getFullUpdateJson();
                 } else {
                     state = gameState.getSmallUpdateJson();
@@ -105,7 +108,7 @@ public class NetworkBroadcaster {
             List<String> preparedChunks = null; 
 
             if (needsChunking) {
-                preparedChunks = prepareChunks(finalStateJson);
+                preparedChunks = prepareChunks(finalStateJson, state);
             }
             long stepEndChunkPrep = System.nanoTime();
             double chunkPrepTimeMs = needsChunking ? (stepEndChunkPrep - stepStartTime) / 1_000_000.0 : 0;
@@ -113,9 +116,9 @@ public class NetworkBroadcaster {
             final List<String> finalPreparedChunks = preparedChunks;
             final boolean finalNeedsChunking = needsChunking;
 
-            // --- 4. 并行发送 ---
+            // --- 4. 顺序发送（避免为少量UDP客户端进入公共ForkJoinPool） ---
             stepStartTime = System.nanoTime();
-            addressToPlayerId.keySet().parallelStream().forEach(address -> {
+            for (InetSocketAddress address : addressToPlayerId.keySet()) {
                 try {
                     if (finalNeedsChunking) {
                         sendLargeMessageChunks(finalPreparedChunks, address);
@@ -123,9 +126,9 @@ public class NetworkBroadcaster {
                         send(finalStateJson, address);
                     }
                 } catch (Exception e) {
-                    // 并行发送的小错不要中断主线程
+                    // 单个客户端发送失败不能中断其余客户端
                 }
-            });
+            }
             long stepEndSend = System.nanoTime();
             double parallelSendTimeMs = (stepEndSend - stepStartTime) / 1_000_000.0;
 
@@ -149,9 +152,9 @@ public class NetworkBroadcaster {
             return;
         try {
             JsonObject state = gameState.getFullUpdateJson();
-            decorateState(state, tickCounter);
+            decorateState(state, latestServerTick);
             String stateJson = gson.toJson(state);
-            List<String> chunks = stateJson.length() > 1024 ? prepareChunks(stateJson) : null;
+            List<String> chunks = stateJson.length() > 1024 ? prepareChunks(stateJson, state) : null;
             for (InetSocketAddress address : addressToPlayerId.keySet()) {
                 if (chunks != null)
                     sendLargeMessageChunks(chunks, address);
@@ -178,6 +181,15 @@ public class NetworkBroadcaster {
     }
 
     public List<String> prepareChunks(String message) {
+        JsonObject sourceMetadata = null;
+        try {
+            sourceMetadata = gson.fromJson(message, JsonObject.class);
+        } catch (RuntimeException ignored) {
+        }
+        return prepareChunks(message, sourceMetadata);
+    }
+
+    private List<String> prepareChunks(String message, JsonObject sourceMetadata) {
         try {
             byte[] compressedBytes = compress(message);
 
@@ -188,12 +200,6 @@ public class NetworkBroadcaster {
             final int CHUNK_SIZE = 1024;
             int totalChunks = (int) Math.ceil((double) base64Message.length() / CHUNK_SIZE);
             String messageId = UUID.randomUUID().toString();
-            JsonObject sourceMetadata = null;
-            try {
-                sourceMetadata = gson.fromJson(message, JsonObject.class);
-            } catch (RuntimeException ignored) {
-            }
-
             List<String> preparedChunks = new ArrayList<>(totalChunks);
             for (int i = 0; i < totalChunks; i++) {
                 int start = i * CHUNK_SIZE;

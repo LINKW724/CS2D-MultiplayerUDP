@@ -32,6 +32,11 @@ import java.util.function.Consumer;
 public class GameServer {
 
     public static final double TPS = 120;
+    /** 物理仍保持120Hz；网络快照独立为30Hz，由客户端在165Hz渲染时插值。 */
+    static final int NETWORK_SNAPSHOT_HZ = 30;
+    static final int TICKS_PER_NETWORK_SNAPSHOT = (int) (TPS / NETWORK_SNAPSHOT_HZ);
+    /** 防止一次调度抖动触发无限历史Tick补算。 */
+    static final int MAX_CATCH_UP_TICKS = 4;
     public static final int PROTOCOL_VERSION = 2;
     private static final long CLIENT_TIMEOUT_MS = 10000;
     private static final long TIMEOUT_CHECK_INTERVAL_MS = 2000;
@@ -581,6 +586,7 @@ public class GameServer {
     private int frameCount = 0;
     private long tickWorkTimeSum = 0;
     private int tickWorkCount = 0;
+    private long droppedCatchUpTicks = 0;
     private long lastMonitorTime = System.nanoTime();
     private long lastFrameTimeMonitor = System.nanoTime();
 
@@ -597,13 +603,17 @@ public class GameServer {
             double targetFrameTime = 1000.0 / TPS;
             double deviation = avgFrameTime - targetFrameTime;
 
-            System.out.printf("性能监控: 平均循环间隔 %.3f ms, 平均Tick工作耗时 %.3f ms, 目标 %.3f ms, 间隔偏差 %.3f ms\n",
-                    avgFrameTime, avgTickWorkTime, targetFrameTime, deviation);
+            System.out.printf("性能监控: 平均循环间隔 %.3f ms, 平均Tick工作耗时 %.3f ms, 目标 %.3f ms, "
+                            + "间隔偏差 %.3f ms, 丢弃过期追帧 %d, 网络[总计 %.3f/JSON %.3f/分片 %.3f/发送 %.3f ms]\n",
+                    avgFrameTime, avgTickWorkTime, targetFrameTime, deviation, droppedCatchUpTicks,
+                    getPerfTimeNetworkSend(), getPerfTimeJsonSerialization(),
+                    getPerfTimeChunkPreparation(), getPerfTimeParallelSend());
 
             frameTimeSum = 0;
             frameCount = 0;
             tickWorkTimeSum = 0;
             tickWorkCount = 0;
+            droppedCatchUpTicks = 0;
             lastMonitorTime = currentTime;
         }
     }
@@ -613,6 +623,7 @@ public class GameServer {
         double nsPerTick = 1000000000.0 / TPS;
         double delta = 0;
         int consecutiveSkippedFrames = 0;
+        long simulationTick = 0;
         lastFrameTimeMonitor = lastFrameTime;
 
         while (running) {
@@ -626,24 +637,35 @@ public class GameServer {
             delta += frameTime / nsPerTick;
             lastFrameTime = currentTime;
 
-            while (delta >= 1) {
+            long expiredTicks = expiredCatchUpTicks(delta);
+            if (expiredTicks > 0) {
+                droppedCatchUpTicks += expiredTicks;
+                // 只丢弃过期的完整Tick，保留亚Tick时间，避免正常节奏产生漂移。
+                delta -= expiredTicks;
+            }
+
+            int catchUpTicks = 0;
+            while (delta >= 1 && catchUpTicks < MAX_CATCH_UP_TICKS) {
                 long tickWorkStartedAt = System.nanoTime();
                 drainGameCommands();
                 gameState.update();
+                simulationTick++;
                 delta -= 1;
-                if (networkBroadcaster != null)
-                    networkBroadcaster.broadcast();
+                if (networkBroadcaster != null && shouldBroadcastNetworkSnapshot(simulationTick))
+                    networkBroadcaster.broadcast(simulationTick);
                 tickWorkTimeSum += System.nanoTime() - tickWorkStartedAt;
                 tickWorkCount++;
-                consecutiveSkippedFrames = 0;
+                catchUpTicks++;
             }
 
-            if (delta > 2) {
+            if (catchUpTicks > 1) {
                 consecutiveSkippedFrames++;
                 if (consecutiveSkippedFrames > 10) {
-                    logger.accept("警告: 连续掉帧，可能系统负载过高");
+                    logger.accept("警告: 服务器持续追帧；已限制单轮补算，避免历史Tick和UDP快照洪水");
                     consecutiveSkippedFrames = 0;
                 }
+            } else {
+                consecutiveSkippedFrames = 0;
             }
 
             long targetFrameTime = lastFrameTime + (long) nsPerTick;
@@ -651,6 +673,16 @@ public class GameServer {
 
             monitorFrameTime();
         }
+    }
+
+    static boolean shouldBroadcastNetworkSnapshot(long simulationTick) {
+        return simulationTick > 0 && simulationTick % TICKS_PER_NETWORK_SNAPSHOT == 0;
+    }
+
+    static long expiredCatchUpTicks(double delta) {
+        if (!Double.isFinite(delta) || delta <= MAX_CATCH_UP_TICKS)
+            return 0;
+        return Math.max(0L, (long) Math.floor(delta) - MAX_CATCH_UP_TICKS);
     }
 
     public double getPerfTimeNetworkSend() {
