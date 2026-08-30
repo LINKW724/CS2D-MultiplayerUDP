@@ -346,6 +346,25 @@ class GameClientProtocolTest {
     }
 
     @Test
+    void stateMailboxKeepsOnlyLatestFullAndSmallSnapshotsInSequenceOrder() {
+        GameClient.LatestStateMailbox mailbox = new GameClient.LatestStateMailbox();
+        mailbox.offer(stateUpdate("full_update", 10));
+        mailbox.offer(stateUpdate("full_update", 12));
+        mailbox.offer(stateUpdate("small_update", 11));
+        mailbox.offer(stateUpdate("small_update", 13));
+        mailbox.offer(stateUpdate("full_update", 9));
+
+        List<JsonObject> drained = mailbox.drainOrdered();
+
+        assertEquals(2, drained.size());
+        assertEquals(12, drained.get(0).get("sequence").getAsLong());
+        assertEquals(13, drained.get(1).get("sequence").getAsLong());
+        assertEquals(3, mailbox.replacedThenReset());
+        assertEquals(0, mailbox.pendingCount());
+        assertTrue(mailbox.drainOrdered().isEmpty());
+    }
+
+    @Test
     void controlBotRequestOmitsBlankSpectatorTarget() throws Exception {
         GameClient client = new GameClient();
         Method request = GameClient.class.getDeclaredMethod("createControlBotRequest", String.class);
@@ -365,6 +384,12 @@ class GameClientProtocolTest {
         state.addProperty("protocolVersion", 2);
         state.addProperty("sessionId", sessionId);
         state.addProperty("sequence", sequence);
+        return state;
+    }
+
+    private static JsonObject stateUpdate(String type, long sequence) {
+        JsonObject state = state("session-a", sequence);
+        state.addProperty("type", type);
         return state;
     }
 

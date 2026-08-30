@@ -505,18 +505,27 @@ public class GameClient extends Application {
     // 用于处理连接和重连的定时任务执行器
     private final ScheduledExecutorService connectionExecutor = Executors.newSingleThreadScheduledExecutor();
 
-    // 网络线程先完成UDP分片重组，再只把完整消息入队；JavaFX线程在165Hz帧边界消费。
-    private final ConcurrentLinkedQueue<String> messageBatchQueue = new ConcurrentLinkedQueue<>();
+    // 网络线程完成UDP分片重组和JSON解析；普通事件保持顺序，状态包只保留各自最新一份。
+    private final ConcurrentLinkedQueue<JsonObject> messageBatchQueue = new ConcurrentLinkedQueue<>();
+    private final LatestStateMailbox pendingStateMessages = new LatestStateMailbox();
 
     private int drainNetworkMessagesForRenderFrame() {
         int processed = 0;
-        String message;
+        JsonObject message;
         while (processed < MAX_NETWORK_MESSAGES_PER_RENDER_FRAME
                 && (message = messageBatchQueue.poll()) != null) {
             try {
                 handleServerMessage(message);
             } catch (RuntimeException e) {
                 System.err.println("Network message execution error: " + e.getMessage());
+            }
+            processed++;
+        }
+        for (JsonObject state : pendingStateMessages.drainOrdered()) {
+            try {
+                handleServerMessage(state);
+            } catch (RuntimeException e) {
+                System.err.println("State message execution error: " + e.getMessage());
             }
             processed++;
         }
@@ -998,6 +1007,7 @@ public class GameClient extends Application {
         this.lastStateSequence.set(-1);
         this.chunkBuffers.clear();
         this.messageBatchQueue.clear();
+        this.pendingStateMessages.clear();
 
         // [核心修复] 切断之前残留的定时握手器和心跳线程，防止重开端口导致成倍发送洪水包。
         if (this.connectionHandle != null && !this.connectionHandle.isDone()) {
@@ -1126,24 +1136,40 @@ public class GameClient extends Application {
         lastServerMessageTime = System.nanoTime();
         if (message == null)
             return;
-        if (!message.startsWith("{\"type\":\"chunk\"")) {
-            messageBatchQueue.offer(message);
-            return;
-        }
-
-        long chunkStartTime = System.nanoTime();
-        perfChunkDatagrams.increment();
         try {
-            JsonObject chunk = gson.fromJson(message, JsonObject.class);
-            String fullMessage = assembleChunkMessage(chunk);
-            if (fullMessage != null) {
-                perfCompletedChunkMessages.increment();
-                messageBatchQueue.offer(fullMessage);
+            JsonObject parsed = gson.fromJson(message, JsonObject.class);
+            if (parsed == null || !parsed.has("type"))
+                return;
+            if (!"chunk".equals(getString(parsed, "type"))) {
+                queueParsedServerMessage(parsed);
+                return;
+            }
+
+            long chunkStartTime = System.nanoTime();
+            perfChunkDatagrams.increment();
+            try {
+                String fullMessage = assembleChunkMessage(parsed);
+                if (fullMessage != null) {
+                    JsonObject completed = gson.fromJson(fullMessage, JsonObject.class);
+                    if (completed != null && completed.has("type")) {
+                        perfCompletedChunkMessages.increment();
+                        queueParsedServerMessage(completed);
+                    }
+                }
+            } finally {
+                perfTimeMsgChunkNanos.add(System.nanoTime() - chunkStartTime);
             }
         } catch (RuntimeException e) {
-            System.err.println("解析UDP分片时出错: " + e.getMessage());
-        } finally {
-            perfTimeMsgChunkNanos.add(System.nanoTime() - chunkStartTime);
+            System.err.println("解析服务器数据包时出错: " + e.getMessage());
+        }
+    }
+
+    private void queueParsedServerMessage(JsonObject message) {
+        String type = getString(message, "type");
+        if ("full_update".equals(type) || "small_update".equals(type)) {
+            pendingStateMessages.offer(message);
+        } else {
+            messageBatchQueue.offer(message);
         }
     }
 
@@ -1295,37 +1321,15 @@ public class GameClient extends Application {
     }
 
     // 处理从服务器接收到的JSON消息
-    private void handleServerMessage(String message) {
+    private void handleServerMessage(JsonObject json) {
         // --- 更新看门狗时间戳 ---
         this.lastServerMessageTime = System.nanoTime();
         // 启动总计时器
         long msgHandleStartTime = System.nanoTime();
 
-        // 1. 在 UI 线程上解析 JSON
-        JsonObject json;
-        try {
-            json = gson.fromJson(message, JsonObject.class);
-        } catch (Exception e) {
-            System.err.println("Error parsing server message on UI thread: " + e.getMessage());
-            return;
-        }
-        // ---
-
         if (json == null || !json.has("type"))
             return;
         String type = getString(json, "type");
-
-        // --- 分片重组逻辑 ---
-        if ("chunk".equals(type)) {
-            // [新] 计时 [M3] Chunk
-            long chunkStartTime = System.nanoTime();
-            String fullMessage = assembleChunkMessage(json);
-            if (fullMessage != null)
-                handleServerMessage(fullMessage);
-            perfTimeMsgChunkNanos.add(System.nanoTime() - chunkStartTime); // 累加 [M3]
-            perfTimeMsgHandling += (System.nanoTime() - msgHandleStartTime); // 累加总耗时
-            return; // 对于分片消息，在此处停止处理
-        }
 
         // 使用 switch 语句根据消息类型进行分发处理
         switch (type) {
@@ -1390,7 +1394,8 @@ public class GameClient extends Application {
                 if (!acceptStatePacket(json))
                     break;
                 long fullUpStartTime = System.nanoTime();
-                final JsonObject finalJsonFull = json.deepCopy();
+                // 网络线程解析后此对象只读发布，不再在FX线程复制整棵50人JSON树。
+                final JsonObject finalJsonFull = json;
                 this.latestFullGameState = finalJsonFull;
                 this.latestGameState = finalJsonFull;
                 // [修复] 同样提交到该线程池，保证状态更新的串行安全
@@ -1696,14 +1701,80 @@ public class GameClient extends Application {
      * 炸弹状态等缺失字段，避免按键和 HUD 在两个完整快照之间失去运行上下文。
      */
     static JsonObject mergeMissingStateFields(JsonObject fullSnapshot, JsonObject incrementalSnapshot) {
-        JsonObject merged = incrementalSnapshot == null ? new JsonObject() : incrementalSnapshot.deepCopy();
+        JsonObject merged = new JsonObject();
+        if (incrementalSnapshot != null) {
+            for (Map.Entry<String, JsonElement> entry : incrementalSnapshot.entrySet())
+                merged.add(entry.getKey(), entry.getValue());
+        }
         if (fullSnapshot == null)
             return merged;
         for (Map.Entry<String, JsonElement> entry : fullSnapshot.entrySet()) {
             if (!merged.has(entry.getKey()))
-                merged.add(entry.getKey(), entry.getValue().deepCopy());
+                merged.add(entry.getKey(), entry.getValue());
         }
         return merged;
+    }
+
+    /**
+     * UDP状态是可覆盖快照，不是必须逐条回放的事件。分别保留最新完整包和小包，
+     * 帧边界最多消费两份并按sequence排序，避免暂停后一次处理数百份历史状态。
+     */
+    static final class LatestStateMailbox {
+        private final AtomicReference<JsonObject> latestFull = new AtomicReference<>();
+        private final AtomicReference<JsonObject> latestSmall = new AtomicReference<>();
+        private final LongAdder replaced = new LongAdder();
+
+        void offer(JsonObject state) {
+            if (state == null)
+                return;
+            String type = getString(state, "type");
+            AtomicReference<JsonObject> slot = "full_update".equals(type) ? latestFull
+                    : "small_update".equals(type) ? latestSmall : null;
+            if (slot == null)
+                return;
+            while (true) {
+                JsonObject previous = slot.get();
+                if (previous != null && sequenceOf(previous) >= sequenceOf(state)) {
+                    replaced.increment();
+                    return;
+                }
+                if (slot.compareAndSet(previous, state)) {
+                    if (previous != null)
+                        replaced.increment();
+                    return;
+                }
+            }
+        }
+
+        List<JsonObject> drainOrdered() {
+            JsonObject full = latestFull.getAndSet(null);
+            JsonObject small = latestSmall.getAndSet(null);
+            if (full == null)
+                return small == null ? List.of() : List.of(small);
+            if (small == null)
+                return List.of(full);
+            return sequenceOf(full) <= sequenceOf(small) ? List.of(full, small) : List.of(small, full);
+        }
+
+        int pendingCount() {
+            return (latestFull.get() == null ? 0 : 1) + (latestSmall.get() == null ? 0 : 1);
+        }
+
+        long replacedThenReset() {
+            return replaced.sumThenReset();
+        }
+
+        void clear() {
+            latestFull.set(null);
+            latestSmall.set(null);
+            replaced.reset();
+        }
+
+        private static long sequenceOf(JsonObject state) {
+            JsonElement sequence = state == null ? null : state.get("sequence");
+            return sequence != null && sequence.isJsonPrimitive() && sequence.getAsJsonPrimitive().isNumber()
+                    ? sequence.getAsLong() : Long.MIN_VALUE;
+        }
     }
 
     /** 构建完成后整体发布，渲染线程不会看见半更新的地面物品集合。 */
@@ -2253,6 +2324,9 @@ public class GameClient extends Application {
                         long hudVisibilityPasses = perfHudVisibilityPasses;
                         long chunkDatagrams = perfChunkDatagrams.sumThenReset();
                         long completedChunkMessages = perfCompletedChunkMessages.sumThenReset();
+                        long coalescedStateMessages = pendingStateMessages.replacedThenReset();
+                        int pendingStateCount = pendingStateMessages.pendingCount();
+                        int queuedEventCount = messageBatchQueue.size();
                         long mediaSoundsPlayed = mediaBackedWorldSoundsPlayed.sumThenReset();
                         long mediaSoundsSuppressed = mediaBackedWorldSoundsSuppressed.sumThenReset();
                         perfEquipmentHudRebuilds = 0;
@@ -2316,6 +2390,8 @@ public class GameClient extends Application {
                                     equipmentHudRebuilds, hudVisibilityPasses);
                             System.out.printf("  [NET-CHUNK] UDP分片 %d | 完整消息 %d | 后台拼包 %.3f ms/帧\n",
                                     chunkDatagrams, completedChunkMessages, avg_M3_Chunk);
+                            System.out.printf("  [NET-STATE] 覆盖旧快照 %d | 待消费状态 %d | 排队事件 %d\n",
+                                    coalescedStateMessages, pendingStateCount, queuedEventCount);
                             System.out.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
                                     mediaSoundsPlayed, mediaSoundsSuppressed);
                             System.out.println("  --- (消息处理 [M] 的详细分解) ---");
