@@ -82,6 +82,7 @@ import java.util.zip.CRC32;
 
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
 import javafx.scene.effect.ColorAdjust;
 
 // 定义游戏客户端的主类，它继承自 JavaFX 的 Application 类
@@ -148,6 +149,9 @@ public class GameClient extends Application {
     static final int OBSTACLE_CACHE_TILE_SIZE = 1024;
     /** 全图视角最终只占1600x900逻辑像素；2048概览纹理足够并可把20次提交合成1次。 */
     static final int OBSTACLE_OVERVIEW_MAX_SIZE = 2048;
+    /** 普通视角合并后的单纹理保持1世界像素=1纹理像素，不降低障碍物精度。 */
+    static final int OBSTACLE_VIEWPORT_CACHE_SIZE = 3072;
+    static final double OBSTACLE_VIEWPORT_REBUILD_MARGIN = 128.0;
     private static final boolean USE_RESIDENT_STATIC_MAP_LAYER = Boolean.parseBoolean(
             System.getProperty("cs2d.staticMapLayer", "true"));
     private final List<ObstacleCacheTile> obstacleCacheTiles = new ArrayList<>();
@@ -156,10 +160,27 @@ public class GameClient extends Application {
     private Group residentStaticMapLayer;
     private Group residentObstacleTileLayer;
     private ImageView residentObstacleOverviewView;
+    private ImageView residentObstacleViewportView;
+    private Canvas residentObstacleViewportCanvas;
+    private WritableImage residentObstacleViewportImage;
+    private double residentViewportOriginX;
+    private double residentViewportOriginY;
+    private double residentViewportWidth;
+    private double residentViewportHeight;
+    private boolean residentViewportValid;
+    private boolean residentViewportActive;
+    private String residentStaticMapMode = "canvas";
     private final Affine residentStaticMapTransform = new Affine();
     private Node gameRenderNode;
     private volatile boolean residentStaticMapReady = false;
     private int residentVisibleTileCount = 0;
+    private long perfStaticViewportRebuilds;
+    private long perfStaticViewportTileBlits;
+    private final Map<String, Image> playerSpriteCache = new HashMap<>();
+    private final Map<String, Image> droppedWeaponSpriteCache = new HashMap<>();
+    private long perfPlayerSpriteDraws;
+    private long perfDroppedWeaponSpriteDraws;
+    private long perfSpriteBuilds;
     /** 同一服务端会话可能有多个已经在途的map_data分片，只初始化一次相同地图。 */
     private String initializedMapSignature = null;
 
@@ -663,6 +684,10 @@ public class GameClient extends Application {
     // --- 声音系统 ---
     // 存储所有预加载的音效
     private final Map<String, AudioClip> sounds = new ConcurrentHashMap<>();
+    /** 高频WAV由一个固定线程混音，避免每次AudioClip.play创建原生媒体线程。 */
+    private final PcmAudioMixer pcmAudioMixer = new PcmAudioMixer();
+    private final Map<String, PcmAudioMixer.Sound> pcmSounds = new ConcurrentHashMap<>();
+    private final LongAdder pcmFallbackPlays = new LongAdder();
     /** MP3会进入JavaFX MediaPlayer后端；远程语音必须串行，避免每次重叠播放创建原生线程群。 */
     private final Set<String> mediaBackedSoundKeys = ConcurrentHashMap.newKeySet();
     private final MediaSoundGate mediaSoundGate = new MediaSoundGate(TimeUnit.MILLISECONDS.toNanos(250));
@@ -869,6 +894,7 @@ public class GameClient extends Application {
 
         // --- 关闭 FOV 线程池 ---
         fovExecutor.shutdownNow();
+        pcmAudioMixer.close();
 
         // 如果套接字存在且未关闭，则关闭它
         if (socket != null && !socket.isClosed())
@@ -931,6 +957,7 @@ public class GameClient extends Application {
             // 停止并清理循环音效
             loopingSounds.values().forEach(javafx.scene.media.AudioClip::stop);
             loopingSounds.clear();
+            pcmAudioMixer.stopAll();
 
             // 重置核心引用和状态
             myPlayerId = null;
@@ -942,6 +969,7 @@ public class GameClient extends Application {
             obstacleCacheTiles.clear();
             obstacleOverviewImage = null;
             residentStaticMapReady = false;
+            invalidateResidentStaticViewport();
             spectateTeammateIndex = 0; // 重置观战索引
             clientState = cs2d.client.GameClient.ClientState.CONNECTING; // 重置为初始状态
 
@@ -1004,6 +1032,7 @@ public class GameClient extends Application {
         this.obstacleCacheTiles.clear();
         this.obstacleOverviewImage = null;
         this.residentStaticMapReady = false;
+        invalidateResidentStaticViewport();
         this.lastStateSequence.set(-1);
         this.chunkBuffers.clear();
         this.messageBatchQueue.clear();
@@ -1424,6 +1453,7 @@ public class GameClient extends Application {
                     obstacleCacheTiles.clear();
                     obstacleOverviewImage = null;
                     residentStaticMapReady = false;
+                    invalidateResidentStaticViewport();
                 }
                 serverSessionId = incomingSessionId;
                 myPlayerId = getString(json, "playerId"); // 获取并保存我自己的玩家ID
@@ -2329,18 +2359,29 @@ public class GameClient extends Application {
                         int queuedEventCount = messageBatchQueue.size();
                         long mediaSoundsPlayed = mediaBackedWorldSoundsPlayed.sumThenReset();
                         long mediaSoundsSuppressed = mediaBackedWorldSoundsSuppressed.sumThenReset();
+                        long pcmFallbackCount = pcmFallbackPlays.sumThenReset();
+                        PcmAudioMixer.Snapshot pcmSnapshot = pcmAudioMixer.snapshotAndReset();
                         perfEquipmentHudRebuilds = 0;
                         perfHudVisibilityPasses = 0;
                         double fovBackgroundAvgMs = fovCalculations == 0 ? 0.0
                                 : fovTotalNanos / (double) fovCalculations / 1_000_000.0;
                         boolean staticMapLayerActive = isResidentStaticMapLayerReady();
-                        String staticMapLayerMode = staticMapLayerActive
-                                ? ("full".equals(cameraMode) && residentObstacleOverviewView != null
-                                        ? "overview"
-                                        : "tiles")
-                                : "canvas";
+                        String staticMapLayerMode = staticMapLayerActive ? residentStaticMapMode : "canvas";
                         int staticMapCachedTiles = obstacleCacheTiles.size();
                         int staticMapVisibleTiles = residentVisibleTileCount;
+                        long staticViewportRebuilds = perfStaticViewportRebuilds;
+                        long staticViewportTileBlits = perfStaticViewportTileBlits;
+                        long playerSpriteDraws = perfPlayerSpriteDraws;
+                        long droppedWeaponSpriteDraws = perfDroppedWeaponSpriteDraws;
+                        long spriteBuilds = perfSpriteBuilds;
+                        int playerSpriteCacheSize = playerSpriteCache.size();
+                        int droppedWeaponSpriteCacheSize = droppedWeaponSpriteCache.size();
+                        boolean staticViewportActive = residentViewportActive;
+                        perfStaticViewportRebuilds = 0;
+                        perfStaticViewportTileBlits = 0;
+                        perfPlayerSpriteDraws = 0;
+                        perfDroppedWeaponSpriteDraws = 0;
+                        perfSpriteBuilds = 0;
 
                         diagnosticsExecutor.execute(() -> {
                             RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
@@ -2364,6 +2405,12 @@ public class GameClient extends Application {
                             System.out.printf("  [STATIC-MAP] active=%s | mode=%s | visibleTiles=%d/%d%n",
                                     staticMapLayerActive, staticMapLayerMode,
                                     staticMapVisibleTiles, staticMapCachedTiles);
+                            System.out.printf("  [STATIC-VIEWPORT] 重建 %d | 合并块 %d | active=%s%n",
+                                    staticViewportRebuilds, staticViewportTileBlits, staticViewportActive);
+                            System.out.printf("  [SPRITE-CACHE] 玩家绘制 %d | 地面武器绘制 %d | 新建纹理 %d"
+                                            + " | 玩家缓存 %d | 武器缓存 %d%n",
+                                    playerSpriteDraws, droppedWeaponSpriteDraws, spriteBuilds,
+                                    playerSpriteCacheSize, droppedWeaponSpriteCacheSize);
                             System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                             System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                             System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -2394,6 +2441,11 @@ public class GameClient extends Application {
                                     coalescedStateMessages, pendingStateCount, queuedEventCount);
                             System.out.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
                                     mediaSoundsPlayed, mediaSoundsSuppressed);
+                            System.out.printf("  [AUDIO-PCM] 请求 %d | 已混音 %d | 活动 %d | 峰值 %d | 排队 %d"
+                                            + " | JavaFX回退 %d | running=%s%n",
+                                    pcmSnapshot.requestedVoices(), pcmSnapshot.mixedVoices(),
+                                    pcmSnapshot.activeVoices(), pcmSnapshot.peakVoices(), pcmSnapshot.queuedVoices(),
+                                    pcmFallbackCount, pcmSnapshot.running());
                             System.out.println("  --- (消息处理 [M] 的详细分解) ---");
                             System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
                             System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
@@ -3348,33 +3400,21 @@ public class GameClient extends Application {
                 // 复用静态特效
                 gc.setEffect(SLOWED_EFFECT);
             }
+            Color bodyColor;
             if (p.id.equals(myPlayerId))
-                gc.setFill(Color.web("#68D391"));
+                bodyColor = Color.web("#68D391");
             else if ("DEATHMATCH".equals(mode))
-                gc.setFill(PRIMARY_RED); // 死斗模式下其他人全是红色（敌人）
+                bodyColor = PRIMARY_RED;
             else if ("CT".equals(team))
-                gc.setFill(PRIMARY_BLUE);
+                bodyColor = PRIMARY_BLUE;
             else if ("T".equals(team))
-                gc.setFill(PRIMARY_RED);
+                bodyColor = PRIMARY_RED;
             else
-                gc.setFill(PRIMARY_GREEN);
+                bodyColor = PRIMARY_GREEN;
 
-            gc.fillOval(x - PLAYER_SIZE / 2.0, y - PLAYER_SIZE / 2.0, PLAYER_SIZE, PLAYER_SIZE);
+            boolean armed = !"ZOMBIE".equals(team) && pData.has("weaponName");
+            drawCachedPlayerSprite(x, y, angle, bodyColor, armed);
             gc.setEffect(null);
-            gc.setFill(Color.GOLD);
-            gc.fillOval(x + Math.cos(angle) * (PLAYER_SIZE / 4.0) - (PLAYER_SIZE / 8.0),
-                    y + Math.sin(angle) * (PLAYER_SIZE / 4.0) - (PLAYER_SIZE / 8.0), PLAYER_SIZE / 4.0,
-                    PLAYER_SIZE / 4.0);
-
-            gc.setEffect(null);
-            gc.setFill(Color.GOLD);
-
-            if (!"ZOMBIE".equals(team) && pData.has("weaponName")) {
-                gc.setStroke(Color.web("#CBD5E0"));
-                gc.setLineWidth(3);
-                gc.strokeLine(x, y, x + Math.cos(angle) * (PLAYER_SIZE / 2.0 + 5),
-                        y + Math.sin(angle) * (PLAYER_SIZE / 2.0 + 5));
-            }
 
             // --- 3. 敏感信息显示决策 ---
             // [2025-12-01] 在死斗模式下，不把其他人视为“敏感敌人”，以便看到血条。
@@ -3772,20 +3812,32 @@ public class GameClient extends Application {
             gc.fillText("C4", x, y + 25);
 
         } else { // 如果是其他掉落的武器
-            // --- 其他掉落武器的绘制逻辑 ---
-            gc.setStroke(Color.YELLOW); // 设置描边为黄色
-            gc.setLineWidth(2); // 设置线宽
-            gc.strokeRect(x - 10, y - 10, 20, 20); // 绘制一个黄色方框
-
-            gc.setFill(Color.WHITE); // 设置填充色为白色
-            gc.setFont(smallHudFont); // 设置字体
-            gc.setTextAlign(TextAlignment.CENTER); // 设置文本居中
-            // 获取武器的显示名称，如果找不到则直接使用内部名称
             String name = WEAPON_UI_DATA.getOrDefault(getString(item, "name"),
                     new cs2d.client.GameClient.WeaponUIData(getString(item, "name"), 0, "ANY", 0, false)).name();
-            // 在物品下方绘制武器名称
-            gc.fillText(name, x, y + 25);
+            Image sprite = droppedWeaponSpriteCache.computeIfAbsent(name, this::createDroppedWeaponSprite);
+            gc.drawImage(sprite, x - 80, y - 16, 160, 56);
+            perfDroppedWeaponSpriteDraws++;
         }
+    }
+
+    private Image createDroppedWeaponSprite(String displayName) {
+        final double logicalWidth = 160;
+        final double logicalHeight = 56;
+        final double scale = 2.0;
+        Canvas spriteCanvas = new Canvas(logicalWidth * scale, logicalHeight * scale);
+        GraphicsContext spriteGc = spriteCanvas.getGraphicsContext2D();
+        spriteGc.scale(scale, scale);
+        spriteGc.setStroke(Color.YELLOW);
+        spriteGc.setLineWidth(2);
+        spriteGc.strokeRect(logicalWidth / 2.0 - 10, 6, 20, 20);
+        spriteGc.setFill(Color.WHITE);
+        spriteGc.setFont(smallHudFont);
+        spriteGc.setTextAlign(TextAlignment.CENTER);
+        spriteGc.fillText(displayName, logicalWidth / 2.0, 41);
+        javafx.scene.SnapshotParameters parameters = new javafx.scene.SnapshotParameters();
+        parameters.setFill(Color.TRANSPARENT);
+        perfSpriteBuilds++;
+        return spriteCanvas.snapshot(parameters, null);
     }
 
     /**
@@ -4106,6 +4158,44 @@ public class GameClient extends Application {
     // 绘制一个障碍物
     private void drawObstacle(JsonObject obs) {
         drawObstacle(gc, obs);
+    }
+
+    private static final double PLAYER_SPRITE_EXTENT = 24.0;
+    private static final double PLAYER_SPRITE_SCALE = 2.0;
+
+    private void drawCachedPlayerSprite(double x, double y, double angle, Color bodyColor, boolean armed) {
+        String key = bodyColor.toString() + ':' + armed;
+        Image sprite = playerSpriteCache.computeIfAbsent(key, ignored -> createPlayerSprite(bodyColor, armed));
+        gc.save();
+        gc.translate(x, y);
+        gc.rotate(Math.toDegrees(angle));
+        gc.drawImage(sprite, -PLAYER_SPRITE_EXTENT, -PLAYER_SPRITE_EXTENT,
+                PLAYER_SPRITE_EXTENT * 2.0, PLAYER_SPRITE_EXTENT * 2.0);
+        gc.restore();
+        perfPlayerSpriteDraws++;
+    }
+
+    private Image createPlayerSprite(Color bodyColor, boolean armed) {
+        double pixelSize = PLAYER_SPRITE_EXTENT * 2.0 * PLAYER_SPRITE_SCALE;
+        Canvas spriteCanvas = new Canvas(pixelSize, pixelSize);
+        GraphicsContext spriteGc = spriteCanvas.getGraphicsContext2D();
+        spriteGc.scale(PLAYER_SPRITE_SCALE, PLAYER_SPRITE_SCALE);
+        double center = PLAYER_SPRITE_EXTENT;
+        spriteGc.setFill(bodyColor);
+        spriteGc.fillOval(center - PLAYER_SIZE / 2.0, center - PLAYER_SIZE / 2.0,
+                PLAYER_SIZE, PLAYER_SIZE);
+        spriteGc.setFill(Color.GOLD);
+        spriteGc.fillOval(center + PLAYER_SIZE / 4.0 - PLAYER_SIZE / 8.0,
+                center - PLAYER_SIZE / 8.0, PLAYER_SIZE / 4.0, PLAYER_SIZE / 4.0);
+        if (armed) {
+            spriteGc.setStroke(Color.web("#CBD5E0"));
+            spriteGc.setLineWidth(3);
+            spriteGc.strokeLine(center, center, center + PLAYER_SIZE / 2.0 + 5, center);
+        }
+        javafx.scene.SnapshotParameters parameters = new javafx.scene.SnapshotParameters();
+        parameters.setFill(Color.TRANSPARENT);
+        perfSpriteBuilds++;
+        return spriteCanvas.snapshot(parameters, null);
     }
 
     private void drawObstacle(GraphicsContext targetGc, JsonObject obs) {
@@ -6476,6 +6566,7 @@ public class GameClient extends Application {
 
     private void preloadSounds() {
         System.out.println("--- [音频系统] 开始预加载所有音效 ---");
+        boolean pcmReady = pcmAudioMixer.start();
 
         List<String> soundKeys = new ArrayList<>(Arrays.asList(
                 "headshot", "kill", "buy", "plant", "defuse",
@@ -6554,8 +6645,16 @@ public class GameClient extends Application {
             if (resource != null) {
                 try {
                     sounds.put(key, new AudioClip(resource.toExternalForm()));
-                    if (resource.getPath().toLowerCase(Locale.ROOT).endsWith(".mp3"))
+                    boolean mp3 = resource.getPath().toLowerCase(Locale.ROOT).endsWith(".mp3");
+                    if (mp3) {
                         mediaBackedSoundKeys.add(key);
+                    } else if (pcmReady) {
+                        try {
+                            pcmSounds.put(key, pcmAudioMixer.load(resource));
+                        } catch (IOException | javax.sound.sampled.UnsupportedAudioFileException pcmError) {
+                            System.err.println("    -> PCM回退JavaFX: " + key + " | " + pcmError.getMessage());
+                        }
+                    }
                     System.out.println("    -> 成功加载: " + resource.getPath());
                 } catch (Exception e) {
                     System.err.println("    -> !!! 加载失败: " + key + " | 错误: " + e.getMessage());
@@ -6564,7 +6663,8 @@ public class GameClient extends Application {
                 System.err.println("    -> !!! 文件未找到: " + key);
             }
         }
-        System.out.println("--- [音频系统] " + sounds.size() + " 个音效预加载完成 ---");
+        System.out.println("--- [音频系统] " + sounds.size() + " 个音效预加载完成, PCM="
+                + pcmSounds.size() + " ---");
     }
 
     /**
@@ -6646,7 +6746,11 @@ public class GameClient extends Application {
             mediaBackedWorldSoundsPlayed.increment();
         }
 
-        // 播放最终计算出的音量
+        // 高频WAV优先进入固定混音线程；只有设备/格式不可用时才回退JavaFX媒体后端。
+        PcmAudioMixer.Sound pcmSound = pcmSounds.get(soundKey);
+        if (pcmSound != null && pcmAudioMixer.play(pcmSound, finalVolume))
+            return;
+        pcmFallbackPlays.increment();
         clip.play(finalVolume);
     }
 
@@ -10030,6 +10134,7 @@ public class GameClient extends Application {
             return;
 
         residentStaticMapReady = false;
+        invalidateResidentStaticViewport();
         Rectangle background = new Rectangle(0, 0, mapWidth, mapHeight);
         background.setFill(CARD_BACKGROUND);
 
@@ -10055,11 +10160,17 @@ public class GameClient extends Application {
             overviewView.setVisible(false);
         }
 
+        ImageView viewportView = new ImageView();
+        viewportView.setManaged(false);
+        viewportView.setVisible(false);
+
         residentObstacleTileLayer = tileLayer;
         residentObstacleOverviewView = overviewView;
+        residentObstacleViewportView = viewportView;
         residentStaticMapLayer.getChildren().clear();
         residentStaticMapLayer.getChildren().add(background);
         residentStaticMapLayer.getChildren().add(tileLayer);
+        residentStaticMapLayer.getChildren().add(viewportView);
         if (overviewView != null)
             residentStaticMapLayer.getChildren().add(overviewView);
         residentStaticMapReady = true;
@@ -10081,19 +10192,27 @@ public class GameClient extends Application {
             return;
 
         boolean useOverview = "full".equals(cameraMode) && residentObstacleOverviewView != null;
-        setVisibleIfChanged(residentObstacleTileLayer, !useOverview);
+        double safeScale = Math.max(camera.scale, 0.0001);
+        double padding = 2.0 / safeScale;
+        double minX = camera.x - camera.offsetX / safeScale - padding;
+        double minY = camera.y - camera.offsetY / safeScale - padding;
+        double maxX = camera.x + (CANVAS_WIDTH - camera.offsetX) / safeScale + padding;
+        double maxY = camera.y + (CANVAS_HEIGHT - camera.offsetY) / safeScale + padding;
+        boolean useViewport = !useOverview && ensureResidentObstacleViewport(minX, minY, maxX, maxY);
+
+        setVisibleIfChanged(residentObstacleTileLayer, !useOverview && !useViewport);
+        setVisibleIfChanged(residentObstacleViewportView, useViewport);
         if (residentObstacleOverviewView != null)
             setVisibleIfChanged(residentObstacleOverviewView, useOverview);
+        residentViewportActive = useViewport;
 
         if (useOverview) {
             residentVisibleTileCount = 0;
+            residentStaticMapMode = "overview";
+        } else if (useViewport) {
+            residentStaticMapMode = "viewport";
         } else {
-            double safeScale = Math.max(camera.scale, 0.0001);
-            double padding = 2.0 / safeScale;
-            double minX = camera.x - camera.offsetX / safeScale - padding;
-            double minY = camera.y - camera.offsetY / safeScale - padding;
-            double maxX = camera.x + (CANVAS_WIDTH - camera.offsetX) / safeScale + padding;
-            double maxY = camera.y + (CANVAS_HEIGHT - camera.offsetY) / safeScale + padding;
+            residentStaticMapMode = "tiles";
             int visibleTiles = 0;
             for (ResidentObstacleTileNode tileNode : residentObstacleTileNodes) {
                 Rectangle2D bounds = tileNode.bounds();
@@ -10116,6 +10235,109 @@ public class GameClient extends Application {
                     camera.scale, 0.0, translateX,
                     0.0, camera.scale, translateY);
         }
+    }
+
+    private boolean ensureResidentObstacleViewport(double viewMinX, double viewMinY,
+            double viewMaxX, double viewMaxY) {
+        if (residentObstacleViewportView == null || mapData == null || obstacleCacheTiles.isEmpty())
+            return false;
+        double mapWidth = getDouble(mapData, "width");
+        double mapHeight = getDouble(mapData, "height");
+        viewMinX = Math.max(0.0, viewMinX);
+        viewMinY = Math.max(0.0, viewMinY);
+        viewMaxX = Math.min(mapWidth, viewMaxX);
+        viewMaxY = Math.min(mapHeight, viewMaxY);
+        double viewWidth = viewMaxX - viewMinX;
+        double viewHeight = viewMaxY - viewMinY;
+        if (viewWidth <= 0.0 || viewHeight <= 0.0
+                || viewWidth > OBSTACLE_VIEWPORT_CACHE_SIZE || viewHeight > OBSTACLE_VIEWPORT_CACHE_SIZE)
+            return false;
+
+        double cacheWidth = Math.min(OBSTACLE_VIEWPORT_CACHE_SIZE, mapWidth);
+        double cacheHeight = Math.min(OBSTACLE_VIEWPORT_CACHE_SIZE, mapHeight);
+        if (residentViewportValid && viewportContainsWithMargin(
+                residentViewportOriginX, residentViewportOriginY,
+                residentViewportWidth, residentViewportHeight,
+                viewMinX, viewMinY, viewMaxX, viewMaxY,
+                mapWidth, mapHeight, OBSTACLE_VIEWPORT_REBUILD_MARGIN)) {
+            return true;
+        }
+
+        double originX = clampViewportOrigin(Math.floor((viewMinX + viewMaxX - cacheWidth) * 0.5),
+                mapWidth, cacheWidth);
+        double originY = clampViewportOrigin(Math.floor((viewMinY + viewMaxY - cacheHeight) * 0.5),
+                mapHeight, cacheHeight);
+        rebuildResidentObstacleViewport(originX, originY, cacheWidth, cacheHeight);
+        return residentViewportValid;
+    }
+
+    private void rebuildResidentObstacleViewport(double originX, double originY,
+            double width, double height) {
+        if (width <= 0 || height <= 0)
+            return;
+        int pixelWidth = Math.max(1, (int) Math.ceil(width));
+        int pixelHeight = Math.max(1, (int) Math.ceil(height));
+        if (residentObstacleViewportCanvas == null
+                || (int) residentObstacleViewportCanvas.getWidth() != pixelWidth
+                || (int) residentObstacleViewportCanvas.getHeight() != pixelHeight) {
+            residentObstacleViewportCanvas = new Canvas(pixelWidth, pixelHeight);
+            residentObstacleViewportImage = new WritableImage(pixelWidth, pixelHeight);
+        }
+
+        GraphicsContext viewportGc = residentObstacleViewportCanvas.getGraphicsContext2D();
+        viewportGc.setTransform(1, 0, 0, 1, 0, 0);
+        viewportGc.clearRect(0, 0, pixelWidth, pixelHeight);
+        Rectangle2D viewportBounds = new Rectangle2D(originX, originY, width, height);
+        int blits = 0;
+        for (ObstacleCacheTile tile : obstacleCacheTiles) {
+            if (!viewportBounds.intersects(tile.bounds()))
+                continue;
+            viewportGc.drawImage(tile.image(), tile.x() - originX, tile.y() - originY);
+            blits++;
+        }
+        javafx.scene.SnapshotParameters parameters = new javafx.scene.SnapshotParameters();
+        parameters.setFill(Color.TRANSPARENT);
+        parameters.setViewport(new Rectangle2D(0, 0, pixelWidth, pixelHeight));
+        residentObstacleViewportCanvas.snapshot(parameters, residentObstacleViewportImage);
+        residentObstacleViewportView.setImage(residentObstacleViewportImage);
+        residentObstacleViewportView.setX(originX);
+        residentObstacleViewportView.setY(originY);
+        residentViewportOriginX = originX;
+        residentViewportOriginY = originY;
+        residentViewportWidth = width;
+        residentViewportHeight = height;
+        residentViewportValid = true;
+        residentVisibleTileCount = blits;
+        perfStaticViewportRebuilds++;
+        perfStaticViewportTileBlits += blits;
+    }
+
+    private void invalidateResidentStaticViewport() {
+        residentViewportValid = false;
+        residentViewportActive = false;
+        residentStaticMapMode = "canvas";
+        if (residentObstacleViewportView != null) {
+            residentObstacleViewportView.setVisible(false);
+            residentObstacleViewportView.setImage(null);
+        }
+        residentObstacleViewportImage = null;
+        residentObstacleViewportCanvas = null;
+    }
+
+    static double clampViewportOrigin(double desiredOrigin, double mapSize, double cacheSize) {
+        return Math.max(0.0, Math.min(Math.max(0.0, mapSize - cacheSize), desiredOrigin));
+    }
+
+    static boolean viewportContainsWithMargin(double originX, double originY, double width, double height,
+            double viewMinX, double viewMinY, double viewMaxX, double viewMaxY,
+            double mapWidth, double mapHeight, double margin) {
+        double leftMargin = originX > 0.0 ? margin : 0.0;
+        double topMargin = originY > 0.0 ? margin : 0.0;
+        double rightMargin = originX + width < mapWidth ? margin : 0.0;
+        double bottomMargin = originY + height < mapHeight ? margin : 0.0;
+        return viewMinX >= originX + leftMargin && viewMinY >= originY + topMargin
+                && viewMaxX <= originX + width - rightMargin
+                && viewMaxY <= originY + height - bottomMargin;
     }
 
     static double staticMapLayerTranslation(double cameraOrigin, double scale, double offset) {
