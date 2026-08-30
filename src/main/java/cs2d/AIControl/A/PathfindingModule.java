@@ -135,7 +135,7 @@ public class PathfindingModule {
         this.targetPosition = null;
     }
 
-    public void reset() {
+    public synchronized void reset() {
         clearPath(); // 清除当前路径
         this.targetPosition = null; // 清除最终目标
         this.isActive = false; // 设为非激活状态
@@ -153,7 +153,7 @@ public class PathfindingModule {
      * 大脑调用的方法，用于在看到敌人时取消当前的预设路径。
      * （取消操作会延迟到下一帧 update() 时再计算新路径）。
      */
-    public void cancelPresetPath() {
+    public synchronized void cancelPresetPath() {
         if (!isFollowingPresetPath)
             return;
 
@@ -174,7 +174,7 @@ public class PathfindingModule {
      * 
      * @return 如果正在执行预设路径则返回true
      */
-    public boolean isFollowingPresetPath() {
+    public synchronized boolean isFollowingPresetPath() {
         return this.isFollowingPresetPath;
     }
 
@@ -183,7 +183,7 @@ public class PathfindingModule {
      * 
      * @param target 最终要抵达的目标坐标
      */
-    public void setTarget(Point2D.Double target) {
+    public synchronized void setTarget(Point2D.Double target) {
 
         // 如果正在跟随预设路径，不允许被新的非空target覆盖 (除非被cancel)
         if (this.isFollowingPresetPath && target != null) {
@@ -336,14 +336,14 @@ public class PathfindingModule {
     /**
      * 检查模块当前是否有活动的移动目标。
      */
-    public boolean isActive() {
+    public synchronized boolean isActive() {
         return this.isActive && (this.targetPosition != null || this.isFollowingPresetPath);
     }
 
     /**
      * 获取当前寻路模块的最终目标位置。
      */
-    public Point2D.Double getTargetPosition() {
+    public synchronized Point2D.Double getTargetPosition() {
         return this.targetPosition;
     }
 
@@ -358,7 +358,7 @@ public class PathfindingModule {
      * @param worldView AI当前的感知视野信息
      * @return AI的按键输入及转向指令
      */
-    public AIInput update(AIWorldView worldView) {
+    public synchronized AIInput update(AIWorldView worldView) {
 
         // --- [新] 接力赛管理 ---
         if (isFollowingPresetPath) {
@@ -453,6 +453,14 @@ public class PathfindingModule {
      * @return 只需要触发物理移动的键盘按键列表 (W/A/S/D)
      */
     private List<String> followPath() {
+        // setTarget/reset可能来自与AI更新不同的线程。公开入口已按BOT实例串行化，
+        // 此处仍保留最终边界保护，避免异常路径状态终止整次AI更新。
+        if (!isPathIndexUsable(currentPath, currentPathIndex)) {
+            clearPath();
+            isActive = false;
+            pathTargetAngle = pathCurrentAngle;
+            return new ArrayList<>();
+        }
         // 1. 获取当前子目标 (路径上的下一个节点)
         Node targetNode = currentPath.get(currentPathIndex);
         Point2D.Double nextNodePos = pathfinder.nodeToWorld(targetNode);
@@ -499,6 +507,10 @@ public class PathfindingModule {
 
         // 7. [修改] 返回移动按键
         return keys;
+    }
+
+    static boolean isPathIndexUsable(List<?> path, int index) {
+        return path != null && index >= 0 && index < path.size();
     }
 
     /**
