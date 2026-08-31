@@ -8,6 +8,7 @@ import cs2d.server.Item; // 需要导入 Item 枚举
 import cs2d.AIControl.A.AttackModule;
 import cs2d.AIControl.A.PathfindingModule; // 导入 A 包
 import cs2d.AIControl.B.PerceptionModule;
+import cs2d.AIControl.B.PerceptionType;
 import cs2d.playerAndAi.Player;
 
 import cs2d.playerAndAi.Weapon;
@@ -624,6 +625,7 @@ public class TEAM_DEATHMATCHcontrol {
         // --- ^^^^ [修复结束] ^^^^ ---
 
         double minScore = Double.POSITIVE_INFINITY; // 初始化最低分数为无穷大
+        List<Player> eligibleSoundResponders = null;
 
         // 添加 perceptionModule null 检查
         if (perceptionModule == null) {
@@ -643,6 +645,17 @@ public class TEAM_DEATHMATCHcontrol {
             if (enemyPlayer == null || !enemyPlayer.isAlive() || enemyPlayer.position == null
                     || info.lastKnownPosition() == null) { // 添加 position null 检查
                 continue; // <--- 确保不会选择已死亡的敌人或处理无效信息
+            }
+
+            // 枪声和脚步只调动全队中距离最近的小组；视觉接敌始终立即响应。
+            if (info.type() != PerceptionType.SIGHT) {
+                if (eligibleSoundResponders == null) {
+                    eligibleSoundResponders = collectEligibleSoundResponders();
+                }
+                if (!TeamSoundResponsePolicy.shouldRespond(owner, info.lastKnownPosition(), info.type(),
+                        eligibleSoundResponders)) {
+                    continue;
+                }
             }
 
             double distanceSq = owner.position.distanceSq(info.lastKnownPosition());
@@ -690,6 +703,21 @@ public class TEAM_DEATHMATCHcontrol {
 
         this.primaryTarget = newBestTarget;
         this.lastKnownPosition = newBestLKP;
+    }
+
+    private List<Player> collectEligibleSoundResponders() {
+        List<Player> responders = new ArrayList<>();
+        if (gameState == null || owner == null) {
+            return responders;
+        }
+
+        for (Player player : gameState.getAllCharacters()) {
+            if (player != null && player.isAI && player.isAlive() && player.position != null
+                    && player.team == owner.team && !player.isControlledByPlayer()) {
+                responders.add(player);
+            }
+        }
+        return responders;
     }
 
     /**
