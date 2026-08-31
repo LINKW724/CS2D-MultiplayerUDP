@@ -30,7 +30,7 @@ final class PcmAudioMixer implements AutoCloseable {
     static final float SAMPLE_RATE = 48_000.0f;
     static final int CHANNELS = 2;
     static final int FRAMES_PER_BUFFER = 256;
-    private static final long OUTPUT_BACKPRESSURE_PARK_NANOS = 250_000L;
+    static final long BUFFER_DURATION_NANOS = Math.round(FRAMES_PER_BUFFER * 1_000_000_000.0 / SAMPLE_RATE);
     static final AudioFormat OUTPUT_FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE, 16, CHANNELS,
             CHANNELS * Short.BYTES, SAMPLE_RATE, false);
@@ -166,22 +166,25 @@ final class PcmAudioMixer implements AutoCloseable {
         List<Voice> voices = new ArrayList<>();
         int[] mix = new int[FRAMES_PER_BUFFER * CHANNELS];
         byte[] output = new byte[FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize()];
+        long nextWriteDeadline = System.nanoTime();
         try {
             while (running.get()) {
                 SourceDataLine line = outputLine;
                 if (line == null)
                     break;
-                // DirectAudioDevice.write() blocks until the complete request is accepted.
-                // On Windows an audio-device backpressure episode can keep that JNI call
-                // inside nWrite() for seconds, delaying every JVM Safepoint. With a single
-                // producer, available capacity can only grow before our next write, so an
-                // entire-buffer capacity check keeps the native write non-blocking without
-                // changing sample rate, buffer contents, sound quality or playback cadence.
-                if (!hasImmediateWriteCapacity(line.available(), output.length,
-                        OUTPUT_FORMAT.getFrameSize())) {
-                    LockSupport.parkNanos(OUTPUT_BACKPRESSURE_PARK_NANOS);
-                    continue;
+                long now = System.nanoTime();
+                long waitNanos = nextWriteDeadline - now;
+                if (waitNanos > 0L) {
+                    LockSupport.parkNanos(waitNanos);
+                    if (!running.get())
+                        break;
+                    if (Thread.interrupted())
+                        continue;
                 }
+                now = System.nanoTime();
+                // 纯Java时钟每5.33ms提交一个256帧块。若线程被系统调度延迟，
+                // 直接从当前时间重新定相，绝不突发补写历史音频。
+                nextWriteDeadline = nextWriteDeadline(nextWriteDeadline, now, BUFFER_DURATION_NANOS);
                 if (clearRequested.getAndSet(false))
                     voices.clear();
                 drainRequests(voices);
@@ -201,11 +204,11 @@ final class PcmAudioMixer implements AutoCloseable {
         }
     }
 
-    static boolean hasImmediateWriteCapacity(int availableBytes, int requestedBytes, int frameSize) {
-        return frameSize > 0
-                && requestedBytes > 0
-                && requestedBytes % frameSize == 0
-                && availableBytes >= requestedBytes;
+    static long nextWriteDeadline(long previousDeadline, long now, long durationNanos) {
+        if (durationNanos <= 0L)
+            throw new IllegalArgumentException("durationNanos must be positive");
+        long scheduled = previousDeadline + durationNanos;
+        return scheduled <= now ? now + durationNanos : scheduled;
     }
 
     private void drainRequests(List<Voice> voices) {

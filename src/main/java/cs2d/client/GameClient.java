@@ -38,12 +38,8 @@ import javafx.scene.media.AudioClip;
 // 导入 JavaFX 颜色和绘图相关的类
 import javafx.scene.paint.Color;
 // 导入 JavaFX 形状相关的类，如 SVG 路径
-import javafx.scene.shape.FillRule;
-import javafx.scene.shape.ClosePath;
-import javafx.scene.shape.LineTo;
-import javafx.scene.shape.MoveTo;
-import javafx.scene.shape.Path;
 import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.FillRule;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.transform.Affine;
 // 导入 JavaFX 文本和字体相关的类
@@ -57,7 +53,6 @@ import javafx.util.Duration;
 import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
-import java.util.Enumeration;
 import java.util.List;
 // 导入 Java 的网络类，用于 UDP 通信
 import java.net.DatagramPacket;
@@ -193,11 +188,10 @@ public class GameClient extends Application {
     private String residentStaticMapMode = "canvas";
     private final Affine residentStaticMapTransform = new Affine();
     private final Affine fogLayerTransform = new Affine();
-    private Path fogPath;
-    private final MoveTo fogHoleStart = new MoveTo();
-    private final ClosePath fogHoleClose = new ClosePath();
-    private final List<LineTo> fogVertexPool = new ArrayList<>();
-    private int activeFogLineCount;
+    private Canvas fogCanvas;
+    private GraphicsContext fogGc;
+    private double[] fogPolygonX = new double[0];
+    private double[] fogPolygonY = new double[0];
     private Canvas hudCanvas;
     private GraphicsContext hudGc;
     private List<Point2D> rasterizedFogGeometry = List.of();
@@ -504,8 +498,9 @@ public class GameClient extends Application {
     private long lastDiscoveryBroadcastTime = 0;
     private static final long DISCOVERY_INTERVAL_MS = 3000; // 每3秒广播一次探测包
 
-    private DatagramSocket discoverySocket; // [新增] 专门用于局域网发现的 Socket
-    private Thread discoveryThread; // [新增] 专门用于监听发现回复的线程
+    private volatile DatagramSocket discoverySocket; // [新增] 专门用于局域网发现的 Socket
+    private volatile Thread discoveryThread; // [新增] 专门用于监听发现回复的线程
+    private final AtomicBoolean discoveryRunning = new AtomicBoolean(false);
     private VBox lobbyPane; // 游戏大厅界面
     private VBox nameSelectionPane; // 名字选择界面
     private VBox teamSelectionPane; // 队伍选择界面
@@ -945,6 +940,7 @@ public class GameClient extends Application {
         saveSettings();
         // 将运行标志设为 false，以停止所有循环
         running = false;
+        stopDiscoveryListener();
         // 立即关闭网络监听线程池
         networkListenExecutor.shutdownNow();
         // 立即关闭网络发送线程池
@@ -1086,6 +1082,9 @@ public class GameClient extends Application {
     // region 网络 (Networking) - 代码折叠区域开始
     // 连接到服务器的方法
     private void connect() {
+        // LAN浏览器与游戏连接生命周期分离。Windows枚举网络接口可能阻塞数秒，
+        // 进入大厅/游戏后必须立即终止发现线程，不能让它影响实时客户端。
+        stopDiscoveryListener();
         // [核心修复] 彻底关闭旧 Socket，引爆还在旧 Socket 上打转的阻塞监听线程 (SocketException)，
         // 以免它永久霸占 networkListenExecutor 的单线程，导致后续接收任务永远排队。
         if (this.socket != null && !this.socket.isClosed()) {
@@ -2246,11 +2245,6 @@ public class GameClient extends Application {
             public void handle(long now) {
                 // ClientMain 已把 JavaFX Pulse 设置为目标刷新率。每个Pulse直接绘制，
                 // 避免同频的第二层截止时间过滤因亚毫秒抖动误跳过整个下一帧。
-
-                // [新增] 局域网服务器发现广播
-                if (serverBrowserPane != null && serverBrowserPane.isVisible()) {
-                    broadcastDiscoveryProbe();
-                }
 
                 // [修复] 使用 JavaFX 提供的 'now' 参数。
                 if (lastNanoTime == 0) {
@@ -5022,6 +5016,7 @@ public class GameClient extends Application {
         Button manualIpButton = new Button("Entry Manual IP");
         styleButton(manualIpButton);
         manualIpButton.setOnAction(e -> {
+            stopDiscoveryListener();
             serverBrowserPane.setVisible(false);
             ipEntryPane.setVisible(true);
         });
@@ -5092,6 +5087,7 @@ public class GameClient extends Application {
                             // 使用延迟最低的实际 IP 连接
                             this.serverIp = bestIp;
                             this.serverPort = getInt(info, "server_port");
+                            stopDiscoveryListener();
                             serverBrowserPane.setVisible(false);
                             lobbyPane.setVisible(true);
                             connect();
@@ -5105,49 +5101,42 @@ public class GameClient extends Application {
     }
 
     private void startDiscoveryListener() {
-        if (discoveryThread != null && discoveryThread.isAlive())
+        Thread currentThread = discoveryThread;
+        if ((currentThread != null && currentThread.isAlive())
+                || !discoveryRunning.compareAndSet(false, true))
             return;
 
-        running = true; // [核心修复] 确保发现线程循环能运行
         System.out.println("[Discovery] Starting LAN discovery listener...");
-
+        final DatagramSocket listenerSocket;
         try {
-            discoverySocket = new DatagramSocket();
-            discoverySocket.setBroadcast(true);
-            discoverySocket.setSoTimeout(2000);
-            System.out.println("[Discovery] Socket bound to port: " + discoverySocket.getLocalPort());
+            listenerSocket = new DatagramSocket();
+            listenerSocket.setBroadcast(true);
+            listenerSocket.setSoTimeout(2000);
+            discoverySocket = listenerSocket;
+            lastDiscoveryBroadcastTime = 0L;
+            System.out.println("[Discovery] Socket bound to port: " + listenerSocket.getLocalPort());
         } catch (SocketException e) {
+            discoveryRunning.set(false);
             System.err.println("Failed to setup discovery socket: " + e.getMessage());
             return;
         }
 
-        discoveryThread = new Thread(() -> {
+        Thread listenerThread = new Thread(() -> {
             byte[] buffer = new byte[2048];
-            // 增加一个微小的延迟，确保 UI 已经完全渲染且可见性状态已同步
             try {
                 Thread.sleep(500);
             } catch (InterruptedException e) {
-                return;
+                Thread.currentThread().interrupt();
             }
 
-            while (running && serverBrowserPane != null) {
-                // 仅在浏览器可见时进行收发
-                if (!serverBrowserPane.isVisible()) {
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        break;
-                    }
-                    continue;
-                }
-
+            while (discoveryRunning.get() && !Thread.currentThread().isInterrupted()) {
                 // 在每次 receive 前主动广播探测包，记录发包时间用于延迟计算
                 long probeSentAt = System.currentTimeMillis();
-                broadcastDiscoveryProbe();
+                broadcastDiscoveryProbe(listenerSocket);
 
                 try {
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                    discoverySocket.receive(packet); // 阻塞等待，Socket 超时为 2s
+                    listenerSocket.receive(packet); // 阻塞等待，Socket 超时为 2s
 
                     long latency = System.currentTimeMillis() - probeSentAt;
                     String message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
@@ -5191,33 +5180,35 @@ public class GameClient extends Application {
                 } catch (SocketTimeoutException ignored) {
                     // 2s 内无回包，继续循环重新发探测
                 } catch (IOException e) {
-                    if (running) {
+                    if (discoveryRunning.get() && !listenerSocket.isClosed()) {
                         System.err.println("Discovery listener error: " + e.getMessage());
-                        // [硬核修复] Windows 系统独有设定：针对未连接 UDP 套接字的收发引起的 ICMP Port Unreachable，
-                        // 会返回持久的“Connection reset by peer”，如果不重新建立 Socket 将会导致永久性的卡死瘫痪。
-                        try {
-                            if (discoverySocket != null && !discoverySocket.isClosed()) {
-                                discoverySocket.close();
-                            }
-                            discoverySocket = new DatagramSocket();
-                            discoverySocket.setBroadcast(true);
-                            discoverySocket.setSoTimeout(2000);
-                        } catch (SocketException resetEx) {
-                            // 忽略重建产生的故障
-                        }
                     }
                 }
             }
-            if (discoverySocket != null) {
-                discoverySocket.close();
-                System.out.println("[Discovery] Listener socket closed.");
-            }
+            listenerSocket.close();
+            if (discoverySocket == listenerSocket)
+                discoverySocket = null;
+            if (discoveryThread == Thread.currentThread())
+                discoveryThread = null;
+            discoveryRunning.set(false);
+            System.out.println("[Discovery] Listener socket closed.");
         }, "LAN-Discovery-Thread");
-        discoveryThread.setDaemon(true);
-        discoveryThread.start();
+        discoveryThread = listenerThread;
+        listenerThread.setDaemon(true);
+        listenerThread.start();
     }
 
-    private void broadcastDiscoveryProbe() {
+    private void stopDiscoveryListener() {
+        discoveryRunning.set(false);
+        DatagramSocket socketToClose = discoverySocket;
+        if (socketToClose != null)
+            socketToClose.close();
+        Thread threadToStop = discoveryThread;
+        if (threadToStop != null)
+            threadToStop.interrupt();
+    }
+
+    private void broadcastDiscoveryProbe(DatagramSocket targetSocket) {
         long now = System.currentTimeMillis();
 
         // [核心修复] 剔除超过 6 秒（丢失两次探针回包）的离线死服务器
@@ -5234,7 +5225,7 @@ public class GameClient extends Application {
             return;
         lastDiscoveryBroadcastTime = now;
 
-        if (discoverySocket == null || discoverySocket.isClosed())
+        if (targetSocket == null || targetSocket.isClosed())
             return;
 
         JsonObject probe = new JsonObject();
@@ -5244,28 +5235,13 @@ public class GameClient extends Application {
 
         try {
             System.out.println("[Discovery] Broadcasting probe...");
-            // 1. 尝试 255.255.255.255 全局广播
-            discoverySocket
+            // Windows的NetworkInterface.getNetworkInterfaces()在部分VPN/虚拟网卡环境中
+            // 每次会阻塞约3秒。受限广播会由系统路由到活动LAN，无需周期枚举全部网卡。
+            targetSocket
                     .send(new DatagramPacket(buffer, buffer.length, new InetSocketAddress("255.255.255.255", 14726)));
 
-            // 2. 针对本地测试，直接尝试 127.0.0.1
-            discoverySocket.send(new DatagramPacket(buffer, buffer.length, new InetSocketAddress("127.0.0.1", 14726)));
-
-            // 3. 遍历所有网卡
-            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            while (interfaces.hasMoreElements()) {
-                NetworkInterface networkInterface = interfaces.nextElement();
-                if (networkInterface.isLoopback() || !networkInterface.isUp())
-                    continue;
-
-                for (InterfaceAddress interfaceAddress : networkInterface.getInterfaceAddresses()) {
-                    InetAddress broadcast = interfaceAddress.getBroadcast();
-                    if (broadcast != null) {
-                        discoverySocket.send(
-                                new DatagramPacket(buffer, buffer.length, new InetSocketAddress(broadcast, 14726)));
-                    }
-                }
-            }
+            // 同机服务器仍走回环地址，不依赖系统广播路由。
+            targetSocket.send(new DatagramPacket(buffer, buffer.length, new InetSocketAddress("127.0.0.1", 14726)));
         } catch (IOException e) {
             // 忽略错误
         }
@@ -5344,6 +5320,7 @@ public class GameClient extends Application {
             ipEntryPane.setVisible(false);
             serverBrowserPane.setVisible(true);
             discoveredServers.clear(); // 清空列表触发重新扫描
+            startDiscoveryListener();
         });
 
         formBox.getChildren().addAll(ipInput, portInput, entryButton, backToScanButton, errorLabel); // 将控件添加到表单框
@@ -5358,21 +5335,17 @@ public class GameClient extends Application {
         gc = canvas.getGraphicsContext2D(); // 获取画布的图形上下文
         double fogWidth = CANVAS_WIDTH + FOG_TEXTURE_MARGIN * 2.0;
         double fogHeight = CANVAS_HEIGHT + FOG_TEXTURE_MARGIN * 2.0;
-        fogPath = new Path(
-                new MoveTo(0, 0), new LineTo(fogWidth, 0),
-                new LineTo(fogWidth, fogHeight), new LineTo(0, fogHeight),
-                new ClosePath(), fogHoleStart, fogHoleClose);
-        fogPath.setFillRule(FillRule.EVEN_ODD);
-        fogPath.setStroke(null);
-        fogPath.setManaged(false);
-        fogPath.setMouseTransparent(true);
-        fogPath.setVisible(false);
-        fogPath.getTransforms().setAll(fogLayerTransform);
+        fogCanvas = new Canvas(fogWidth, fogHeight);
+        fogCanvas.setManaged(false);
+        fogCanvas.setMouseTransparent(true);
+        fogCanvas.setVisible(false);
+        fogCanvas.getTransforms().setAll(fogLayerTransform);
+        fogGc = fogCanvas.getGraphicsContext2D();
         hudCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
         hudCanvas.setManaged(false);
         hudCanvas.setMouseTransparent(true);
         hudGc = hudCanvas.getGraphicsContext2D();
-        System.out.println("[Render] Fog pipeline: pooled vector path + camera transform");
+        System.out.println("[Render] Fog pipeline: retained canvas mask + camera transform");
         Pane renderPane = new Pane();
         if (USE_RESIDENT_STATIC_MAP_LAYER) {
             residentStaticMapLayer = new Group();
@@ -5384,7 +5357,7 @@ public class GameClient extends Application {
         } else {
             System.out.println("[Render] Static map layer: Canvas fallback (enable with -Dcs2d.staticMapLayer=true)");
         }
-        renderPane.getChildren().addAll(canvas, fogPath, hudCanvas);
+        renderPane.getChildren().addAll(canvas, fogCanvas, hudCanvas);
         renderPane.setMinSize(CANVAS_WIDTH, CANVAS_HEIGHT);
         renderPane.setPrefSize(CANVAS_WIDTH, CANVAS_HEIGHT);
         renderPane.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -8574,11 +8547,11 @@ public class GameClient extends Application {
     }
 
     /**
-     * 使用一条持久Path和可复用LineTo池承载迷雾轮廓。新的FOV快照只更新坐标，
-     * 不再清空并重绘一张全屏Canvas；FOV未变化时只更新仿射变换。
+     * 使用持久Canvas承载迷雾像素遮罩。新的FOV快照只更新一次纹理；中间显示帧
+     * 只更新仿射变换，避免JavaFX Path在Prism线程中反复触发全屏Marlin光栅化。
      */
     private void updateCachedFogLayer(List<Point2D> currentFovPoints) {
-        if (fogPath == null || currentFovPoints == null || currentFovPoints.isEmpty()) {
+        if (fogCanvas == null || fogGc == null || currentFovPoints == null || currentFovPoints.isEmpty()) {
             clearCachedFogLayer();
             return;
         }
@@ -8588,46 +8561,49 @@ public class GameClient extends Application {
                 || !Objects.equals(fogColor, fogRasterColor)
                 || !cachedFogTransformCoversViewport();
         if (geometryChanged) {
-            updateFogPathGeometry(currentFovPoints, fogColor);
+            updateFogMaskGeometry(currentFovPoints, fogColor);
             perfFogRasterizations++;
         } else {
             perfFogTransformOnlyFrames++;
         }
         updateFogLayerTransform();
-        setVisibleIfChanged(fogPath, true);
+        setVisibleIfChanged(fogCanvas, true);
     }
 
-    private void updateFogPathGeometry(List<Point2D> currentFovPoints, Color fogColor) {
+    private void updateFogMaskGeometry(List<Point2D> currentFovPoints, Color fogColor) {
         fogRasterCameraX = camera.x;
         fogRasterCameraY = camera.y;
         fogRasterScale = Math.max(camera.scale, 0.0001);
         fogRasterOffsetX = camera.offsetX;
         fogRasterOffsetY = camera.offsetY;
 
-        int requiredLines = Math.max(0, currentFovPoints.size() - 1);
-        while (fogVertexPool.size() < requiredLines)
-            fogVertexPool.add(new LineTo());
-        while (activeFogLineCount < requiredLines) {
-            fogPath.getElements().add(fogPath.getElements().size() - 1,
-                    fogVertexPool.get(activeFogLineCount));
-            activeFogLineCount++;
+        int pointCount = currentFovPoints.size();
+        if (fogPolygonX.length < pointCount) {
+            fogPolygonX = new double[pointCount];
+            fogPolygonY = new double[pointCount];
         }
-        while (activeFogLineCount > requiredLines) {
-            fogPath.getElements().remove(5 + activeFogLineCount);
-            activeFogLineCount--;
+        for (int i = 0; i < pointCount; i++) {
+            Point2D point = currentFovPoints.get(i);
+            fogPolygonX[i] = fogScreenCoordinate(point.getX(), fogRasterCameraX,
+                    fogRasterScale, fogRasterOffsetX);
+            fogPolygonY[i] = fogScreenCoordinate(point.getY(), fogRasterCameraY,
+                    fogRasterScale, fogRasterOffsetY);
         }
 
-        Point2D first = currentFovPoints.get(0);
-        fogHoleStart.setX(fogScreenCoordinate(first.getX(), fogRasterCameraX, fogRasterScale, fogRasterOffsetX));
-        fogHoleStart.setY(fogScreenCoordinate(first.getY(), fogRasterCameraY, fogRasterScale, fogRasterOffsetY));
-        for (int i = 1; i < currentFovPoints.size(); i++) {
-            Point2D point = currentFovPoints.get(i);
-            LineTo line = fogVertexPool.get(i - 1);
-            line.setX(fogScreenCoordinate(point.getX(), fogRasterCameraX, fogRasterScale, fogRasterOffsetX));
-            line.setY(fogScreenCoordinate(point.getY(), fogRasterCameraY, fogRasterScale, fogRasterOffsetY));
+        fogGc.setTransform(1, 0, 0, 1, 0, 0);
+        fogGc.clearRect(0, 0, fogCanvas.getWidth(), fogCanvas.getHeight());
+        fogGc.setFill(fogColor);
+        fogGc.setFillRule(FillRule.EVEN_ODD);
+        fogGc.beginPath();
+        fogGc.rect(0, 0, fogCanvas.getWidth(), fogCanvas.getHeight());
+        if (pointCount >= 3) {
+            fogGc.moveTo(fogPolygonX[0], fogPolygonY[0]);
+            for (int i = 1; i < pointCount; i++)
+                fogGc.lineTo(fogPolygonX[i], fogPolygonY[i]);
+            fogGc.closePath();
         }
-        if (!Objects.equals(fogColor, fogRasterColor))
-            fogPath.setFill(fogColor);
+        fogGc.fill();
+        fogGc.setFillRule(FillRule.NON_ZERO);
         rasterizedFogGeometry = currentFovPoints;
         fogRasterColor = fogColor;
     }
@@ -8670,10 +8646,10 @@ public class GameClient extends Application {
     }
 
     private void clearCachedFogLayer() {
-        if (fogPath == null)
+        if (fogCanvas == null)
             return;
-        if (fogPath.isVisible())
-            fogPath.setVisible(false);
+        if (fogCanvas.isVisible())
+            fogCanvas.setVisible(false);
         rasterizedFogGeometry = List.of();
         fogRasterColor = null;
     }

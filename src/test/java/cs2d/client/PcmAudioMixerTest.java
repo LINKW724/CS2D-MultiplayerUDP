@@ -16,15 +16,14 @@ import org.junit.jupiter.api.Test;
 
 class PcmAudioMixerTest {
     @Test
-    void writesOnlyWhenTheWholeFrameAlignedBufferIsImmediatelyAvailable() {
-        int requestedBytes = PcmAudioMixer.FRAMES_PER_BUFFER * PcmAudioMixer.OUTPUT_FORMAT.getFrameSize();
+    void schedulesPcmWritesAtFixedCadenceWithoutCatchUpBursts() {
+        long previousDeadline = 1_000_000_000L;
+        long duration = PcmAudioMixer.BUFFER_DURATION_NANOS;
 
-        assertTrue(PcmAudioMixer.hasImmediateWriteCapacity(requestedBytes, requestedBytes,
-                PcmAudioMixer.OUTPUT_FORMAT.getFrameSize()));
-        assertTrue(!PcmAudioMixer.hasImmediateWriteCapacity(requestedBytes - 1, requestedBytes,
-                PcmAudioMixer.OUTPUT_FORMAT.getFrameSize()));
-        assertTrue(!PcmAudioMixer.hasImmediateWriteCapacity(requestedBytes, requestedBytes - 1,
-                PcmAudioMixer.OUTPUT_FORMAT.getFrameSize()));
+        assertEquals(previousDeadline + duration,
+                PcmAudioMixer.nextWriteDeadline(previousDeadline, 1_002_000_000L, duration));
+        assertEquals(1_010_000_000L + duration,
+                PcmAudioMixer.nextWriteDeadline(previousDeadline, 1_010_000_000L, duration));
     }
 
     @Test
