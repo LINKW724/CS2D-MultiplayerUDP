@@ -135,16 +135,16 @@ public class ServerStatusWindow extends JDialog {
         // --- 格式化性能列表为字符串 ---
         final StringBuilder sb = new StringBuilder(); // 使用 final StringBuilder
 
-        // 注意：数据是每 2 秒 (120 逻辑帧) 更新一次的
+        // 注意：数据约每 2 秒更新一次
         sb.append(String.format("--- 实时性能日志 (数据每 ~2s 更新) ---\n"));
         sb.append("------------------------------------------\n");
-        sb.append("  --- 游戏逻辑 (GameState.update @ 120Hz) ---\n");
+        sb.append(String.format("  --- 游戏逻辑 (GameState.update @ %.0fHz) ---\n", GameServer.TPS));
         sb.append(String.format("    [1] AI/输入/准备:      \t\t%.3f ms\n", aiPrepTime));
         sb.append(String.format("    [2] 物理 (移动/碰撞):   \t\t%.3f ms\n", physicsTime));
         sb.append(String.format("    [3] 游戏逻辑:          \t\t%.3f ms\n", logicTime));
         sb.append(String.format("    >>> 逻辑总耗时:         \t\t%.3f ms\n\n", logicTotalTime));
 
-        sb.append("  --- 网络发送 (NetworkBroadcaster @ 60Hz) ---\n");
+        sb.append("  --- 网络发送 (NetworkBroadcaster @ 30Hz) ---\n");
         sb.append(String.format("    [4.1] 主JSON序列化:     \t\t%.3f ms\n", networkJsonTime));
         sb.append(String.format("    [4.2] 分片打包(Base64): \t\t%.3f ms\n", networkChunkTime));
         sb.append(String.format("    [4.3] 并行I/O发送:      \t\t%.3f ms\n", networkSendTime));

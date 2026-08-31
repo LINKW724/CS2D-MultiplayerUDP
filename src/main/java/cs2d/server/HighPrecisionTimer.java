@@ -24,7 +24,7 @@ public class HighPrecisionTimer {
         // 1. 系统休眠让出 CPU (阻塞阶段)
         while ((remainingNs = targetTimeNs - System.nanoTime()) > SPIN_THRESHOLD_NS) {
             // Windows 的 parkNanos 可能按约 15.625ms 粒度唤醒。先扣除已观测到的超休眠，
-            // 如果本帧预算不足，则跳过 park，直接进入精确自旋，避免 120TPS 退化到约 64Hz。
+            // 如果本帧预算不足，则跳过 park，直接进入精确自旋，避免高频Tick被系统定时粒度拖慢。
             long parkTime = calculateParkTimeNs(remainingNs, observedParkOvershootNs);
             if (parkTime <= 0)
                 break;

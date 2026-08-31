@@ -9,15 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GameLoopLoadSheddingTest {
 
     @Test
-    void broadcastsExactlyThirtySnapshotsPerSecondAtOneHundredTwentyTps() {
+    void broadcastsExactlyThirtySnapshotsPerSecondAtSixtyTps() {
         int broadcasts = 0;
-        for (long tick = 1; tick <= 120; tick++) {
+        for (long tick = 1; tick <= 60; tick++) {
             if (GameServer.shouldBroadcastNetworkSnapshot(tick)) {
                 broadcasts++;
             }
         }
-        assertTrue(GameServer.shouldBroadcastNetworkSnapshot(4));
-        assertFalse(GameServer.shouldBroadcastNetworkSnapshot(5));
+        assertTrue(GameServer.shouldBroadcastNetworkSnapshot(2));
+        assertFalse(GameServer.shouldBroadcastNetworkSnapshot(3));
         assertEquals(30, broadcasts, "network snapshot cadence must remain 30Hz");
     }
 

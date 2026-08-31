@@ -29,7 +29,7 @@ import java.util.zip.CRC32;
 
 /**
  * 专职的网络广播器。游戏线程只在确定的Tick捕获独立Json快照；序列化、压缩、
- * 分片和UDP发送由单一latest-wins工作线程完成，慢发送不会阻塞120Hz世界模拟。
+ * 分片和UDP发送由单一latest-wins工作线程完成，慢发送不会阻塞权威世界模拟。
  */
 public class NetworkBroadcaster {
 

@@ -43,6 +43,8 @@ public class GameState {
 
     private static final double BASE_SPEED = 1.5; // 人物移速
     private static final double ACCELERATION = 0.3; // 人物移动加速度
+    /** 60Hz主Tick内执行两个旧版120Hz运动子步，保持原移动/摩擦手感。 */
+    private static final int LEGACY_MOTION_SUBSTEPS = TickRateScaler.integralLegacySubsteps(GameServer.TPS);
 
     private static final double PENETRATION_MULTIPLIER = 2.0; // 穿透系数 2.0
     private static final int TDM_GAME_DURATION_SECONDS = 600; // 团队战 10min
@@ -68,6 +70,10 @@ public class GameState {
     private final Set<Point> generalForbiddenGridCells = new HashSet<>(); // <-- 通用寻路禁区
     private final ConcurrentHashMap<String, AIService.AIInput> aiInputMailbox; // <-- AI输入数据邮箱（线程安全的消息队列），用于异步通信。
     private final Set<String> pendingAiDropRequests = ConcurrentHashMap.newKeySet();
+    /** 本Tick各实体经过运动子步累计出的位移；碰撞与网格仍只提交一次。 */
+    private final Map<Player, Point2D.Double> preparedDisplacements = new IdentityHashMap<>();
+    /** 当前主Tick内按Sub-tick持续时间加权后的移动方向。 */
+    private final Map<Player, Point2D.Double> subtickMovementBlends = new IdentityHashMap<>();
 
     // 僵尸生成点：
     private final List<Point2D.Double> precomputedSpawnPoints = new ArrayList<>();
@@ -1213,7 +1219,8 @@ public class GameState {
         updateFirePatches();
         updatePingMarkers();
 
-        /** 所有的玩家行为（射击、交互、换弹）都在这里更新，但不进行位置/碰撞修正 */
+        preparedDisplacements.clear();
+        /** 所有的玩家行为（射击、交互、换弹）都在这里更新，并准备本Tick累计位移 */
         allCharacters.forEach(this::updatePlayerBehaviorAndPhysicsPrep);
 
         long timeAfterPhysicsPrep = System.nanoTime();
@@ -1233,9 +1240,12 @@ public class GameState {
             if (!p.isAlive())
                 continue;
 
-            // 应用 p.vx 和 p.vy 带来的位移
-            p.position.x += p.vx;
-            p.position.y += p.vy;
+            Point2D.Double displacement = preparedDisplacements.get(p);
+            if (displacement == null)
+                displacement = new Point2D.Double(p.vx * LEGACY_MOTION_SUBSTEPS,
+                        p.vy * LEGACY_MOTION_SUBSTEPS);
+            p.position.x += displacement.x;
+            p.position.y += displacement.y;
 
             // 填充网格
             int gridX = (int) (p.position.x / gridCellSize);
@@ -1263,7 +1273,7 @@ public class GameState {
         updateVisualEffects();
 
         // 性能日志
-        if (tickCounter % 120 == 0) {
+        if (tickCounter % Math.max(1L, Math.round(GameServer.TPS)) == 0) {
             // [修改] 将性能数据存储到成员变量中，供外部UI读取
             // 注意：这里的 lastTimeStamp 是 update() 方法开头的局部变量 (long lastTimeStamp =
             // frameStartTime;)
@@ -1382,8 +1392,8 @@ public class GameState {
             // grenade.tickCounter, grenade.position.x, grenade.position.y,
             // grenade.velocity.x, grenade.velocity.y));
 
-            // 记录完毕后，计数器加一，为下一个Tick做准备
-            grenade.tickCounter++;
+            // 计数仍按旧版120Hz运动子步累计，便于轨迹诊断前后对照。
+            grenade.tickCounter += LEGACY_MOTION_SUBSTEPS;
             // ================== [日志记录结束] ============================
 
             // --- 引爆和持续效果检查 ---
@@ -1434,37 +1444,39 @@ public class GameState {
                 continue;
             }
 
-            // --- 连续碰撞检测物理更新 ---
-            Point2D.Double currentPos = grenade.position;
-            Point2D.Double velocity = grenade.velocity;
-            Point2D.Double nextPos = new Point2D.Double(currentPos.x + velocity.x, currentPos.y + velocity.y);
+            // 保留旧版120Hz轨迹：一个60Hz主Tick内执行两个连续碰撞子步。
+            for (int substep = 0; substep < LEGACY_MOTION_SUBSTEPS; substep++) {
+                Point2D.Double currentPos = grenade.position;
+                Point2D.Double velocity = grenade.velocity;
+                Point2D.Double nextPos = new Point2D.Double(currentPos.x + velocity.x, currentPos.y + velocity.y);
 
-            Line2D.Double movementRay = new Line2D.Double(currentPos, nextPos);
-            CollisionResult collision = findClosestCollision(movementRay, obstacles);
+                Line2D.Double movementRay = new Line2D.Double(currentPos, nextPos);
+                CollisionResult collision = findClosestCollision(movementRay, obstacles);
 
-            if (collision != null && collision.distance() <= currentPos.distance(nextPos)) {
-                Point2D.Double normal = collision.normal();
-                double dot = velocity.x * normal.x + velocity.y * normal.y;
-                if (dot > 0) {
-                    normal.x *= -1;
-                    normal.y *= -1;
+                if (collision != null && collision.distance() <= currentPos.distance(nextPos)) {
+                    Point2D.Double normal = collision.normal();
+                    double dot = velocity.x * normal.x + velocity.y * normal.y;
+                    if (dot > 0) {
+                        normal.x *= -1;
+                        normal.y *= -1;
+                    }
+                    dot = velocity.x * normal.x + velocity.y * normal.y;
+                    velocity.x -= 2 * dot * normal.x;
+                    velocity.y -= 2 * dot * normal.y;
+                    velocity.x *= -GRENADE_BOUNCE_FRICTION;
+                    velocity.y *= -GRENADE_BOUNCE_FRICTION;
+                    grenade.velocity = velocity;
+                    double epsilon = 0.1;
+                    grenade.position.x = collision.impactPoint().x + normal.x * epsilon;
+                    grenade.position.y = collision.impactPoint().y + normal.y * epsilon;
+                    long bounceCooldown = 100;
+                    if (System.currentTimeMillis() - grenade.lastBounceTime > bounceCooldown) {
+                        playBounceSound(grenade);
+                        grenade.lastBounceTime = System.currentTimeMillis();
+                    }
+                } else {
+                    grenade.position = nextPos;
                 }
-                dot = velocity.x * normal.x + velocity.y * normal.y;
-                velocity.x -= 2 * dot * normal.x;
-                velocity.y -= 2 * dot * normal.y;
-                velocity.x *= -GRENADE_BOUNCE_FRICTION;
-                velocity.y *= -GRENADE_BOUNCE_FRICTION;
-                grenade.velocity = velocity;
-                double epsilon = 0.1;
-                grenade.position.x = collision.impactPoint().x + normal.x * epsilon;
-                grenade.position.y = collision.impactPoint().y + normal.y * epsilon;
-                long bounceCooldown = 100;
-                if (System.currentTimeMillis() - grenade.lastBounceTime > bounceCooldown) {
-                    playBounceSound(grenade);
-                    grenade.lastBounceTime = System.currentTimeMillis();
-                }
-            } else {
-                grenade.position = nextPos;
             }
         }
         thrownGrenades.removeAll(grenadesToRemove);
@@ -1479,11 +1491,12 @@ public class GameState {
 
         // 更新每一个烟雾颗粒物理状态
         for (SmokePuff puff : smokePuffs) {
+            for (int substep = 0; substep < LEGACY_MOTION_SUBSTEPS; substep++) {
             // 如果速度已经很小，就让它完全停下
             if (puff.velocity.distance(0, 0) < 0.1) {
                 puff.velocity.x = 0;
                 puff.velocity.y = 0;
-                continue; // 跳过后续计算
+                break;
             }
 
             // 计算下一步的位置
@@ -1506,6 +1519,7 @@ public class GameState {
             // 应用碰撞摩擦力(不是摩擦力！是弹墙一次的)，让速度越来越慢
             puff.velocity.x *= SMOKE_FRICTION;
             puff.velocity.y *= SMOKE_FRICTION;
+            }
         }
     }
 
@@ -3276,6 +3290,17 @@ public class GameState {
      * @param p
      */
     private void updatePlayerPhysics(Player p) {
+        Point2D.Double displacement = new Point2D.Double();
+        for (int substep = 0; substep < LEGACY_MOTION_SUBSTEPS; substep++) {
+            updatePlayerPhysicsLegacySubstep(p);
+            displacement.x += p.vx;
+            displacement.y += p.vy;
+        }
+        preparedDisplacements.put(p, displacement);
+    }
+
+    /** 执行一次与旧版120Hz完全相同的玩家运动积分。 */
+    private void updatePlayerPhysicsLegacySubstep(Player p) {
         // 允许人类玩家或被夺舍的BOT根据按键移动
         // --- 1. 计算加速度 ---
         // 总是先重置加速度，确保上一帧的加速度不残留
@@ -3284,14 +3309,20 @@ public class GameState {
 
         // 移除错误的 if 条件！现在所有实体都会根据 keysDown 计算加速度
         // 根据按键设置加速度方向。
-        if (p.keysDown.contains("W"))
-            p.ay -= 1;
-        if (p.keysDown.contains("S"))
-            p.ay += 1;
-        if (p.keysDown.contains("A"))
-            p.ax -= 1;
-        if (p.keysDown.contains("D"))
-            p.ax += 1;
+        Point2D.Double subtickBlend = subtickMovementBlends.get(p);
+        if (subtickBlend != null) {
+            p.ax = subtickBlend.x;
+            p.ay = subtickBlend.y;
+        } else {
+            if (p.keysDown.contains("W"))
+                p.ay -= 1;
+            if (p.keysDown.contains("S"))
+                p.ay += 1;
+            if (p.keysDown.contains("A"))
+                p.ax -= 1;
+            if (p.keysDown.contains("D"))
+                p.ax += 1;
+        }
 
         // 计算玩家当前的最大速度（受武器和减速效果影响）。
         Weapon currentWep = p.getCurrentWeapon();
@@ -4414,6 +4445,99 @@ public class GameState {
             }
         }
         return null;
+    }
+
+    /**
+     * 按客户端采样顺序应用一个60Hz主Tick内收到的Sub-tick输入。
+     * 持续状态以最后一个样本为准，按下/释放边沿逐条执行，避免一次Tick内的快速点击被吞掉。
+     */
+    public void applySubtickInputs(String playerId, List<SubtickInputCommand> commands) {
+        Player humanPlayer = getPlayerById(playerId);
+        if (humanPlayer == null || commands == null || commands.isEmpty())
+            return;
+
+        Player target = humanPlayer.isControllingBot() ? getPlayerById(humanPlayer.controllingBotId) : humanPlayer;
+        if (target == null || !target.isAlive())
+            return;
+
+        int initialMovementButtons = movementButtons(target.keysDown);
+        subtickMovementBlends.put(target, calculateSubtickMovementBlend(commands, initialMovementButtons));
+
+        for (SubtickInputCommand command : commands) {
+            target.angle = command.angle();
+            target.keysDown.clear();
+            target.keysDown.addAll(command.movementKeys());
+            target.isWalking = command.down(SubtickInputCommand.BUTTON_WALK);
+            target.isRequestingUnderhandThrow = command.down(SubtickInputCommand.BUTTON_UNDERHAND);
+            target.isShooting = command.down(SubtickInputCommand.BUTTON_FIRE);
+
+            if (command.pressed(SubtickInputCommand.BUTTON_FIRE)) {
+                // 保留短于一个60Hz Tick的点击边沿；后续持续射击仍由主循环按武器冷却处理。
+                target.wasShootingLastFrame = false;
+                requestShoot(target);
+            }
+            if (command.pressed(SubtickInputCommand.BUTTON_INTERACT))
+                playerStartInteraction(playerId);
+            if ((command.releasedButtons() & SubtickInputCommand.BUTTON_INTERACT) != 0)
+                playerStopInteraction(playerId);
+        }
+    }
+
+    public void clearSubtickInputIntents() {
+        subtickMovementBlends.clear();
+    }
+
+    static Point2D.Double calculateSubtickMovementBlend(List<SubtickInputCommand> commands,
+            int initialMovementButtons) {
+        if (commands == null || commands.isEmpty())
+            return new Point2D.Double(axisX(initialMovementButtons), axisY(initialMovementButtons));
+
+        long newestClientTick = commands.stream().mapToLong(SubtickInputCommand::clientTick).max().orElse(0L);
+        int buttons = initialMovementButtons;
+        for (SubtickInputCommand command : commands) {
+            if (command.clientTick() < newestClientTick)
+                buttons = command.buttons();
+        }
+
+        double weightedX = 0.0;
+        double weightedY = 0.0;
+        double lastFraction = 0.0;
+        for (SubtickInputCommand command : commands) {
+            if (command.clientTick() != newestClientTick)
+                continue;
+            double fraction = Math.max(lastFraction, Math.min(1.0, command.fraction()));
+            double duration = fraction - lastFraction;
+            weightedX += axisX(buttons) * duration;
+            weightedY += axisY(buttons) * duration;
+            buttons = command.buttons();
+            lastFraction = fraction;
+        }
+        weightedX += axisX(buttons) * (1.0 - lastFraction);
+        weightedY += axisY(buttons) * (1.0 - lastFraction);
+        return new Point2D.Double(weightedX, weightedY);
+    }
+
+    private static int movementButtons(Set<String> keysDown) {
+        int buttons = 0;
+        if (keysDown.contains("W")) buttons |= SubtickInputCommand.BUTTON_FORWARD;
+        if (keysDown.contains("S")) buttons |= SubtickInputCommand.BUTTON_BACK;
+        if (keysDown.contains("A")) buttons |= SubtickInputCommand.BUTTON_LEFT;
+        if (keysDown.contains("D")) buttons |= SubtickInputCommand.BUTTON_RIGHT;
+        return buttons;
+    }
+
+    private static double axisX(int buttons) {
+        double value = 0.0;
+        if ((buttons & SubtickInputCommand.BUTTON_LEFT) != 0) value -= 1.0;
+        if ((buttons & SubtickInputCommand.BUTTON_RIGHT) != 0) value += 1.0;
+        return value;
+    }
+
+    private static double axisY(int buttons) {
+        double value = 0.0;
+        if ((buttons & SubtickInputCommand.BUTTON_FORWARD) != 0) value -= 1.0;
+        if ((buttons & SubtickInputCommand.BUTTON_BACK) != 0) value += 1.0;
+        return value;
     }
 
     private static void addSegmentIntersectionParameter(Line2D.Double line, double edgeX1, double edgeY1,
@@ -5957,10 +6081,14 @@ public class GameState {
             } else {
                 // 如果没有在交互，才执行正常的物理和行为更新
                 if (gameMode == GameMode.DEMOLITION && roundPhase == RoundPhase.FREEZE_TIME) {
-                    p.vx *= FRICTION;
-                    p.vy *= FRICTION;
-                    p.position.x += p.vx;
-                    p.position.y += p.vy;
+                    Point2D.Double displacement = new Point2D.Double();
+                    for (int substep = 0; substep < LEGACY_MOTION_SUBSTEPS; substep++) {
+                        p.vx *= FRICTION;
+                        p.vy *= FRICTION;
+                        displacement.x += p.vx;
+                        displacement.y += p.vy;
+                    }
+                    preparedDisplacements.put(p, displacement);
                 } else {
                     updatePlayerPhysics(p);
                 }

@@ -15,6 +15,9 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -31,13 +34,14 @@ import java.util.function.Consumer;
  */
 public class GameServer {
 
-    public static final double TPS = 120;
-    /** 物理仍保持120Hz；网络快照独立为30Hz，由客户端在165Hz渲染时插值。 */
+    /** CS2-style authoritative simulation cadence. Input events retain sub-tick timing. */
+    public static final double TPS = 60;
+    /** 网络快照保持30Hz，避免把每客户端约2Mbps的现有带宽直接翻倍。 */
     static final int NETWORK_SNAPSHOT_HZ = 30;
     static final int TICKS_PER_NETWORK_SNAPSHOT = (int) (TPS / NETWORK_SNAPSHOT_HZ);
     /** 防止一次调度抖动触发无限历史Tick补算。 */
     static final int MAX_CATCH_UP_TICKS = 4;
-    public static final int PROTOCOL_VERSION = 2;
+    public static final int PROTOCOL_VERSION = 3;
     private static final long CLIENT_TIMEOUT_MS = 10000;
     private static final long TIMEOUT_CHECK_INTERVAL_MS = 2000;
     private static final int MAX_INVALID_PACKETS = 10;
@@ -57,6 +61,8 @@ public class GameServer {
     private NetworkBroadcaster networkBroadcaster;
     private final String sessionId = UUID.randomUUID().toString();
     private final ConcurrentLinkedQueue<Runnable> gameCommandQueue = new ConcurrentLinkedQueue<>();
+    /** 每名玩家独立的有界Sub-tick输入邮箱；只由游戏主线程实际读写。 */
+    private final ConcurrentHashMap<String, SubtickInputBuffer> subtickInputBuffers = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<InetSocketAddress, String> addressToPlayerId = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, InetSocketAddress> playerIdToAddress = new ConcurrentHashMap<>();
@@ -382,6 +388,12 @@ public class GameServer {
                 JsonObject validatedInput = validatePlayerInput(json);
                 enqueueGameCommand(() -> gameState.updatePlayerInput(playerId, validatedInput));
                 break;
+            case "inputBatch":
+                List<SubtickInputCommand> commands = validateSubtickInputBatch(json);
+                enqueueGameCommand(() -> subtickInputBuffers
+                        .computeIfAbsent(playerId, ignored -> new SubtickInputBuffer())
+                        .offerAll(commands));
+                break;
             case "dropC4":
                 enqueueGameCommand(() -> gameState.playerDropC4(playerId));
                 break;
@@ -475,6 +487,32 @@ public class GameServer {
         return validated;
     }
 
+    static List<SubtickInputCommand> validateSubtickInputBatch(JsonObject json) {
+        JsonElement commandsElement = json.get("commands");
+        if (commandsElement == null || !commandsElement.isJsonArray())
+            throw new IllegalArgumentException("字段 commands 必须是数组");
+        JsonArray commands = commandsElement.getAsJsonArray();
+        if (commands.isEmpty() || commands.size() > 32)
+            throw new IllegalArgumentException("字段 commands 数量必须在1到32之间");
+
+        List<SubtickInputCommand> validated = new ArrayList<>(commands.size());
+        for (JsonElement element : commands) {
+            if (!element.isJsonArray() || element.getAsJsonArray().size() != 8)
+                throw new IllegalArgumentException("commands 元素必须是固定8项数组");
+            JsonArray command = element.getAsJsonArray();
+            validated.add(new SubtickInputCommand(
+                    requireLong(command, 0, 0, Long.MAX_VALUE),
+                    requireLong(command, 1, 0, Long.MAX_VALUE),
+                    requireInt(command, 2, 0, SubtickInputCommand.MAX_SUB_TICK),
+                    requireLong(command, 3, 0, Long.MAX_VALUE),
+                    requireFiniteDouble(command, 4),
+                    requireInt(command, 5, 0, SubtickInputCommand.KNOWN_BUTTON_MASK),
+                    requireInt(command, 6, 0, SubtickInputCommand.KNOWN_BUTTON_MASK),
+                    requireInt(command, 7, 0, SubtickInputCommand.KNOWN_BUTTON_MASK)));
+        }
+        return List.copyOf(validated);
+    }
+
     private static String requireString(JsonObject json, String field, int maxLength) {
         JsonElement value = json.get(field);
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
@@ -496,6 +534,55 @@ public class GameServer {
         int result = value.getAsInt();
         if (result < min || result > max)
             throw new IllegalArgumentException("字段 " + field + " 超出范围");
+        return result;
+    }
+
+    private static long requireLong(JsonObject json, String field, long min, long max) {
+        JsonElement value = json.get(field);
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IllegalArgumentException("字段 " + field + " 必须是整数");
+        double numeric = value.getAsDouble();
+        if (!Double.isFinite(numeric) || numeric != Math.rint(numeric))
+            throw new IllegalArgumentException("字段 " + field + " 必须是整数");
+        long result = value.getAsLong();
+        if (result < min || result > max)
+            throw new IllegalArgumentException("字段 " + field + " 超出范围");
+        return result;
+    }
+
+    private static int requireInt(JsonArray json, int index, int min, int max) {
+        JsonElement value = json.get(index);
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IllegalArgumentException("commands[" + index + "] 必须是整数");
+        double numeric = value.getAsDouble();
+        if (!Double.isFinite(numeric) || numeric != Math.rint(numeric))
+            throw new IllegalArgumentException("commands[" + index + "] 必须是整数");
+        int result = value.getAsInt();
+        if (result < min || result > max)
+            throw new IllegalArgumentException("commands[" + index + "] 超出范围");
+        return result;
+    }
+
+    private static long requireLong(JsonArray json, int index, long min, long max) {
+        JsonElement value = json.get(index);
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IllegalArgumentException("commands[" + index + "] 必须是整数");
+        double numeric = value.getAsDouble();
+        if (!Double.isFinite(numeric) || numeric != Math.rint(numeric))
+            throw new IllegalArgumentException("commands[" + index + "] 必须是整数");
+        long result = value.getAsLong();
+        if (result < min || result > max)
+            throw new IllegalArgumentException("commands[" + index + "] 超出范围");
+        return result;
+    }
+
+    private static double requireFiniteDouble(JsonArray json, int index) {
+        JsonElement value = json.get(index);
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
+            throw new IllegalArgumentException("commands[" + index + "] 必须是数字");
+        double result = value.getAsDouble();
+        if (!Double.isFinite(result))
+            throw new IllegalArgumentException("commands[" + index + "] 必须是有限数字");
         return result;
     }
 
@@ -650,11 +737,15 @@ public class GameServer {
             while (delta >= 1 && catchUpTicks < MAX_CATCH_UP_TICKS) {
                 long tickWorkStartedAt = System.nanoTime();
                 drainGameCommands();
+                gameState.clearSubtickInputIntents();
+                applyBufferedSubtickInputs();
                 gameState.update();
                 simulationTick++;
                 delta -= 1;
-                if (networkBroadcaster != null && shouldBroadcastNetworkSnapshot(simulationTick))
+                if (networkBroadcaster != null && shouldBroadcastNetworkSnapshot(simulationTick)) {
                     networkBroadcaster.broadcast(simulationTick);
+                    sendInputAcknowledgements(simulationTick);
+                }
                 tickWorkTimeSum += System.nanoTime() - tickWorkStartedAt;
                 tickWorkCount++;
                 catchUpTicks++;
@@ -685,6 +776,34 @@ public class GameServer {
         if (!Double.isFinite(delta) || delta <= MAX_CATCH_UP_TICKS)
             return 0;
         return Math.max(0L, (long) Math.floor(delta) - MAX_CATCH_UP_TICKS);
+    }
+
+    private void applyBufferedSubtickInputs() {
+        for (Map.Entry<String, SubtickInputBuffer> entry : subtickInputBuffers.entrySet()) {
+            List<SubtickInputCommand> commands = entry.getValue().drainOrdered();
+            if (!commands.isEmpty())
+                gameState.applySubtickInputs(entry.getKey(), commands);
+        }
+    }
+
+    private void sendInputAcknowledgements(long simulationTick) {
+        long serverTimeNanos = System.nanoTime();
+        for (Map.Entry<String, SubtickInputBuffer> entry : subtickInputBuffers.entrySet()) {
+            long acknowledgedSequence = entry.getValue().lastAppliedSequence();
+            if (acknowledgedSequence < 0)
+                continue;
+            InetSocketAddress address = playerIdToAddress.get(entry.getKey());
+            if (address == null)
+                continue;
+            JsonObject ack = new JsonObject();
+            ack.addProperty("type", "input_ack");
+            ack.addProperty("protocolVersion", PROTOCOL_VERSION);
+            ack.addProperty("sessionId", sessionId);
+            ack.addProperty("ackSequence", acknowledgedSequence);
+            ack.addProperty("serverTick", simulationTick);
+            ack.addProperty("serverTimeNanos", serverTimeNanos);
+            send(gson.toJson(ack), address);
+        }
     }
 
     public double getPerfTimeNetworkSend() {
@@ -731,6 +850,7 @@ public class GameServer {
     private void handleDisconnect(InetSocketAddress address) {
         String playerId = addressToPlayerId.remove(address);
         if (playerId != null) {
+            subtickInputBuffers.remove(playerId);
             playerIdToAddress.remove(playerId);
             clientLastSeen.remove(address);
             playerBytesSentInInterval.remove(playerId);

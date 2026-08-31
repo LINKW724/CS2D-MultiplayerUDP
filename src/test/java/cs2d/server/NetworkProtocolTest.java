@@ -26,7 +26,7 @@ class NetworkProtocolTest {
     void chunksPreserveOrderingMetadata() {
         JsonObject state = new JsonObject();
         state.addProperty("type", "full_update");
-        state.addProperty("protocolVersion", 2);
+        state.addProperty("protocolVersion", 3);
         state.addProperty("sessionId", "session-a");
         state.addProperty("sequence", 42L);
         state.addProperty("serverTick", 120L);
@@ -38,7 +38,7 @@ class NetworkProtocolTest {
         assertFalse(chunks.isEmpty());
         for (String encodedChunk : chunks) {
             JsonObject chunk = gson.fromJson(encodedChunk, JsonObject.class);
-            assertEquals(2, chunk.get("protocolVersion").getAsInt());
+            assertEquals(3, chunk.get("protocolVersion").getAsInt());
             assertEquals("session-a", chunk.get("sessionId").getAsString());
             assertEquals(42L, chunk.get("sequence").getAsLong());
             assertEquals(120L, chunk.get("serverTick").getAsLong());
