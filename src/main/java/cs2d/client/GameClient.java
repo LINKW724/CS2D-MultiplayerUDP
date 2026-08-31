@@ -90,7 +90,6 @@ import javafx.scene.image.ImageView;
 import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.PixelFormat;
 import javafx.scene.image.WritableImage;
-import javafx.scene.effect.ColorAdjust;
 
 import java.nio.IntBuffer;
 
@@ -129,7 +128,8 @@ public class GameClient extends Application {
     // 使用线程安全的 ConcurrentHashMap 存储飞行中的手榴弹信息，键是ID，值是JSON数据
     private final ConcurrentHashMap<String, JsonObject> thrownGrenades = new ConcurrentHashMap<>(); // 没有使用插值法的
     private Image flashbangSnapshot = null;// 闪光视觉暂留
-    private final ColorAdjust desaturateEffect = new ColorAdjust();
+    /** 闪光残影复用固定屏幕尺寸缓冲，避免每次闪光重新分配大图。 */
+    private WritableImage flashbangSnapshotBuffer;
     private final ConcurrentHashMap<String, cs2d.client.GameClient.ClientGrenade> clientGrenades = new ConcurrentHashMap<>(); // 使用插值法的
     // 使用线程安全的 ConcurrentHashMap 存储烟雾弹颗粒的信息
 
@@ -1906,12 +1906,16 @@ public class GameClient extends Application {
     // playSound("flashbang_ring", null);
     // }
     private void triggerFlashbangEffect(long duration) {
-        // 【核心新增】在效果开始的瞬间，对Canvas进行快照
-        // 这会捕获当前帧的游戏画面，并存入我们新加的变量中
+        // 只截取1600x900动态Canvas。静态地图Atlas仍在底层正常显示；若对整个
+        // gameRenderNode同步snapshot，会强制Prism合成/回读整张大地图并造成数秒停顿。
         if (canvas != null) {
-            this.flashbangSnapshot = gameRenderNode != null
-                    ? gameRenderNode.snapshot(null, null)
-                    : canvas.snapshot(null, null);
+            if (flashbangSnapshotBuffer == null) {
+                flashbangSnapshotBuffer = new WritableImage(CANVAS_WIDTH, CANVAS_HEIGHT);
+            }
+            javafx.scene.SnapshotParameters snapshotParameters = new javafx.scene.SnapshotParameters();
+            snapshotParameters.setFill(Color.TRANSPARENT);
+            snapshotParameters.setViewport(new Rectangle2D(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT));
+            this.flashbangSnapshot = canvas.snapshot(snapshotParameters, flashbangSnapshotBuffer);
         }
 
         // 后续逻辑保持不变
@@ -3125,7 +3129,6 @@ public class GameClient extends Application {
             double afterimageAlpha = effectProgress * 0.9;
 
             gc.save();
-            gc.setEffect(desaturateEffect);
             gc.setGlobalAlpha(afterimageAlpha);
             gc.drawImage(flashbangSnapshot, 0, 0);
             gc.restore();
