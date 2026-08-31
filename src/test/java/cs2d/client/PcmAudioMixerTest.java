@@ -16,6 +16,18 @@ import org.junit.jupiter.api.Test;
 
 class PcmAudioMixerTest {
     @Test
+    void writesOnlyWhenTheWholeFrameAlignedBufferIsImmediatelyAvailable() {
+        int requestedBytes = PcmAudioMixer.FRAMES_PER_BUFFER * PcmAudioMixer.OUTPUT_FORMAT.getFrameSize();
+
+        assertTrue(PcmAudioMixer.hasImmediateWriteCapacity(requestedBytes, requestedBytes,
+                PcmAudioMixer.OUTPUT_FORMAT.getFrameSize()));
+        assertTrue(!PcmAudioMixer.hasImmediateWriteCapacity(requestedBytes - 1, requestedBytes,
+                PcmAudioMixer.OUTPUT_FORMAT.getFrameSize()));
+        assertTrue(!PcmAudioMixer.hasImmediateWriteCapacity(requestedBytes, requestedBytes - 1,
+                PcmAudioMixer.OUTPUT_FORMAT.getFrameSize()));
+    }
+
+    @Test
     void decodesAndEncodesLittleEndianPcmWithoutQualityLoss() {
         byte[] input = { 0x34, 0x12, 0x00, (byte) 0x80, (byte) 0xff, 0x7f };
         PcmAudioMixer.Sound sound = PcmAudioMixer.decodeLittleEndian16(input);

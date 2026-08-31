@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.LongAdder;
+import java.util.concurrent.locks.LockSupport;
 
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
@@ -29,6 +30,7 @@ final class PcmAudioMixer implements AutoCloseable {
     static final float SAMPLE_RATE = 48_000.0f;
     static final int CHANNELS = 2;
     static final int FRAMES_PER_BUFFER = 256;
+    private static final long OUTPUT_BACKPRESSURE_PARK_NANOS = 250_000L;
     static final AudioFormat OUTPUT_FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE, 16, CHANNELS,
             CHANNELS * Short.BYTES, SAMPLE_RATE, false);
@@ -166,15 +168,26 @@ final class PcmAudioMixer implements AutoCloseable {
         byte[] output = new byte[FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize()];
         try {
             while (running.get()) {
+                SourceDataLine line = outputLine;
+                if (line == null)
+                    break;
+                // DirectAudioDevice.write() blocks until the complete request is accepted.
+                // On Windows an audio-device backpressure episode can keep that JNI call
+                // inside nWrite() for seconds, delaying every JVM Safepoint. With a single
+                // producer, available capacity can only grow before our next write, so an
+                // entire-buffer capacity check keeps the native write non-blocking without
+                // changing sample rate, buffer contents, sound quality or playback cadence.
+                if (!hasImmediateWriteCapacity(line.available(), output.length,
+                        OUTPUT_FORMAT.getFrameSize())) {
+                    LockSupport.parkNanos(OUTPUT_BACKPRESSURE_PARK_NANOS);
+                    continue;
+                }
                 if (clearRequested.getAndSet(false))
                     voices.clear();
                 drainRequests(voices);
                 Arrays.fill(mix, 0);
                 mixVoices(voices, mix, FRAMES_PER_BUFFER);
                 encodeLittleEndian16(mix, output);
-                SourceDataLine line = outputLine;
-                if (line == null)
-                    break;
                 line.write(output, 0, output.length);
                 activeVoiceCount.set(voices.size());
             }
@@ -186,6 +199,13 @@ final class PcmAudioMixer implements AutoCloseable {
             closeLine();
             running.set(false);
         }
+    }
+
+    static boolean hasImmediateWriteCapacity(int availableBytes, int requestedBytes, int frameSize) {
+        return frameSize > 0
+                && requestedBytes > 0
+                && requestedBytes % frameSize == 0
+                && availableBytes >= requestedBytes;
     }
 
     private void drainRequests(List<Voice> voices) {
