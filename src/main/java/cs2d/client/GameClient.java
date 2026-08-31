@@ -39,7 +39,6 @@ import javafx.scene.media.AudioClip;
 import javafx.scene.paint.Color;
 // 导入 JavaFX 形状相关的类，如 SVG 路径
 import javafx.scene.shape.Rectangle;
-import javafx.scene.shape.FillRule;
 import javafx.scene.shape.SVGPath;
 import javafx.scene.transform.Affine;
 // 导入 JavaFX 文本和字体相关的类
@@ -84,6 +83,7 @@ import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.PixelBuffer;
 import javafx.scene.image.PixelFormat;
+import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
 
 import java.nio.IntBuffer;
@@ -95,7 +95,7 @@ public class GameClient extends Application {
     }
 
 
-    private static final int SUPPORTED_PROTOCOL_VERSION = 3;
+    private static final int SUPPORTED_PROTOCOL_VERSION = 4;
 
     private QuadtreeNode quadtreeRootNode; //
     private static final int QUADTREE_MAX_OBJECTS = 8; // 根据需要调整
@@ -188,10 +188,16 @@ public class GameClient extends Application {
     private String residentStaticMapMode = "canvas";
     private final Affine residentStaticMapTransform = new Affine();
     private final Affine fogLayerTransform = new Affine();
-    private Canvas fogCanvas;
-    private GraphicsContext fogGc;
-    private double[] fogPolygonX = new double[0];
-    private double[] fogPolygonY = new double[0];
+    private ImageView fogMaskView;
+    private final WritableImage[] fogMaskImages = new WritableImage[2];
+    private FogMaskRasterizer fogMaskRasterizer;
+    private volatile int displayedFogBufferIndex;
+    private final AtomicReference<FogMaskRequest> pendingFogMaskRequest = new AtomicReference<>();
+    private final AtomicReference<FogMaskResult> completedFogMask = new AtomicReference<>();
+    private final AtomicBoolean fogMaskWorkerRunning = new AtomicBoolean(false);
+    private final AtomicLong fogMaskGeneration = new AtomicLong();
+    private List<Point2D> submittedFogGeometry = List.of();
+    private Color submittedFogColor;
     private Canvas hudCanvas;
     private GraphicsContext hudGc;
     private List<Point2D> rasterizedFogGeometry = List.of();
@@ -203,6 +209,11 @@ public class GameClient extends Application {
     private Color fogRasterColor;
     private long perfFogRasterizations;
     private long perfFogTransformOnlyFrames;
+    private final LongAdder perfFogMaskRequests = new LongAdder();
+    private final LongAdder perfFogMaskReplacements = new LongAdder();
+    private final LongAdder perfFogMaskPublished = new LongAdder();
+    private final LongAdder perfFogMaskBackgroundNanos = new LongAdder();
+    private final LongAdder perfFogMaskDirtyPixels = new LongAdder();
     private Node gameRenderNode;
     private volatile boolean residentStaticMapReady = false;
     private int residentVisibleTileCount = 0;
@@ -545,6 +556,11 @@ public class GameClient extends Application {
     private final ExecutorService fovExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "FOV-Calculator-Thread");
         t.setDaemon(true); // 设为守护线程
+        return t;
+    });
+    private final ExecutorService fogMaskExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "Fog-Mask-Rasterizer");
+        t.setDaemon(true);
         return t;
     });
     private final ExecutorService staticViewportExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -951,6 +967,7 @@ public class GameClient extends Application {
 
         // --- 关闭 FOV 线程池 ---
         fovExecutor.shutdownNow();
+        fogMaskExecutor.shutdownNow();
         staticViewportExecutor.shutdownNow();
         pcmAudioMixer.close();
 
@@ -2047,6 +2064,18 @@ public class GameClient extends Application {
 
     // 根据增量的游戏状态更新本地数据
     private void updateStateFromSmall(JsonObject state) {
+        // v4 紧凑字段级增量：[id,vx,vy,angle,health,isAlive,spectatorMode,
+        // spectatorTargetId,isShooting,isReloading,predictedRecoilAngle]。
+        if (state.has("playersDelta") && !state.get("playersDelta").isJsonNull()) {
+            state.getAsJsonArray("playersDelta").forEach(pEl -> {
+                JsonArray row = pEl.getAsJsonArray();
+                if (row.size() < 11 || row.get(0).isJsonNull())
+                    return;
+                ClientPlayer cPlayer = clientPlayers.get(row.get(0).getAsString());
+                if (cPlayer != null)
+                    cPlayer.updatePackedDynamic(row);
+            });
+        }
         // 正常更新玩家的动态数据（位置、角度等）
         if (state.has("players") && !state.get("players").isJsonNull()) {
             state.getAsJsonArray("players").forEach(pEl -> {
@@ -2068,6 +2097,19 @@ public class GameClient extends Application {
                     if (cZombie != null) {
                         cZombie.updateDynamic(zData); // 调用动态更新方法
                     }
+                });
+            }
+        }
+
+        if (state.has("zombiesDelta")) {
+            synchronized (clientZombies) {
+                state.getAsJsonArray("zombiesDelta").forEach(zEl -> {
+                    JsonArray row = zEl.getAsJsonArray();
+                    if (row.size() < 5 || row.get(0).isJsonNull())
+                        return;
+                    ClientPlayer cZombie = clientZombies.get(row.get(0).getAsString());
+                    if (cZombie != null)
+                        cZombie.updatePackedDynamic(row);
                 });
             }
         }
@@ -2447,6 +2489,11 @@ public class GameClient extends Application {
                         long spriteBuilds = perfSpriteBuilds;
                         long fogRasterizations = perfFogRasterizations;
                         long fogTransformOnlyFrames = perfFogTransformOnlyFrames;
+                        long fogMaskRequests = perfFogMaskRequests.sumThenReset();
+                        long fogMaskReplacements = perfFogMaskReplacements.sumThenReset();
+                        long fogMaskPublished = perfFogMaskPublished.sumThenReset();
+                        long fogMaskBackgroundNanos = perfFogMaskBackgroundNanos.sumThenReset();
+                        long fogMaskDirtyPixels = perfFogMaskDirtyPixels.sumThenReset();
                         int playerSpriteCacheSize = playerSpriteCache.size();
                         int droppedWeaponSpriteCacheSize = droppedWeaponSpriteCache.size();
                         boolean staticViewportActive = residentViewportActive;
@@ -2498,6 +2545,13 @@ public class GameClient extends Application {
                                     fogRasterizations + fogTransformOnlyFrames == 0 ? 0.0
                                             : fogTransformOnlyFrames * 100.0
                                                     / (fogRasterizations + fogTransformOnlyFrames));
+                            System.out.printf("  [FOG-MASK] 请求 %d | 发布 %d | 覆盖 %d | 后台 %.3f ms"
+                                            + " | 平均脏区 %.1f Kpix%n",
+                                    fogMaskRequests, fogMaskPublished, fogMaskReplacements,
+                                    fogMaskPublished == 0 ? 0.0
+                                            : fogMaskBackgroundNanos / (double) fogMaskPublished / 1_000_000.0,
+                                    fogMaskPublished == 0 ? 0.0
+                                            : fogMaskDirtyPixels / (double) fogMaskPublished / 1000.0);
                             System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
                             System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
                             System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
@@ -2713,6 +2767,16 @@ public class GameClient extends Application {
     private record FovComputationResult(List<Point2D> points, long totalNanos, long queryNanos,
             long edgeExtractNanos, long intersectionNanos, int candidateObstacles,
             int rawVertices, int finalVertices) {
+    }
+
+    private record FogMaskRequest(long generation, List<Point2D> geometry, Color color, int argbPre,
+            double cameraX, double cameraY, double cameraScale,
+            double cameraOffsetX, double cameraOffsetY,
+            double[] polygonX, double[] polygonY) {
+    }
+
+    private record FogMaskResult(FogMaskRequest request, int bufferIndex,
+            FogMaskRasterizer.DirtyRegion dirtyRegion, long backgroundNanos, long touchedPixels) {
     }
 
     /** JavaFX线程只发布最新视角；单一后台worker顺序计算，并自动跳过中间过期请求。 */
@@ -5341,17 +5405,21 @@ public class GameClient extends Application {
         gc = canvas.getGraphicsContext2D(); // 获取画布的图形上下文
         double fogWidth = CANVAS_WIDTH + FOG_TEXTURE_MARGIN * 2.0;
         double fogHeight = CANVAS_HEIGHT + FOG_TEXTURE_MARGIN * 2.0;
-        fogCanvas = new Canvas(fogWidth, fogHeight);
-        fogCanvas.setManaged(false);
-        fogCanvas.setMouseTransparent(true);
-        fogCanvas.setVisible(false);
-        fogCanvas.getTransforms().setAll(fogLayerTransform);
-        fogGc = fogCanvas.getGraphicsContext2D();
+        int fogPixelWidth = (int) Math.ceil(fogWidth);
+        int fogPixelHeight = (int) Math.ceil(fogHeight);
+        fogMaskRasterizer = new FogMaskRasterizer(fogPixelWidth, fogPixelHeight);
+        fogMaskImages[0] = new WritableImage(fogPixelWidth, fogPixelHeight);
+        fogMaskImages[1] = new WritableImage(fogPixelWidth, fogPixelHeight);
+        fogMaskView = new ImageView(fogMaskImages[0]);
+        fogMaskView.setManaged(false);
+        fogMaskView.setMouseTransparent(true);
+        fogMaskView.setVisible(false);
+        fogMaskView.getTransforms().setAll(fogLayerTransform);
         hudCanvas = new Canvas(CANVAS_WIDTH, CANVAS_HEIGHT);
         hudCanvas.setManaged(false);
         hudCanvas.setMouseTransparent(true);
         hudGc = hudCanvas.getGraphicsContext2D();
-        System.out.println("[Render] Fog pipeline: retained canvas mask + camera transform");
+        System.out.println("[Render] Fog pipeline: background double-buffer mask + dirty-region upload");
         Pane renderPane = new Pane();
         if (USE_RESIDENT_STATIC_MAP_LAYER) {
             residentStaticMapLayer = new Group();
@@ -5363,7 +5431,7 @@ public class GameClient extends Application {
         } else {
             System.out.println("[Render] Static map layer: Canvas fallback (enable with -Dcs2d.staticMapLayer=true)");
         }
-        renderPane.getChildren().addAll(canvas, fogCanvas, hudCanvas);
+        renderPane.getChildren().addAll(canvas, fogMaskView, hudCanvas);
         renderPane.setMinSize(CANVAS_WIDTH, CANVAS_HEIGHT);
         renderPane.setPrefSize(CANVAS_WIDTH, CANVAS_HEIGHT);
         renderPane.setMaxSize(CANVAS_WIDTH, CANVAS_HEIGHT);
@@ -8009,6 +8077,14 @@ public class GameClient extends Application {
             this.predictedRecoilAngle = getDouble(currentData, "predictedRecoilAngle");
         }
 
+        /** 合并 v4 数组式字段增量，避免在线路上重复几十次 JSON 字段名。 */
+        synchronized void updatePackedDynamic(JsonArray row) {
+            JsonObject delta = decodePackedDynamic(row);
+            if (delta == null)
+                return;
+            updateDynamic(delta);
+        }
+
         synchronized void mutateData(Consumer<JsonObject> mutation) {
             JsonObject updated = data == null ? new JsonObject() : data.deepCopy();
             mutation.accept(updated);
@@ -8161,10 +8237,9 @@ public class GameClient extends Application {
         long queryStartTime = System.nanoTime();
         fovCandidateObstacles.clear();
         if (quadtreeRootNode != null) {
-            Rectangle2D fovBounds = new Rectangle2D(
-                    sourcePos.getX() - FOV_RAY_LENGTH, sourcePos.getY() - FOV_RAY_LENGTH,
-                    FOV_RAY_LENGTH * 2, FOV_RAY_LENGTH * 2);
-            quadtreeRootNode.queryBounds(fovCandidateObstacles, fovBounds);
+            quadtreeRootNode.queryFov(fovCandidateObstacles,
+                    sourcePos.getX(), sourcePos.getY(), sourceAngle,
+                    FOV_RADIANS / 2.0, FOV_ANGLE_STEP, FOV_RAY_COUNT, FOV_RAY_LENGTH);
         }
         // 查询结果可能覆盖全图；一次性计算每个障碍物可能覆盖的离散射线范围并缓存。
         // 旧路径先做视锥判断，求交前又重复计算同一组中心/距离/角半径数据。
@@ -8266,24 +8341,58 @@ public class GameClient extends Application {
         return Math.abs(relativeAngle) <= halfFovRadians + angularRadius;
     }
 
-    /** 返回障碍物包围圆可能覆盖的首尾射线索引，未覆盖任何离散射线时返回-1。 */
+    /**
+     * 返回障碍物 AABB 可能覆盖的首尾射线索引，未覆盖任何离散射线时返回 -1。
+     * 相比包围圆，角域更紧；仍是保守判定，最终边缘求交算法和射线数均不变。
+     */
     static long fovRayIndexRange(Rectangle2D bounds, double sourceX, double sourceY,
             double sourceAngle, double halfFovRadians, double angleStep, int rayCount, double rayLength) {
         if (bounds == null || rayCount <= 0 || angleStep <= 0)
             return -1L;
+
+        double nearestX = Math.max(bounds.getMinX(), Math.min(sourceX, bounds.getMaxX()));
+        double nearestY = Math.max(bounds.getMinY(), Math.min(sourceY, bounds.getMaxY()));
+        double nearestDx = nearestX - sourceX;
+        double nearestDy = nearestY - sourceY;
+        if (nearestDx * nearestDx + nearestDy * nearestDy > rayLength * rayLength)
+            return -1L;
+        if (bounds.contains(sourceX, sourceY))
+            return packRayRange(0, rayCount - 1);
+
         double centerX = (bounds.getMinX() + bounds.getMaxX()) * 0.5;
         double centerY = (bounds.getMinY() + bounds.getMaxY()) * 0.5;
-        double radius = Math.hypot(bounds.getWidth(), bounds.getHeight()) * 0.5;
-        return fovRayIndexRange(centerX, centerY, radius, sourceX, sourceY,
-                sourceAngle, halfFovRadians, angleStep, rayCount, rayLength);
+        double centerRelative = normalizeAngle(Math.atan2(centerY - sourceY, centerX - sourceX) - sourceAngle);
+        double minimumAngle = Double.POSITIVE_INFINITY;
+        double maximumAngle = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < 4; i++) {
+            double cornerX = (i == 0 || i == 3) ? bounds.getMinX() : bounds.getMaxX();
+            double cornerY = i < 2 ? bounds.getMinY() : bounds.getMaxY();
+            double relative = normalizeAngle(Math.atan2(cornerY - sourceY, cornerX - sourceX) - sourceAngle);
+            while (relative - centerRelative > Math.PI)
+                relative -= TWO_PI;
+            while (relative - centerRelative < -Math.PI)
+                relative += TWO_PI;
+            minimumAngle = Math.min(minimumAngle, relative);
+            maximumAngle = Math.max(maximumAngle, relative);
+        }
+
+        minimumAngle = Math.max(-halfFovRadians, minimumAngle);
+        maximumAngle = Math.min(halfFovRadians, maximumAngle);
+        if (minimumAngle > maximumAngle)
+            return -1L;
+
+        int first = Math.max(0, (int) Math.ceil((minimumAngle + halfFovRadians) / angleStep - 1.0e-12));
+        int last = Math.min(rayCount - 1,
+                (int) Math.floor((maximumAngle + halfFovRadians) / angleStep + 1.0e-12));
+        return first <= last ? packRayRange(first, last) : -1L;
     }
 
     private static long fovRayIndexRange(StaticObstacle obstacle, double sourceX, double sourceY,
             double sourceAngle, double halfFovRadians, double angleStep, int rayCount, double rayLength) {
         if (obstacle == null || rayCount <= 0 || angleStep <= 0)
             return -1L;
-        return fovRayIndexRange(obstacle.centerX, obstacle.centerY, obstacle.boundingRadius,
-                sourceX, sourceY, sourceAngle, halfFovRadians, angleStep, rayCount, rayLength);
+        return fovRayIndexRange(obstacle.bounds, sourceX, sourceY, sourceAngle,
+                halfFovRadians, angleStep, rayCount, rayLength);
     }
 
     private static long fovRayIndexRange(double centerX, double centerY, double radius,
@@ -8553,65 +8662,123 @@ public class GameClient extends Application {
     }
 
     /**
-     * 使用持久Canvas承载迷雾像素遮罩。新的FOV快照只更新一次纹理；中间显示帧
-     * 只更新仿射变换，避免JavaFX Path在Prism线程中反复触发全屏Marlin光栅化。
+     * FX线程只提交最新几何并消费已经完成的像素缓冲；扫描转换、抗锯齿和脏区恢复
+     * 全部在单一后台worker中执行。前景继续显示上一张完整遮罩，不出现半帧或撕裂。
      */
     private void updateCachedFogLayer(List<Point2D> currentFovPoints) {
-        if (fogCanvas == null || fogGc == null || currentFovPoints == null || currentFovPoints.isEmpty()) {
+        applyCompletedFogMask();
+        if (fogMaskView == null || fogMaskRasterizer == null
+                || currentFovPoints == null || currentFovPoints.isEmpty()) {
             clearCachedFogLayer();
             return;
         }
 
         Color fogColor = currentFogColor();
-        boolean geometryChanged = currentFovPoints != rasterizedFogGeometry
-                || !Objects.equals(fogColor, fogRasterColor)
-                || !cachedFogTransformCoversViewport();
-        if (geometryChanged) {
-            updateFogMaskGeometry(currentFovPoints, fogColor);
-            perfFogRasterizations++;
+        boolean workInFlight = pendingFogMaskRequest.get() != null || completedFogMask.get() != null
+                || fogMaskWorkerRunning.get();
+        boolean geometryChanged = currentFovPoints != submittedFogGeometry
+                || !Objects.equals(fogColor, submittedFogColor);
+        boolean appliedMaskNoLongerCoversView = !cachedFogTransformCoversViewport();
+        if (geometryChanged || (appliedMaskNoLongerCoversView && !workInFlight)) {
+            submitFogMaskRequest(currentFovPoints, fogColor);
         } else {
             perfFogTransformOnlyFrames++;
         }
-        updateFogLayerTransform();
-        setVisibleIfChanged(fogCanvas, true);
+
+        if (!rasterizedFogGeometry.isEmpty()) {
+            updateFogLayerTransform();
+            setVisibleIfChanged(fogMaskView, true);
+        }
     }
 
-    private void updateFogMaskGeometry(List<Point2D> currentFovPoints, Color fogColor) {
-        fogRasterCameraX = camera.x;
-        fogRasterCameraY = camera.y;
-        fogRasterScale = Math.max(camera.scale, 0.0001);
-        fogRasterOffsetX = camera.offsetX;
-        fogRasterOffsetY = camera.offsetY;
-
+    private void submitFogMaskRequest(List<Point2D> currentFovPoints, Color fogColor) {
+        double requestCameraX = camera.x;
+        double requestCameraY = camera.y;
+        double requestScale = Math.max(camera.scale, 0.0001);
+        double requestOffsetX = camera.offsetX;
+        double requestOffsetY = camera.offsetY;
         int pointCount = currentFovPoints.size();
-        if (fogPolygonX.length < pointCount) {
-            fogPolygonX = new double[pointCount];
-            fogPolygonY = new double[pointCount];
-        }
+        double[] polygonX = new double[pointCount];
+        double[] polygonY = new double[pointCount];
         for (int i = 0; i < pointCount; i++) {
             Point2D point = currentFovPoints.get(i);
-            fogPolygonX[i] = fogScreenCoordinate(point.getX(), fogRasterCameraX,
-                    fogRasterScale, fogRasterOffsetX);
-            fogPolygonY[i] = fogScreenCoordinate(point.getY(), fogRasterCameraY,
-                    fogRasterScale, fogRasterOffsetY);
+            polygonX[i] = fogScreenCoordinate(point.getX(), requestCameraX, requestScale, requestOffsetX);
+            polygonY[i] = fogScreenCoordinate(point.getY(), requestCameraY, requestScale, requestOffsetY);
         }
 
-        fogGc.setTransform(1, 0, 0, 1, 0, 0);
-        fogGc.clearRect(0, 0, fogCanvas.getWidth(), fogCanvas.getHeight());
-        fogGc.setFill(fogColor);
-        fogGc.setFillRule(FillRule.EVEN_ODD);
-        fogGc.beginPath();
-        fogGc.rect(0, 0, fogCanvas.getWidth(), fogCanvas.getHeight());
-        if (pointCount >= 3) {
-            fogGc.moveTo(fogPolygonX[0], fogPolygonY[0]);
-            for (int i = 1; i < pointCount; i++)
-                fogGc.lineTo(fogPolygonX[i], fogPolygonY[i]);
-            fogGc.closePath();
+        FogMaskRequest request = new FogMaskRequest(fogMaskGeneration.get(), currentFovPoints,
+                fogColor, toArgbPre(fogColor), requestCameraX, requestCameraY, requestScale,
+                requestOffsetX, requestOffsetY, polygonX, polygonY);
+        FogMaskRequest replaced = pendingFogMaskRequest.getAndSet(request);
+        perfFogMaskRequests.increment();
+        if (replaced != null)
+            perfFogMaskReplacements.increment();
+        submittedFogGeometry = currentFovPoints;
+        submittedFogColor = fogColor;
+        ensureFogMaskWorkerRunning();
+    }
+
+    private void ensureFogMaskWorkerRunning() {
+        if (fogMaskRasterizer == null || completedFogMask.get() != null
+                || !fogMaskWorkerRunning.compareAndSet(false, true))
+            return;
+        try {
+            fogMaskExecutor.execute(this::drainFogMaskRequests);
+        } catch (RejectedExecutionException ignored) {
+            fogMaskWorkerRunning.set(false);
         }
-        fogGc.fill();
-        fogGc.setFillRule(FillRule.NON_ZERO);
-        rasterizedFogGeometry = currentFovPoints;
-        fogRasterColor = fogColor;
+    }
+
+    private void drainFogMaskRequests() {
+        try {
+            FogMaskRequest request = pendingFogMaskRequest.getAndSet(null);
+            if (request == null || completedFogMask.get() != null)
+                return;
+            int targetBuffer = 1 - displayedFogBufferIndex;
+            long startedAt = System.nanoTime();
+            FogMaskRasterizer.RenderResult rendered = fogMaskRasterizer.render(targetBuffer,
+                    request.polygonX(), request.polygonY(), request.polygonX().length, request.argbPre());
+            long elapsed = System.nanoTime() - startedAt;
+            completedFogMask.set(new FogMaskResult(request, targetBuffer,
+                    rendered.dirtyRegion(), elapsed, rendered.touchedPixels()));
+            perfFogMaskBackgroundNanos.add(elapsed);
+            perfFogMaskDirtyPixels.add(rendered.dirtyRegion().pixelCount());
+        } finally {
+            fogMaskWorkerRunning.set(false);
+            if (completedFogMask.get() == null && pendingFogMaskRequest.get() != null)
+                ensureFogMaskWorkerRunning();
+        }
+    }
+
+    /** FX线程中的唯一纹理写入点。每次提交一个完整后台结果，然后原子切换Image。 */
+    private void applyCompletedFogMask() {
+        FogMaskResult completed = completedFogMask.getAndSet(null);
+        if (completed == null)
+            return;
+        FogMaskRequest request = completed.request();
+        if (request.generation() == fogMaskGeneration.get()) {
+            FogMaskRasterizer.DirtyRegion dirty = completed.dirtyRegion();
+            if (!dirty.isEmpty()) {
+                int bufferIndex = completed.bufferIndex();
+                PixelWriter writer = fogMaskImages[bufferIndex].getPixelWriter();
+                writer.setPixels(dirty.x(), dirty.y(), dirty.width(), dirty.height(),
+                        PixelFormat.getIntArgbPreInstance(), fogMaskRasterizer.pixels(bufferIndex),
+                        dirty.y() * fogMaskRasterizer.width() + dirty.x(), fogMaskRasterizer.width());
+                fogMaskView.setImage(fogMaskImages[bufferIndex]);
+                displayedFogBufferIndex = bufferIndex;
+            }
+            fogRasterCameraX = request.cameraX();
+            fogRasterCameraY = request.cameraY();
+            fogRasterScale = request.cameraScale();
+            fogRasterOffsetX = request.cameraOffsetX();
+            fogRasterOffsetY = request.cameraOffsetY();
+            rasterizedFogGeometry = request.geometry();
+            fogRasterColor = request.color();
+            perfFogRasterizations++;
+            perfFogMaskPublished.increment();
+        }
+        if (pendingFogMaskRequest.get() != null)
+            ensureFogMaskWorkerRunning();
     }
 
     private static double fogScreenCoordinate(double worldCoordinate, double rasterCameraOrigin,
@@ -8652,12 +8819,25 @@ public class GameClient extends Application {
     }
 
     private void clearCachedFogLayer() {
-        if (fogCanvas == null)
+        if (fogMaskView == null)
             return;
-        if (fogCanvas.isVisible())
-            fogCanvas.setVisible(false);
+        if (fogMaskView.isVisible())
+            fogMaskView.setVisible(false);
+        fogMaskGeneration.incrementAndGet();
+        pendingFogMaskRequest.set(null);
+        completedFogMask.set(null);
+        submittedFogGeometry = List.of();
+        submittedFogColor = null;
         rasterizedFogGeometry = List.of();
         fogRasterColor = null;
+    }
+
+    static int toArgbPre(Color color) {
+        int alpha = (int) Math.round(color.getOpacity() * 255.0);
+        int red = ((int) Math.round(color.getRed() * 255.0) * alpha + 127) / 255;
+        int green = ((int) Math.round(color.getGreen() * 255.0) * alpha + 127) / 255;
+        int blue = ((int) Math.round(color.getBlue() * 255.0) * alpha + 127) / 255;
+        return (alpha << 24) | (red << 16) | (green << 8) | blue;
     }
 
     private Color currentFogColor() {
@@ -8672,6 +8852,26 @@ public class GameClient extends Application {
         int hs = getInt(p, "totalHeadshots");
         int d = getInt(p, "deaths");
         return dmg + (k * 50) + (hs * 20) - (d * 50);
+    }
+
+    static JsonObject decodePackedDynamic(JsonArray row) {
+        if (row == null || row.size() < 5 || row.get(0).isJsonNull())
+            return null;
+        JsonObject delta = new JsonObject();
+        delta.add("id", row.get(0));
+        delta.add("vx", row.get(1));
+        delta.add("vy", row.get(2));
+        delta.add("angle", row.get(3));
+        delta.add("health", row.get(4));
+        if (row.size() >= 11) {
+            delta.add("isAlive", row.get(5));
+            delta.add("spectatorMode", row.get(6));
+            delta.add("spectatorTargetId", row.get(7));
+            delta.add("isShooting", row.get(8));
+            delta.add("isReloading", row.get(9));
+            delta.add("predictedRecoilAngle", row.get(10));
+        }
+        return delta;
     }
 
     private static boolean isStatKey(String key) {

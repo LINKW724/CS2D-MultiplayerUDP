@@ -234,4 +234,36 @@ public class QuadtreeNode {
 
         return returnObjects;
     }
+
+    /**
+     * 直接按离散 FOV 射线覆盖范围遍历四叉树。节点边界连一条射线都不可能命中时，
+     * 整棵子树都会被跳过；判断是保守的，不会牺牲遮挡精度。
+     */
+    public List<GameClient.StaticObstacle> queryFov(List<GameClient.StaticObstacle> returnObjects,
+            double sourceX, double sourceY, double sourceAngle, double halfFovRadians,
+            double angleStep, int rayCount, double rayLength) {
+        if (GameClient.fovRayIndexRange(bounds, sourceX, sourceY, sourceAngle,
+                halfFovRadians, angleStep, rayCount, rayLength) < 0) {
+            return returnObjects;
+        }
+
+        for (GameClient.StaticObstacle obj : objects) {
+            if (GameClient.fovRayIndexRange(obj.bounds, sourceX, sourceY, sourceAngle,
+                    halfFovRadians, angleStep, rayCount, rayLength) >= 0) {
+                returnObjects.add(obj);
+            }
+        }
+
+        if (children[0] != null) {
+            children[0].queryFov(returnObjects, sourceX, sourceY, sourceAngle,
+                    halfFovRadians, angleStep, rayCount, rayLength);
+            children[1].queryFov(returnObjects, sourceX, sourceY, sourceAngle,
+                    halfFovRadians, angleStep, rayCount, rayLength);
+            children[2].queryFov(returnObjects, sourceX, sourceY, sourceAngle,
+                    halfFovRadians, angleStep, rayCount, rayLength);
+            children[3].queryFov(returnObjects, sourceX, sourceY, sourceAngle,
+                    halfFovRadians, angleStep, rayCount, rayLength);
+        }
+        return returnObjects;
+    }
 }

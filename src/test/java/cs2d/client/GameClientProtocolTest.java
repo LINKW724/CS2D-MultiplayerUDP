@@ -26,6 +26,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameClientProtocolTest {
     @Test
+    void packedDynamicPlayerDeltaDoesNotInventPositionFields() {
+        JsonArray row = new JsonArray();
+        row.add("player-1");
+        row.add(1.25);
+        row.add(-0.5);
+        row.add(0.75);
+        row.add(88);
+        row.add(true);
+        row.add("NONE");
+        row.add((String) null);
+        row.add(true);
+        row.add(false);
+        row.add(0.1);
+
+        JsonObject delta = GameClient.decodePackedDynamic(row);
+        assertEquals("player-1", delta.get("id").getAsString());
+        assertEquals(1.25, delta.get("vx").getAsDouble());
+        assertTrue(delta.get("spectatorTargetId").isJsonNull());
+        assertFalse(delta.has("x"));
+        assertFalse(delta.has("y"));
+    }
+
+    @Test
     void droppedItemsArePublishedAsOneCompleteImmutableSnapshot() {
         JsonArray incoming = new JsonArray();
         JsonObject first = new JsonObject();
@@ -408,7 +431,7 @@ class GameClientProtocolTest {
 
     private static JsonObject state(String sessionId, long sequence) {
         JsonObject state = new JsonObject();
-        state.addProperty("protocolVersion", 3);
+        state.addProperty("protocolVersion", 4);
         state.addProperty("sessionId", sessionId);
         state.addProperty("sequence", sequence);
         return state;
