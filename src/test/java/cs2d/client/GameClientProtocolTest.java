@@ -26,6 +26,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameClientProtocolTest {
     @Test
+    void smokePuffsArePublishedAsOneCompleteSnapshot() {
+        JsonArray first = new JsonArray();
+        JsonObject puffA = new JsonObject();
+        puffA.addProperty("id", "smoke-a");
+        first.add(puffA);
+        JsonObject puffB = new JsonObject();
+        puffB.addProperty("id", "smoke-b");
+        first.add(puffB);
+
+        Map<String, JsonObject> published = GameClient.createSmokePuffSnapshot(first);
+        assertEquals(2, published.size());
+        assertTrue(published.containsKey("smoke-a"));
+        assertTrue(published.containsKey("smoke-b"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> published.put("partial", new JsonObject()));
+        assertTrue(GameClient.createSmokePuffSnapshot(new JsonArray()).isEmpty());
+    }
+
+    @Test
     void packedDynamicPlayerDeltaDoesNotInventPositionFields() {
         JsonArray row = new JsonArray();
         row.add("player-1");

@@ -130,7 +130,8 @@ public class GameClient extends Application {
 
     private final ConcurrentHashMap<String, cs2d.client.GameClient.FireEmitter> fireEmitters = new ConcurrentHashMap<>();// 燃烧弹特效
     private long lastFrameTimeNanos = 0; // 确保燃烧弹这个变量来计算deltaTime
-    private final ConcurrentHashMap<String, JsonObject> smokePuffs = new ConcurrentHashMap<>();
+    /** 完整、原子发布的烟雾快照；渲染线程绝不会看到 clear/put 的中间空状态。 */
+    private volatile Map<String, JsonObject> smokePuffs = Map.of();
     // 闪光弹
     private double flashBangAlpha = 0.0; // 用于控制闪光弹白屏效果的透明度，范围 0.0 到 1.0
     private long flashBangFadeEndTime = 0; // 记录闪光效果应该结束的系统时间戳
@@ -1020,7 +1021,7 @@ public class GameClient extends Application {
             clientZombies.clear();
             droppedItems = Map.of();
             visualEffects.clear();
-            smokePuffs.clear();
+            smokePuffs = Map.of();
             firePatches.clear();
             pingMarkers.clear();
             clientGrenades.clear();
@@ -1366,7 +1367,7 @@ public class GameClient extends Application {
             clientZombies.clear();
             droppedItems = Map.of();
             visualEffects.clear();
-            smokePuffs.clear();
+            smokePuffs = Map.of();
             firePatches.clear();
             pingMarkers.clear();
             clientGrenades.clear();
@@ -2049,12 +2050,7 @@ public class GameClient extends Application {
         if (state.has("smokePuffs")) {
             // System.out.println("[客户端-接收] 成功接收到烟雾数据包, 包含颗粒数量: " +
             // state.getAsJsonArray("smokePuffs").size()); // 调试信息
-            smokePuffs.clear(); // 首先，清除旧的烟雾数据
-            // 然后，从服务器添加新的烟雾数据
-            state.getAsJsonArray("smokePuffs").forEach(sEl -> {
-                JsonObject sData = sEl.getAsJsonObject();
-                smokePuffs.put(getString(sData, "id"), sData); // 添加新数据
-            });
+            smokePuffs = createSmokePuffSnapshot(state.getAsJsonArray("smokePuffs"));
         }
 
         // 在最后，调用通用的状态更新方法
@@ -2118,11 +2114,7 @@ public class GameClient extends Application {
         if (state.has("smokePuffs")) {
             // System.out.println("[客户端-接收] 成功接收到烟雾数据包, 包含颗粒数量: " +
             // state.getAsJsonArray("smokePuffs").size()); // 调试信息
-            smokePuffs.clear();
-            state.getAsJsonArray("smokePuffs").forEach(sEl -> {
-                JsonObject sData = sEl.getAsJsonObject();
-                smokePuffs.put(getString(sData, "id"), sData);
-            });
+            smokePuffs = createSmokePuffSnapshot(state.getAsJsonArray("smokePuffs"));
         }
         if (state.has("firePatches")) {
             firePatches.clear();
@@ -8872,6 +8864,21 @@ public class GameClient extends Application {
             delta.add("predictedRecoilAngle", row.get(10));
         }
         return delta;
+    }
+
+    static Map<String, JsonObject> createSmokePuffSnapshot(JsonArray puffs) {
+        if (puffs == null || puffs.isEmpty())
+            return Map.of();
+        Map<String, JsonObject> snapshot = new LinkedHashMap<>(puffs.size());
+        for (JsonElement element : puffs) {
+            if (element == null || !element.isJsonObject())
+                continue;
+            JsonObject puff = element.getAsJsonObject();
+            String id = getString(puff, "id");
+            if (id != null && !id.isBlank())
+                snapshot.put(id, puff);
+        }
+        return snapshot.isEmpty() ? Map.of() : Collections.unmodifiableMap(snapshot);
     }
 
     private static boolean isStatKey(String key) {
