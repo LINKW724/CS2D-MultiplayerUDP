@@ -39,6 +39,18 @@ class PcmAudioMixerTest {
     }
 
     @Test
+    void batchesFourMixerBlocksWithoutChangingPcmByteOrder() {
+        byte[] batch = new byte[8];
+
+        PcmAudioMixer.copyPcmBlock(new byte[] { 1, 2 }, batch, 0);
+        PcmAudioMixer.copyPcmBlock(new byte[] { 3, 4 }, batch, 1);
+        PcmAudioMixer.copyPcmBlock(new byte[] { 5, 6 }, batch, 2);
+        PcmAudioMixer.copyPcmBlock(new byte[] { 7, 8 }, batch, 3);
+
+        assertArrayEquals(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8 }, batch);
+    }
+
+    @Test
     void decodesAndEncodesLittleEndianPcmWithoutQualityLoss() {
         byte[] input = { 0x34, 0x12, 0x00, (byte) 0x80, (byte) 0xff, 0x7f };
         PcmAudioMixer.Sound sound = PcmAudioMixer.decodeLittleEndian16(input);
