@@ -16,7 +16,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import cs2d.AIControl.BW.MapViz.DynamicPathfinderVisualizer.*; // 导入 PathType 枚举
 
 /**
@@ -59,7 +58,7 @@ public class PresetPathModule {
     private PresetPathCollection loadedCollection;
 
     private boolean isLoaded = false;
-    private Random rand = new Random(); // 每个AI拥有自己的随机数生成器
+    private String loadedMapName = "";
 
 
     /**
@@ -78,6 +77,7 @@ public class PresetPathModule {
             System.err.println("PresetPathModule: mapName 为空，无法加载。");
             return;
         }
+        this.loadedMapName = mapName;
 
         // --- [新] 缓存检查 ---
         PresetPathCollection cachedData = pathCache.get(mapName);
@@ -162,12 +162,13 @@ public class PresetPathModule {
     }
 
     /**
-     * [核心] [修改] 根据AI阵营和目标类型，随机选择一条预设的"关键点"路径
+     * 根据AI阵营和目标类型，选择一条预设的"关键点"路径。
+     * 同一地图、同一路径类型会均衡轮转，避免一批AI随机挤到同一条路线。
      * @param team AI的阵营
      * @param pathType 路径类型 (TDM_T_CT, DEMO_CT_A 等)
      * @return 一个 Point2D.Double 列表 (约10个点)，如果失败则返回 null
      */
-    public List<Point2D.Double> getRandomPresetKeyPoints(Player.Team team, PathType pathType) {
+    public List<Point2D.Double> getPresetKeyPoints(Player.Team team, PathType pathType) {
 
         if (!isLoaded || loadedCollection == null) {
             return null; // 未加载
@@ -202,15 +203,24 @@ public class PresetPathModule {
             return null; // 该类型没有路径
         }
 
-        // 1. 随机选择一条路径
-        List<Point2D.Double> chosenPathPoints = targetList.get(rand.nextInt(targetList.size()));
+        // 同一波次尽量覆盖所有地图路线，再开始下一轮。
+        int routeIndex = PresetRouteAllocator.nextRouteIndex(loadedMapName, pathType, targetList.size());
+        List<Point2D.Double> chosenPathPoints = targetList.get(routeIndex);
 
         if (chosenPathPoints == null || chosenPathPoints.isEmpty()) {
-            System.err.println("PresetPathModule: 随机选择的路径为空！");
+            System.err.println("PresetPathModule: 选择的路径为空！");
             return null;
         }
 
         // 2. 返回这个 "点列表"
         return chosenPathPoints;
+    }
+
+    /**
+     * 保留旧接口，避免其他模式或外部工具失去兼容性。
+     */
+    @Deprecated
+    public List<Point2D.Double> getRandomPresetKeyPoints(Player.Team team, PathType pathType) {
+        return getPresetKeyPoints(team, pathType);
     }
 }

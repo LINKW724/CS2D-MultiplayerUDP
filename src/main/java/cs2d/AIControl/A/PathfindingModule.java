@@ -289,7 +289,7 @@ public class PathfindingModule {
         // 4. 如果找到了合适的路径类型
         if (selectedPathType != null) {
             // 尝试获取预设路径点
-            List<Point2D.Double> keyPoints = presetPathModule.getRandomPresetKeyPoints(owner.team, selectedPathType);
+            List<Point2D.Double> keyPoints = presetPathModule.getPresetKeyPoints(owner.team, selectedPathType);
 
             if (keyPoints != null && !keyPoints.isEmpty()) {
                 // 5. 成功获取"接力赛"路径！
