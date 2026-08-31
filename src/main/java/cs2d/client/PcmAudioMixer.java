@@ -7,11 +7,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.concurrent.locks.LockSupport;
 
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
@@ -30,6 +33,9 @@ final class PcmAudioMixer implements AutoCloseable {
     static final float SAMPLE_RATE = 48_000.0f;
     static final int CHANNELS = 2;
     static final int FRAMES_PER_BUFFER = 256;
+    static final int PREBUFFER_BLOCKS = 2;
+    static final int PCM_RING_BLOCKS = PREBUFFER_BLOCKS + 1;
+    private static final int DEVICE_BUFFER_BLOCKS = 2;
     static final long BUFFER_DURATION_NANOS = Math.round(FRAMES_PER_BUFFER * 1_000_000_000.0 / SAMPLE_RATE);
     static final AudioFormat OUTPUT_FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE, 16, CHANNELS,
@@ -46,7 +52,9 @@ final class PcmAudioMixer implements AutoCloseable {
     }
 
     record Snapshot(long requestedVoices, long mixedVoices, int activeVoices,
-            int queuedVoices, int peakVoices, boolean running) {
+            int queuedVoices, int peakVoices, long underruns, int bufferedBlocks,
+            int minimumBufferedBlocks, long outputWrites, double averageWriteMillis,
+            double maximumWriteMillis, long lateWrites, boolean running) {
     }
 
     private record PlayRequest(Sound sound, float gain) {
@@ -63,15 +71,78 @@ final class PcmAudioMixer implements AutoCloseable {
         }
     }
 
+    /**
+     * Fixed reusable PCM block pool. The mixer owns blocks from the free queue,
+     * and the device writer owns blocks from the ready queue. No audio block is
+     * allocated while the game is running.
+     */
+    static final class PcmBlockRing {
+        private final ArrayBlockingQueue<byte[]> freeBlocks;
+        private final ArrayBlockingQueue<byte[]> readyBlocks;
+
+        PcmBlockRing(int blockCount, int readyBlockCount, int blockBytes) {
+            if (blockCount < 2 || readyBlockCount < 1 || readyBlockCount >= blockCount || blockBytes <= 0)
+                throw new IllegalArgumentException("Invalid PCM ring geometry");
+            freeBlocks = new ArrayBlockingQueue<>(blockCount);
+            readyBlocks = new ArrayBlockingQueue<>(readyBlockCount);
+            for (int i = 0; i < blockCount; i++)
+                freeBlocks.add(new byte[blockBytes]);
+        }
+
+        byte[] acquireForMix() throws InterruptedException {
+            return freeBlocks.take();
+        }
+
+        void publish(byte[] block) throws InterruptedException {
+            readyBlocks.put(block);
+        }
+
+        byte[] pollForWrite() {
+            return readyBlocks.poll();
+        }
+
+        byte[] awaitForWrite(long timeout, TimeUnit unit) throws InterruptedException {
+            return readyBlocks.poll(timeout, unit);
+        }
+
+        void recycle(byte[] block) {
+            if (block != null && !freeBlocks.offer(block))
+                throw new IllegalStateException("PCM block recycled twice");
+        }
+
+        void discardReady() {
+            byte[] block;
+            while ((block = readyBlocks.poll()) != null)
+                recycle(block);
+        }
+
+        int readyCount() {
+            return readyBlocks.size();
+        }
+
+        int freeCount() {
+            return freeBlocks.size();
+        }
+    }
+
     private final ConcurrentLinkedQueue<PlayRequest> requests = new ConcurrentLinkedQueue<>();
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean clearRequested = new AtomicBoolean(false);
+    private final AtomicBoolean flushRequested = new AtomicBoolean(false);
     private final LongAdder requestedVoices = new LongAdder();
     private final LongAdder mixedVoices = new LongAdder();
+    private final LongAdder underrunCount = new LongAdder();
+    private final LongAdder outputWriteCount = new LongAdder();
+    private final LongAdder outputWriteNanos = new LongAdder();
+    private final LongAdder lateWriteCount = new LongAdder();
     private final AtomicInteger activeVoiceCount = new AtomicInteger();
     private final AtomicInteger peakVoiceCount = new AtomicInteger();
+    private final AtomicInteger minimumBufferedBlocks = new AtomicInteger(PREBUFFER_BLOCKS);
+    private final AtomicLong maximumWriteNanos = new AtomicLong();
     private volatile SourceDataLine outputLine;
+    private volatile PcmBlockRing blockRing;
     private volatile Thread mixerThread;
+    private volatile Thread writerThread;
 
     boolean start() {
         if (running.get())
@@ -79,22 +150,33 @@ final class PcmAudioMixer implements AutoCloseable {
         try {
             DataLine.Info info = new DataLine.Info(SourceDataLine.class, OUTPUT_FORMAT);
             SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
-            // 4个混音块约21ms，兼顾Windows设备稳定性和枪声触发延迟。
-            line.open(OUTPUT_FORMAT, FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize() * 4);
-            line.start();
+            // 设备端保留2块（约10.7ms），Java环形缓冲再提前准备2块。
+            // 总缓冲足以覆盖Windows调度抖动，同时保持射击声音延迟在约21ms内。
+            line.open(OUTPUT_FORMAT, FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize() * DEVICE_BUFFER_BLOCKS);
             outputLine = line;
         } catch (LineUnavailableException | IllegalArgumentException e) {
             System.err.println("[PCM-MIXER] 无法打开48kHz立体声音频设备，将使用JavaFX回退: " + e.getMessage());
             return false;
         }
-
+        PcmBlockRing ring = new PcmBlockRing(PCM_RING_BLOCKS, PREBUFFER_BLOCKS,
+                FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize());
+        CountDownLatch prebufferReady = new CountDownLatch(PREBUFFER_BLOCKS);
+        blockRing = ring;
+        clearRequested.set(false);
+        flushRequested.set(false);
+        minimumBufferedBlocks.set(PREBUFFER_BLOCKS);
         running.set(true);
-        Thread thread = new Thread(this::mixLoop, "CS2D-PCM-Mixer");
-        thread.setDaemon(true);
-        thread.setPriority(Math.min(Thread.NORM_PRIORITY + 1, Thread.MAX_PRIORITY));
-        mixerThread = thread;
-        thread.start();
-        System.out.println("[PCM-MIXER] 固定混音线程已启动: 48000Hz / 16-bit / stereo");
+        Thread mixThread = new Thread(() -> mixLoop(ring, prebufferReady), "CS2D-PCM-Mixer");
+        Thread writeThread = new Thread(() -> writeLoop(ring, prebufferReady), "CS2D-PCM-Writer");
+        mixThread.setDaemon(true);
+        writeThread.setDaemon(true);
+        mixThread.setPriority(Math.min(Thread.NORM_PRIORITY + 1, Thread.MAX_PRIORITY));
+        writeThread.setPriority(Math.min(Thread.NORM_PRIORITY + 1, Thread.MAX_PRIORITY));
+        mixerThread = mixThread;
+        writerThread = writeThread;
+        mixThread.start();
+        writeThread.start();
+        System.out.println("[PCM-MIXER] 双线程环形缓冲已启动: 48000Hz / 16-bit / stereo / 256-frame");
         return true;
     }
 
@@ -152,63 +234,119 @@ final class PcmAudioMixer implements AutoCloseable {
     }
 
     Snapshot snapshotAndReset() {
+        PcmBlockRing ring = blockRing;
+        int bufferedBlocks = ring == null ? 0 : ring.readyCount();
+        int minBuffered = minimumBufferedBlocks.getAndSet(bufferedBlocks);
+        long writes = outputWriteCount.sumThenReset();
+        long writeNanos = outputWriteNanos.sumThenReset();
         return new Snapshot(requestedVoices.sumThenReset(), mixedVoices.sumThenReset(),
                 activeVoiceCount.get(), requests.size(), peakVoiceCount.getAndSet(activeVoiceCount.get()),
-                running.get());
+                underrunCount.sumThenReset(), bufferedBlocks, minBuffered, writes,
+                writes == 0 ? 0.0 : writeNanos / (double) writes / 1_000_000.0,
+                maximumWriteNanos.getAndSet(0L) / 1_000_000.0,
+                lateWriteCount.sumThenReset(), running.get());
     }
 
     void stopAll() {
         requests.clear();
         clearRequested.set(true);
+        flushRequested.set(true);
     }
 
-    private void mixLoop() {
+    private void mixLoop(PcmBlockRing ring, CountDownLatch prebufferReady) {
         List<Voice> voices = new ArrayList<>();
         int[] mix = new int[FRAMES_PER_BUFFER * CHANNELS];
-        byte[] output = new byte[FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize()];
-        long nextWriteDeadline = System.nanoTime();
         try {
             while (running.get()) {
-                SourceDataLine line = outputLine;
-                if (line == null)
+                byte[] output = ring.acquireForMix();
+                if (!running.get()) {
+                    ring.recycle(output);
                     break;
-                long now = System.nanoTime();
-                long waitNanos = nextWriteDeadline - now;
-                if (waitNanos > 0L) {
-                    LockSupport.parkNanos(waitNanos);
-                    if (!running.get())
-                        break;
-                    if (Thread.interrupted())
-                        continue;
                 }
-                now = System.nanoTime();
-                // 纯Java时钟每5.33ms提交一个256帧块。若线程被系统调度延迟，
-                // 直接从当前时间重新定相，绝不突发补写历史音频。
-                nextWriteDeadline = nextWriteDeadline(nextWriteDeadline, now, BUFFER_DURATION_NANOS);
                 if (clearRequested.getAndSet(false))
                     voices.clear();
                 drainRequests(voices);
                 Arrays.fill(mix, 0);
                 mixVoices(voices, mix, FRAMES_PER_BUFFER);
                 encodeLittleEndian16(mix, output);
-                line.write(output, 0, output.length);
                 activeVoiceCount.set(voices.size());
+                ring.publish(output);
+                if (prebufferReady.getCount() > 0)
+                    prebufferReady.countDown();
             }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         } catch (RuntimeException e) {
             if (running.get())
                 System.err.println("[PCM-MIXER] 混音线程异常: " + e.getMessage());
         } finally {
             activeVoiceCount.set(0);
-            closeLine();
-            running.set(false);
+            stopFromAudioThread(Thread.currentThread());
         }
     }
 
-    static long nextWriteDeadline(long previousDeadline, long now, long durationNanos) {
-        if (durationNanos <= 0L)
-            throw new IllegalArgumentException("durationNanos must be positive");
-        long scheduled = previousDeadline + durationNanos;
-        return scheduled <= now ? now + durationNanos : scheduled;
+    private void writeLoop(PcmBlockRing ring, CountDownLatch prebufferReady) {
+        byte[] output = null;
+        try {
+            prebufferReady.await();
+            SourceDataLine line = outputLine;
+            if (!running.get() || line == null)
+                return;
+            line.start();
+            while (running.get()) {
+                if (flushRequested.getAndSet(false)) {
+                    ring.discardReady();
+                    line.flush();
+                }
+
+                int bufferedBeforeWrite = ring.readyCount();
+                minimumBufferedBlocks.accumulateAndGet(bufferedBeforeWrite, Math::min);
+                output = ring.pollForWrite();
+                if (output == null) {
+                    underrunCount.increment();
+                    output = ring.awaitForWrite(100, TimeUnit.MILLISECONDS);
+                    if (output == null)
+                        continue;
+                }
+
+                long writeStarted = System.nanoTime();
+                int written = 0;
+                while (running.get() && written < output.length) {
+                    int count = line.write(output, written, output.length - written);
+                    if (count <= 0)
+                        break;
+                    written += count;
+                }
+                long writeNanos = System.nanoTime() - writeStarted;
+                outputWriteCount.increment();
+                outputWriteNanos.add(writeNanos);
+                maximumWriteNanos.accumulateAndGet(writeNanos, Math::max);
+                if (writeNanos > BUFFER_DURATION_NANOS * 2L)
+                    lateWriteCount.increment();
+
+                ring.recycle(output);
+                output = null;
+            }
+        } catch (InterruptedException e) {
+            if (running.get())
+                Thread.interrupted();
+        } catch (RuntimeException e) {
+            if (running.get())
+                System.err.println("[PCM-MIXER] 写入线程异常: " + e.getMessage());
+        } finally {
+            if (output != null)
+                ring.recycle(output);
+            stopFromAudioThread(Thread.currentThread());
+        }
+    }
+
+    private void stopFromAudioThread(Thread thread) {
+        if (running.compareAndSet(true, false)) {
+            Thread other = thread == mixerThread ? writerThread : mixerThread;
+            if (other != null)
+                other.interrupt();
+            closeLine();
+        }
     }
 
     private void drainRequests(List<Voice> voices) {
@@ -247,14 +385,20 @@ final class PcmAudioMixer implements AutoCloseable {
     @Override
     public void close() {
         running.set(false);
-        Thread thread = mixerThread;
-        if (thread != null)
-            thread.interrupt();
+        Thread mixer = mixerThread;
+        Thread writer = writerThread;
+        if (mixer != null)
+            mixer.interrupt();
+        if (writer != null)
+            writer.interrupt();
         closeLine();
         requests.clear();
+        PcmBlockRing ring = blockRing;
+        if (ring != null)
+            ring.discardReady();
     }
 
-    private void closeLine() {
+    private synchronized void closeLine() {
         SourceDataLine line = outputLine;
         outputLine = null;
         if (line != null) {

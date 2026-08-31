@@ -2,6 +2,7 @@ package cs2d.client;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -16,14 +17,25 @@ import org.junit.jupiter.api.Test;
 
 class PcmAudioMixerTest {
     @Test
-    void schedulesPcmWritesAtFixedCadenceWithoutCatchUpBursts() {
-        long previousDeadline = 1_000_000_000L;
-        long duration = PcmAudioMixer.BUFFER_DURATION_NANOS;
+    void reusesFixedPcmBlocksAcrossMixerAndWriter() throws Exception {
+        PcmAudioMixer.PcmBlockRing ring = new PcmAudioMixer.PcmBlockRing(3, 2, 1024);
+        byte[] first = ring.acquireForMix();
+        byte[] second = ring.acquireForMix();
 
-        assertEquals(previousDeadline + duration,
-                PcmAudioMixer.nextWriteDeadline(previousDeadline, 1_002_000_000L, duration));
-        assertEquals(1_010_000_000L + duration,
-                PcmAudioMixer.nextWriteDeadline(previousDeadline, 1_010_000_000L, duration));
+        ring.publish(first);
+        ring.publish(second);
+        assertEquals(2, ring.readyCount());
+        assertEquals(1, ring.freeCount());
+
+        byte[] writtenFirst = ring.pollForWrite();
+        assertSame(first, writtenFirst);
+        ring.recycle(writtenFirst);
+        byte[] writtenSecond = ring.pollForWrite();
+        assertSame(second, writtenSecond);
+        ring.recycle(writtenSecond);
+
+        assertEquals(0, ring.readyCount());
+        assertEquals(3, ring.freeCount());
     }
 
     @Test

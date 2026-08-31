@@ -2529,9 +2529,13 @@ public class GameClient extends Application {
                             System.out.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
                                     mediaSoundsPlayed, mediaSoundsSuppressed);
                             System.out.printf("  [AUDIO-PCM] 请求 %d | 已混音 %d | 活动 %d | 峰值 %d | 排队 %d"
+                                            + " | 缓冲 %d块/min %d | 欠载 %d | 写入 %d次 %.3f/%.3fms | 迟写 %d"
                                             + " | JavaFX回退 %d | running=%s%n",
                                     pcmSnapshot.requestedVoices(), pcmSnapshot.mixedVoices(),
                                     pcmSnapshot.activeVoices(), pcmSnapshot.peakVoices(), pcmSnapshot.queuedVoices(),
+                                    pcmSnapshot.bufferedBlocks(), pcmSnapshot.minimumBufferedBlocks(),
+                                    pcmSnapshot.underruns(), pcmSnapshot.outputWrites(), pcmSnapshot.averageWriteMillis(),
+                                    pcmSnapshot.maximumWriteMillis(), pcmSnapshot.lateWrites(),
                                     pcmFallbackCount, pcmSnapshot.running());
                             System.out.println("  --- (消息处理 [M] 的详细分解) ---");
                             System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
