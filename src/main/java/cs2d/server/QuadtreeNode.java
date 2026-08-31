@@ -189,40 +189,29 @@ public class QuadtreeNode {
      * @return 传入的 results 列表 (为了链式调用)
      */
     public List<MapData.ShapeWrapper> queryRay(List<MapData.ShapeWrapper> results, Point2D.Double rayStart, Point2D.Double rayEnd) { // <-- 修改结果列表类型和参数类型
-        // --- VVVV 核心修改: 使用 AWT Line2D VVVV ---
         Line2D.Double rayLine = new Line2D.Double(rayStart, rayEnd);
-        // --- ^^^^ ---
+        return queryRay(results, rayLine);
+    }
 
-        // --- 1. 剪枝步骤：检查射线是否与此节点的边界相交 ---
-        // --- VVVV 核心修改: 使用 AWT intersectsLine VVVV ---
-        if (!bounds.intersectsLine(rayLine)) { // 使用 AWT 的 intersectsLine
-            return results; 
+    private List<MapData.ShapeWrapper> queryRay(List<MapData.ShapeWrapper> results, Line2D.Double rayLine) {
+        if (!bounds.intersectsLine(rayLine))
+            return results;
+
+        for (MapData.ShapeWrapper obj : objects) {
+            if (obj == null)
+                continue;
+            Rectangle2D.Double objBounds = MapData.getObstacleBounds(obj);
+            if (objBounds != null && objBounds.intersectsLine(rayLine))
+                results.add(obj);
         }
-        // --- ^^^^ ---
 
-        // --- 2. 添加此节点的对象 (检查碰撞) ---
-        for (MapData.ShapeWrapper obj : objects) { // <-- 遍历 ShapeWrapper
-            if (obj == null) continue;
-            // --- VVVV 核心修改: 使用 MapData 获取 AWT 边界 VVVV ---
-            Rectangle2D.Double objBounds = MapData.getObstacleBounds(obj); 
-            // --- ^^^^ ---
-            // --- VVVV 核心修改: 使用 AWT intersectsLine VVVV ---
-            if (objBounds != null && objBounds.intersectsLine(rayLine)) { 
-                results.add(obj); // <-- 添加 ShapeWrapper
+        if (children != null) {
+            for (int i = 0; i < children.length; i++) {
+                QuadtreeNode child = children[i];
+                if (child != null && child.bounds.intersectsLine(rayLine))
+                    child.queryRay(results, rayLine);
             }
-            // --- ^^^^ ---
         }
-
-        // --- 3. 递归检查子节点 ---
-        if (children != null) { // <-- 修正: 检查 children 是否为 null
-            // --- VVVV 核心修改: 使用 AWT intersectsLine VVVV ---
-            if (children[0] != null && children[0].bounds.intersectsLine(rayLine)) children[0].queryRay(results, rayStart, rayEnd);
-            if (children[1] != null && children[1].bounds.intersectsLine(rayLine)) children[1].queryRay(results, rayStart, rayEnd);
-            if (children[2] != null && children[2].bounds.intersectsLine(rayLine)) children[2].queryRay(results, rayStart, rayEnd);
-            if (children[3] != null && children[3].bounds.intersectsLine(rayLine)) children[3].queryRay(results, rayStart, rayEnd);
-            // --- ^^^^ ---
-        }
-
         return results;
     }
 

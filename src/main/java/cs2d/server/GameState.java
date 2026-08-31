@@ -5,6 +5,7 @@
 package cs2d.server;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 
 import cs2d.AIControl.A.PathfindingModule;
@@ -4798,8 +4799,6 @@ public class GameState {
 
         JsonArray playersArray = new JsonArray();
         for (Player p : players) {
-            JsonObject pJson = new JsonObject();
-
             // 默认的数据源是玩家自己
             Player dataSource = p;
 
@@ -4810,40 +4809,36 @@ public class GameState {
                     dataSource = controlledBot; // 将数据源切换为BOT！
                 }
             }
-            // 无论是否夺舍，ID 永远是人类玩家的ID
-            pJson.addProperty("id", p.id);
-
-            // 所有数据都从正确的 dataSource 获取
-            pJson.addProperty("vx", dataSource.vx);
-            pJson.addProperty("vy", dataSource.vy);
-            pJson.addProperty("angle", dataSource.angle);
-            pJson.addProperty("health", dataSource.health);
-            addControlStateToSmallUpdate(pJson, dataSource.isAlive(), p.spectatorMode, p.spectatorTargetId);
-            pJson.addProperty("isShooting", dataSource.isShooting);
-            pJson.addProperty("isReloading", dataSource.isReloading);
-            pJson.addProperty("predictedRecoilAngle", dataSource.predictedRecoilAngle);
-
-            Weapon currentWep = dataSource.getCurrentWeapon();
-
-            // 其他不经常变化的数据（如名称、队伍、金钱等）在小包中不发送。
-            playersArray.add(pJson); // 添加到数组。
+            JsonArray row = new JsonArray();
+            row.add(p.id);
+            row.add(dataSource.vx);
+            row.add(dataSource.vy);
+            row.add(dataSource.angle);
+            row.add(dataSource.health);
+            row.add(dataSource.isAlive());
+            row.add(p.spectatorMode);
+            row.add(p.spectatorTargetId == null ? JsonNull.INSTANCE : new com.google.gson.JsonPrimitive(p.spectatorTargetId));
+            row.add(dataSource.isShooting);
+            row.add(dataSource.isReloading);
+            row.add(dataSource.predictedRecoilAngle);
+            playersArray.add(row);
         }
-        state.add("players", playersArray);
+        state.add("playersDelta", playersArray);
 
         // 序列化所有僵尸的轻量级信息。
         JsonArray zombiesArray = new JsonArray();
         for (Player z : zombies) {
             if (z.isAlive()) {
-                JsonObject zJson = new JsonObject();
-                zJson.addProperty("id", z.id);
-                zJson.addProperty("vx", z.vx);
-                zJson.addProperty("vy", z.vy);
-                zJson.addProperty("angle", z.angle);
-                zJson.addProperty("health", z.health);
-                zombiesArray.add(zJson);
+                JsonArray row = new JsonArray();
+                row.add(z.id);
+                row.add(z.vx);
+                row.add(z.vy);
+                row.add(z.angle);
+                row.add(z.health);
+                zombiesArray.add(row);
             }
         }
-        state.add("zombies", zombiesArray);
+        state.add("zombiesDelta", zombiesArray);
 
         // 序列化所有视觉和听觉效果。
         serializeEffects(state);

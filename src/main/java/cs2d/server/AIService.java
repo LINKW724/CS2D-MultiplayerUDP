@@ -9,6 +9,7 @@ import cs2d.playerAndAi.Player;
 import java.awt.Shape;
 import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
+import java.awt.geom.Rectangle2D;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -50,6 +51,8 @@ public class AIService implements Runnable {
     private final ConcurrentHashMap<String, Map<String, Long>> aiPerceptionTimestamps = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> lastDropRequestTimes = new ConcurrentHashMap<>();
     private static final long MEMORY_EXPIRY_MS = 5000;
+    private final ThreadLocal<ArrayList<MapData.ShapeWrapper>> perceptionCandidates =
+            ThreadLocal.withInitial(() -> new ArrayList<>(32));
 
     public AIService(GameState gameState, ConcurrentHashMap<String, AIInput> aiInputMailbox,
             ConcurrentHashMap<String, cs2d.server.rl.RLMacroCommand> rlMacroMailbox, int threadCount, int aiTps,
@@ -462,21 +465,35 @@ public class AIService implements Runnable {
         if (distSq > mapDiagSq)
             return false;
 
+        // 非警戒状态最终必然受 150° 视锥限制。先做这个廉价判定，避免对背后目标
+        // 进行 Quadtree、精确墙体求交和烟雾扫描；返回结果与原顺序完全一致。
+        if (!isAlerted) {
+            double angleToTarget = Math.atan2(targetPos.y - ai.position.y, targetPos.x - ai.position.x);
+            if (Math.abs(normalizeAngle(angleToTarget - ai.angle)) > Math.toRadians(75))
+                return false;
+        }
+
         Line2D.Double ray = new Line2D.Double(ai.position, targetPos);
 
         // [新] 四叉树加速：只获取射线路径上的候选障碍物 ShapeWrapper
         QuadtreeNode qtRoot = gameState.getQuadtreeRootNode();
         boolean blockedByWall;
         if (qtRoot != null) {
-            List<MapData.ShapeWrapper> candidates = new ArrayList<>();
+            ArrayList<MapData.ShapeWrapper> candidates = perceptionCandidates.get();
+            candidates.clear();
             qtRoot.queryRay(candidates,
                     new Point2D.Double(ai.position.x, ai.position.y),
                     new Point2D.Double(targetPos.x, targetPos.y));
-            blockedByWall = candidates.stream()
-                    .map(wrapper -> gameState.getShapeFromWrapper(wrapper))
-                    .filter(obs -> obs != null)
-                    .anyMatch(obs -> obs.intersects(ray.getBounds2D())
-                            && GameState.getLineShapeIntersections(ray, obs) != null);
+            blockedByWall = false;
+            Rectangle2D rayBounds = ray.getBounds2D();
+            for (int i = 0; i < candidates.size(); i++) {
+                Shape obs = gameState.getShapeFromWrapper(candidates.get(i));
+                if (obs != null && obs.intersects(rayBounds)
+                        && GameState.getLineShapeIntersections(ray, obs) != null) {
+                    blockedByWall = true;
+                    break;
+                }
+            }
         } else {
             // 四叉树未初始化时降级为原始全量扫描（理论上只在随机地图时发生）
             blockedByWall = gameState.getObstacles().stream()
@@ -495,16 +512,20 @@ public class AIService implements Runnable {
         if (isAlerted)
             return true;
 
-        double angleToTarget = Math.atan2(targetPos.y - ai.position.y, targetPos.x - ai.position.x);
-        double angleDiff = Math.abs(normalizeAngle(angleToTarget - ai.angle));
-        return (angleDiff <= Math.toRadians(75));
+        return true;
     }
 
     private double normalizeAngle(double angle) {
-        while (angle <= -Math.PI)
-            angle += 2 * Math.PI;
-        while (angle > Math.PI)
-            angle -= 2 * Math.PI;
+        double twoPi = Math.PI * 2.0;
+        if (angle <= -Math.PI) {
+            angle += twoPi;
+            if (angle <= -Math.PI)
+                angle = Math.IEEEremainder(angle, twoPi);
+        } else if (angle > Math.PI) {
+            angle -= twoPi;
+            if (angle > Math.PI)
+                angle = Math.IEEEremainder(angle, twoPi);
+        }
         return angle;
     }
 

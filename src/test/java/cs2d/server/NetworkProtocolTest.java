@@ -8,11 +8,19 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class NetworkProtocolTest {
     private final Gson gson = new Gson();
+
+    @Test
+    void staticObstacleBoundsAreReusedAcrossHotQuadtreeQueries() {
+        MapData.ShapeWrapper wrapper = new MapData.ShapeWrapper(
+                MapData.ShapeWrapper.ShapeType.RECTANGLE, 10, 20, 30, 40);
+        assertSame(MapData.getObstacleBounds(wrapper), MapData.getObstacleBounds(wrapper));
+    }
 
     @Test
     void aiFreezesForManualPauseRoundEndAndMatchEnd() {
@@ -26,7 +34,7 @@ class NetworkProtocolTest {
     void chunksPreserveOrderingMetadata() {
         JsonObject state = new JsonObject();
         state.addProperty("type", "full_update");
-        state.addProperty("protocolVersion", 3);
+        state.addProperty("protocolVersion", GameServer.PROTOCOL_VERSION);
         state.addProperty("sessionId", "session-a");
         state.addProperty("sequence", 42L);
         state.addProperty("serverTick", 120L);
@@ -38,7 +46,7 @@ class NetworkProtocolTest {
         assertFalse(chunks.isEmpty());
         for (String encodedChunk : chunks) {
             JsonObject chunk = gson.fromJson(encodedChunk, JsonObject.class);
-            assertEquals(3, chunk.get("protocolVersion").getAsInt());
+            assertEquals(GameServer.PROTOCOL_VERSION, chunk.get("protocolVersion").getAsInt());
             assertEquals("session-a", chunk.get("sessionId").getAsString());
             assertEquals(42L, chunk.get("sequence").getAsLong());
             assertEquals(120L, chunk.get("serverTick").getAsLong());

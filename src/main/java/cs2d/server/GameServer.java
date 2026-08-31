@@ -41,7 +41,7 @@ public class GameServer {
     static final int TICKS_PER_NETWORK_SNAPSHOT = (int) (TPS / NETWORK_SNAPSHOT_HZ);
     /** 防止一次调度抖动触发无限历史Tick补算。 */
     static final int MAX_CATCH_UP_TICKS = 4;
-    public static final int PROTOCOL_VERSION = 3;
+    public static final int PROTOCOL_VERSION = 4;
     private static final long CLIENT_TIMEOUT_MS = 10000;
     private static final long TIMEOUT_CHECK_INTERVAL_MS = 2000;
     private static final int MAX_INVALID_PACKETS = 10;

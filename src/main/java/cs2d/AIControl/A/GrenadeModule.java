@@ -7,6 +7,7 @@ import cs2d.server.AIDifficulty;
 import cs2d.server.GameState;
 import cs2d.server.AiDiagnostics;
 import cs2d.server.MapData;
+import cs2d.server.QuadtreeNode;
 
 // 使用 PathfindingModule 的内嵌类
 import cs2d.AIControl.A.PathfindingModule.Pathfinder;
@@ -31,6 +32,7 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -59,6 +61,10 @@ public class GrenadeModule {
     private final AIDifficulty difficulty; // AI 难度设置
     private final Consumer<String> logger; // 日志记录器
     private final Random rand; // 随机数生成器
+    private static final double[] EMPTY_EDGES = new double[0];
+    private final ConcurrentHashMap<Shape, double[]> collisionEdgeCache = new ConcurrentHashMap<>();
+    private final ThreadLocal<ArrayList<MapData.ShapeWrapper>> collisionCandidates =
+            ThreadLocal.withInitial(() -> new ArrayList<>(24));
 
     // --- 模块内部状态 ---
     private volatile ModuleState currentState = ModuleState.IDLE;
@@ -530,120 +536,143 @@ public class GrenadeModule {
      */
     private CollisionResult findClosestCollision(Vector2D rayStart, Vector2D rayEnd) {
         CollisionResult closestCollision = null;
-        double minDistanceSq = Double.POSITIVE_INFINITY;
-
-        // 检查 pathfinder 是否 null
-        if (pathfinder == null)
-            return null;
-
-        List<Shape> obstacles = pathfinder.getObstacles(); // 依赖 Pathfinder
-        if (obstacles == null)
-            return null;
-
-        for (Shape obs : obstacles) {
-            if (obs == null)
-                continue; // 添加障碍物 null 检查
-
-            List<Vector2D[]> edges = new ArrayList<>();
-            // ... (形状转换代码保持不变) ...
-            if (obs instanceof Rectangle2D.Double rect) {
-                // 添加对 rect 属性的检查（虽然不太可能为null/负数）
-                if (rect.width < 0 || rect.height < 0)
-                    continue;
-                double x = rect.x, y = rect.y, w = rect.width, h = rect.height;
-                Vector2D p1 = new Vector2D(x, y), p2 = new Vector2D(x + w, y), p3 = new Vector2D(x + w, y + h),
-                        p4 = new Vector2D(x, y + h);
-                edges.add(new Vector2D[] { p1, p2 });
-                edges.add(new Vector2D[] { p2, p3 });
-                edges.add(new Vector2D[] { p3, p4 });
-                edges.add(new Vector2D[] { p4, p1 });
-            } else if (obs instanceof Path2D.Double path) {
-                if (path.getPathIterator(null) == null)
-                    continue; // 检查 PathIterator
-                PathIterator pi = path.getPathIterator(null);
-                double[] coords = new double[6];
-                Vector2D firstPoint = null, lastPoint = null;
-                while (!pi.isDone()) {
-                    int type = pi.currentSegment(coords);
-                    // 添加 coords 长度检查 (虽然通常是 6)
-                    if (coords.length < 2)
-                        break;
-                    Vector2D currentPoint = new Vector2D(coords[0], coords[1]);
-                    if (type == PathIterator.SEG_MOVETO) {
-                        firstPoint = currentPoint;
-                    } else if (type == PathIterator.SEG_LINETO) {
-                        if (lastPoint != null)
-                            edges.add(new Vector2D[] { lastPoint, currentPoint });
-                    } else if (type == PathIterator.SEG_CLOSE) {
-                        if (lastPoint != null && firstPoint != null)
-                            edges.add(new Vector2D[] { lastPoint, firstPoint });
-                    }
-                    lastPoint = currentPoint;
-                    pi.next();
-                }
-            } else if (obs instanceof Ellipse2D.Double ellipse) {
-                if (ellipse.width < 0 || ellipse.height < 0)
-                    continue; // 检查椭圆尺寸
-                final int numSegments = 16;
-                double x = ellipse.x, y = ellipse.y, w = ellipse.width, h = ellipse.height;
-                for (int i = 0; i < numSegments; i++) {
-                    double angle1 = (i / (double) numSegments) * 2 * Math.PI;
-                    double angle2 = ((i + 1) / (double) numSegments) * 2 * Math.PI;
-                    Vector2D p1 = new Vector2D(x + w / 2 + (w / 2) * Math.cos(angle1),
-                            y + h / 2 + (h / 2) * Math.sin(angle1));
-                    Vector2D p2 = new Vector2D(x + w / 2 + (w / 2) * Math.cos(angle2),
-                            y + h / 2 + (h / 2) * Math.sin(angle2));
-                    edges.add(new Vector2D[] { p1, p2 });
-                }
+        QuadtreeNode root = gameState.getQuadtreeRootNode();
+        if (root != null) {
+            ArrayList<MapData.ShapeWrapper> candidates = collisionCandidates.get();
+            candidates.clear();
+            root.queryRay(candidates, new Point2D.Double(rayStart.x, rayStart.y),
+                    new Point2D.Double(rayEnd.x, rayEnd.y));
+            for (int i = 0; i < candidates.size(); i++) {
+                Shape shape = gameState.getShapeFromWrapper(candidates.get(i));
+                closestCollision = closestCollisionOnShape(rayStart, rayEnd, shape, closestCollision);
             }
-
-            for (Vector2D[] edge : edges) {
-                // 添加 edge 和 edge 内元素 null 检查
-                if (edge == null || edge.length < 2 || edge[0] == null || edge[1] == null)
-                    continue;
-
-                Vector2D intersection = getLineIntersection(rayStart, rayEnd, edge[0], edge[1]);
-                if (intersection != null) {
-                    double distSq = rayStart.distanceSq(intersection);
-                    if (distSq < minDistanceSq) {
-                        minDistanceSq = distSq;
-                        Vector2D edgeVector = edge[1].subtract(edge[0]);
-                        Vector2D normal = new Vector2D(edgeVector.y, -edgeVector.x).normalize();
-                        Vector2D velocityVector = rayEnd.subtract(rayStart);
-                        if (normal.dotProduct(velocityVector) > 0) {
-                            normal = normal.multiply(-1.0);
-                        }
-                        // Convert Vector2D to Point2D.Double and add distance
-                        Point2D.Double impactPoint2D = new Point2D.Double(intersection.x, intersection.y);
-                        Point2D.Double normal2D = new Point2D.Double(normal.x, normal.y);
-                        // Using sqrt here for actual distance, assuming CollisionResult needs it
-                        closestCollision = new CollisionResult(impactPoint2D, normal2D, Math.sqrt(minDistanceSq));
-                    }
-                }
-            }
+        } else {
+            List<Shape> obstacles = pathfinder == null ? null : pathfinder.getObstacles();
+            if (obstacles == null)
+                return null;
+            for (int i = 0; i < obstacles.size(); i++)
+                closestCollision = closestCollisionOnShape(rayStart, rayEnd, obstacles.get(i), closestCollision);
         }
         return closestCollision;
     }
 
-    /**
-     * 计算两条线段的交点
-     */
-    private Vector2D getLineIntersection(Vector2D p1, Vector2D p2, Vector2D p3, Vector2D p4) {
-        // 添加参数 null 检查
-        if (p1 == null || p2 == null || p3 == null || p4 == null)
-            return null;
+    private CollisionResult closestCollisionOnShape(Vector2D rayStart, Vector2D rayEnd, Shape shape,
+            CollisionResult closest) {
+        if (shape == null)
+            return closest;
+        double[] edges = collisionEdgeCache.computeIfAbsent(shape, GrenadeModule::flattenCollisionEdges);
+        double minDistanceSq = closest == null ? Double.POSITIVE_INFINITY
+                : closest.distance() * closest.distance();
+        double rayDx = rayEnd.x - rayStart.x;
+        double rayDy = rayEnd.y - rayStart.y;
+        for (int i = 0; i < edges.length; i += 4) {
+            double edgeX1 = edges[i];
+            double edgeY1 = edges[i + 1];
+            double edgeX2 = edges[i + 2];
+            double edgeY2 = edges[i + 3];
+            double den = (rayStart.x - rayEnd.x) * (edgeY1 - edgeY2)
+                    - (rayStart.y - rayEnd.y) * (edgeX1 - edgeX2);
+            if (Math.abs(den) < 1e-9)
+                continue;
+            double t = ((rayStart.x - edgeX1) * (edgeY1 - edgeY2)
+                    - (rayStart.y - edgeY1) * (edgeX1 - edgeX2)) / den;
+            double u = -((rayStart.x - rayEnd.x) * (rayStart.y - edgeY1)
+                    - (rayStart.y - rayEnd.y) * (rayStart.x - edgeX1)) / den;
+            if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0)
+                continue;
+            double hitX = rayStart.x + t * rayDx;
+            double hitY = rayStart.y + t * rayDy;
+            double hitDx = hitX - rayStart.x;
+            double hitDy = hitY - rayStart.y;
+            double distanceSq = hitDx * hitDx + hitDy * hitDy;
+            if (distanceSq >= minDistanceSq)
+                continue;
 
-        double den = (p1.x - p2.x) * (p3.y - p4.y) - (p1.y - p2.y) * (p3.x - p4.x);
-        // 添加极小值检查防止除零
-        if (Math.abs(den) < 1e-9)
-            return null;
-
-        double t = ((p1.x - p3.x) * (p3.y - p4.y) - (p1.y - p3.y) * (p3.x - p4.x)) / den;
-        double u = -((p1.x - p2.x) * (p1.y - p3.y) - (p1.y - p2.y) * (p1.x - p3.x)) / den;
-        if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
-            return new Vector2D(p1.x + t * (p2.x - p1.x), p1.y + t * (p2.y - p1.y));
+            double edgeDx = edgeX2 - edgeX1;
+            double edgeDy = edgeY2 - edgeY1;
+            double edgeLength = Math.hypot(edgeDx, edgeDy);
+            if (edgeLength <= 1e-12)
+                continue;
+            double normalX = edgeDy / edgeLength;
+            double normalY = -edgeDx / edgeLength;
+            if (normalX * rayDx + normalY * rayDy > 0.0) {
+                normalX = -normalX;
+                normalY = -normalY;
+            }
+            minDistanceSq = distanceSq;
+            closest = new CollisionResult(new Point2D.Double(hitX, hitY),
+                    new Point2D.Double(normalX, normalY), Math.sqrt(distanceSq));
         }
-        return null;
+        return closest;
+    }
+
+    static double[] flattenCollisionEdges(Shape shape) {
+        if (shape == null)
+            return EMPTY_EDGES;
+        DoubleEdgeBuilder builder = new DoubleEdgeBuilder();
+        if (shape instanceof Rectangle2D.Double rect) {
+            if (rect.width < 0 || rect.height < 0)
+                return EMPTY_EDGES;
+            double x2 = rect.x + rect.width;
+            double y2 = rect.y + rect.height;
+            builder.add(rect.x, rect.y, x2, rect.y);
+            builder.add(x2, rect.y, x2, y2);
+            builder.add(x2, y2, rect.x, y2);
+            builder.add(rect.x, y2, rect.x, rect.y);
+        } else if (shape instanceof Path2D.Double path) {
+            PathIterator iterator = path.getPathIterator(null);
+            double[] coordinates = new double[6];
+            double firstX = 0.0, firstY = 0.0, lastX = 0.0, lastY = 0.0;
+            boolean hasFirst = false, hasLast = false;
+            while (!iterator.isDone()) {
+                int type = iterator.currentSegment(coordinates);
+                if (type == PathIterator.SEG_MOVETO) {
+                    firstX = coordinates[0];
+                    firstY = coordinates[1];
+                    hasFirst = true;
+                } else if (type == PathIterator.SEG_LINETO && hasLast) {
+                    builder.add(lastX, lastY, coordinates[0], coordinates[1]);
+                } else if (type == PathIterator.SEG_CLOSE && hasLast && hasFirst) {
+                    builder.add(lastX, lastY, firstX, firstY);
+                }
+                lastX = coordinates[0];
+                lastY = coordinates[1];
+                hasLast = true;
+                iterator.next();
+            }
+        } else if (shape instanceof Ellipse2D.Double ellipse) {
+            if (ellipse.width < 0 || ellipse.height < 0)
+                return EMPTY_EDGES;
+            double centerX = ellipse.x + ellipse.width * 0.5;
+            double centerY = ellipse.y + ellipse.height * 0.5;
+            double radiusX = ellipse.width * 0.5;
+            double radiusY = ellipse.height * 0.5;
+            for (int i = 0; i < 16; i++) {
+                double angle1 = i * Math.PI / 8.0;
+                double angle2 = (i + 1) * Math.PI / 8.0;
+                builder.add(centerX + radiusX * Math.cos(angle1), centerY + radiusY * Math.sin(angle1),
+                        centerX + radiusX * Math.cos(angle2), centerY + radiusY * Math.sin(angle2));
+            }
+        }
+        return builder.toArray();
+    }
+
+    private static final class DoubleEdgeBuilder {
+        private double[] values = new double[32];
+        private int size;
+
+        void add(double x1, double y1, double x2, double y2) {
+            if (size + 4 > values.length)
+                values = Arrays.copyOf(values, values.length * 2);
+            values[size++] = x1;
+            values[size++] = y1;
+            values[size++] = x2;
+            values[size++] = y2;
+        }
+
+        double[] toArray() {
+            return size == 0 ? EMPTY_EDGES : Arrays.copyOf(values, size);
+        }
     }
 
     /**

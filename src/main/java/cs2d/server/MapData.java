@@ -182,16 +182,20 @@ public class MapData implements Serializable {
         if (wrapper == null)
             return new java.awt.geom.Rectangle2D.Double();
 
-        switch (wrapper.type) {
+        java.awt.geom.Rectangle2D.Double cached = wrapper.cachedBounds;
+        if (cached != null)
+            return cached;
+
+        java.awt.geom.Rectangle2D.Double calculated = switch (wrapper.type) {
             case RECTANGLE:
             case ELLIPSE:
                 // 矩形和椭圆的边界直接就是 x, y, w, h
-                return new java.awt.geom.Rectangle2D.Double(wrapper.x, wrapper.y, wrapper.width, wrapper.height);
+                yield new java.awt.geom.Rectangle2D.Double(wrapper.x, wrapper.y, wrapper.width, wrapper.height);
 
             case POLYGON:
                 // 多边形需要计算 xPoints 和 yPoints 的最大最小值来生成包围盒 (AABB)
                 if (wrapper.xPoints == null || wrapper.xPoints.length == 0) {
-                    return new java.awt.geom.Rectangle2D.Double();
+                    yield new java.awt.geom.Rectangle2D.Double();
                 }
 
                 double minX = Double.MAX_VALUE;
@@ -210,11 +214,13 @@ public class MapData implements Serializable {
                         maxY = wrapper.yPoints[i];
                 }
                 // 宽度 = maxX - minX, 高度 = maxY - minY
-                return new java.awt.geom.Rectangle2D.Double(minX, minY, maxX - minX, maxY - minY);
+                yield new java.awt.geom.Rectangle2D.Double(minX, minY, maxX - minX, maxY - minY);
 
             default:
-                return new java.awt.geom.Rectangle2D.Double();
-        }
+                yield new java.awt.geom.Rectangle2D.Double();
+        };
+        wrapper.cachedBounds = calculated;
+        return calculated;
     }
 
     public void setWaypoints(List<SerializableWaypoint> waypoints) {
@@ -236,6 +242,8 @@ public class MapData implements Serializable {
         double width, height;
         double[] xPoints;
         double[] yPoints;
+        /** 服务端静态地图空间查询缓存；transient 防止进入地图 JSON/序列化协议。 */
+        transient volatile java.awt.geom.Rectangle2D.Double cachedBounds;
 
         /**
          * 矩形/椭圆构造器
