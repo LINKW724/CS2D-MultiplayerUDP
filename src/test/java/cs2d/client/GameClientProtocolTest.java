@@ -408,7 +408,7 @@ class GameClientProtocolTest {
 
     private static JsonObject state(String sessionId, long sequence) {
         JsonObject state = new JsonObject();
-        state.addProperty("protocolVersion", 2);
+        state.addProperty("protocolVersion", 3);
         state.addProperty("sessionId", sessionId);
         state.addProperty("sequence", sequence);
         return state;

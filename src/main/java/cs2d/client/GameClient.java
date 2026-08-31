@@ -101,7 +101,7 @@ public class GameClient extends Application {
     }
 
 
-    private static final int SUPPORTED_PROTOCOL_VERSION = 2;
+    private static final int SUPPORTED_PROTOCOL_VERSION = 3;
 
     private QuadtreeNode quadtreeRootNode; //
     private static final int QUADTREE_MAX_OBJECTS = 8; // 根据需要调整
@@ -472,8 +472,10 @@ public class GameClient extends Application {
     // 玩家的尺寸（直径）
     private static final int PLAYER_SIZE = 24;
     // 服务器权威模拟、输入发送和客户端渲染使用彼此独立的时钟。
-    private static final double SERVER_TICK_RATE = 120.0;
-    private static final int INPUT_SEND_RATE = 120;
+    private static final double SERVER_TICK_RATE = 60.0;
+    /** 服务端在每个60Hz Tick内执行两个旧版运动子步，速度字段仍是120Hz单位。 */
+    private static final double LEGACY_PHYSICS_RATE = 120.0;
+    private static final int INPUT_SEND_RATE = 60;
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
     private static final Color FOLLOW_FOG_COLOR = Color.rgb(26, 32, 44, 0.85);
@@ -533,6 +535,16 @@ public class GameClient extends Application {
     private final ExecutorService networkListenExecutor = Executors.newSingleThreadExecutor();
     // 用于发送网络消息的单线程执行器
     private final ExecutorService networkSendExecutor = Executors.newSingleThreadExecutor();
+    /** 输入发送不依赖JavaFX Pulse；画面掉帧时仍维持稳定60Hz命令流。 */
+    private final ScheduledExecutorService inputSendExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "Subtick-Input-Sender");
+        t.setDaemon(true);
+        return t;
+    });
+    private final SubtickInputTransmitter subtickInputTransmitter = new SubtickInputTransmitter(INPUT_SEND_RATE);
+    private final AtomicReference<LocalInputState> latestLocalInput =
+            new AtomicReference<>(new LocalInputState(0.0, 0));
+    private ScheduledFuture<?> inputSendHandle;
 
     // --- 专门用于 FOV 计算的单线程执行器 ---
     private final ExecutorService fovExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -715,6 +727,9 @@ public class GameClient extends Application {
     /** HUD由唯一游戏帧循环驱动，避免匿名AnimationTimer在界面重建后残留。 */
     private Runnable hudFrameUpdater = () -> {
     };
+
+    private record LocalInputState(double angle, int buttons) {
+    }
 
     // --- 渲染与相机 ---
     // 游戏镜头对象，用于控制视野
@@ -934,6 +949,7 @@ public class GameClient extends Application {
         networkListenExecutor.shutdownNow();
         // 立即关闭网络发送线程池
         networkSendExecutor.shutdownNow();
+        inputSendExecutor.shutdownNow();
         // 立即关闭连接管理线程池
         connectionExecutor.shutdownNow();
 
@@ -959,6 +975,8 @@ public class GameClient extends Application {
 
         // 1. 停止运行标志和循环
         running = false;
+        subtickInputTransmitter.reset();
+        latestLocalInput.set(new LocalInputState(0.0, 0));
         cancelStaticDataRequests();
         completeReconnect();
         if (gameLoop != null) {
@@ -1495,6 +1513,8 @@ public class GameClient extends Application {
                 }
                 if (serverSessionId != null && !serverSessionId.equals(incomingSessionId)) {
                     lastStateSequence.set(-1);
+                    subtickInputTransmitter.reset();
+                    latestLocalInput.set(new LocalInputState(0.0, 0));
                     chunkBuffers.clear();
                     initializedMapSignature = null;
                     obstacleCacheTiles.clear();
@@ -1528,6 +1548,10 @@ public class GameClient extends Application {
                 if (!hasCurrentSession(json))
                     break;
                 ping = (System.nanoTime() - pingStartTime) / 1_000_000;
+                break;
+            case "input_ack":
+                if (hasCurrentSession(json) && json.has("ackSequence"))
+                    subtickInputTransmitter.acknowledge(json.get("ackSequence").getAsLong());
                 break;
         }
 
@@ -2199,10 +2223,9 @@ public class GameClient extends Application {
         if (gameLoop != null) {
             gameLoop.stop();
         }
+        ensureInputSendLoop();
         // 创建一个 AnimationTimer，它会在每一帧被调用
         gameLoop = new AnimationTimer() {
-            private long lastInputSendTime = 0; // 记录上一次发送输入的时间
-            private final long inputInterval = 1_000_000_000L / INPUT_SEND_RATE;
             private long lastPerfLogTime = 0; // 用于 2 秒性能日志
             private final FramePacingMonitor framePacingMonitor =
                     new FramePacingMonitor(TARGET_RENDER_RATE, TARGET_RENDER_RATE * 4);
@@ -2240,7 +2263,7 @@ public class GameClient extends Application {
                 // [新] 启动 [B] 帧内代码耗时的总计时器
                 long onFrameCodeStartTime = System.nanoTime();
 
-                // 在渲染帧边界应用网络状态。服务器仍保持120Hz，渲染不会被网络包到达时刻驱动。
+                // 在渲染帧边界应用网络状态。服务器60Hz权威模拟，165Hz渲染不由网络包到达时刻驱动。
                 drainNetworkMessagesForRenderFrame();
                 if (buyMenuRefreshPending.getAndSet(false)
                         && buyMenuPane != null && buyMenuPane.isVisible()) {
@@ -2260,22 +2283,18 @@ public class GameClient extends Application {
                     lastFpsUpdateTime = now;
                 }
 
-                // --- [L1] 发送输入 ---
+                // --- [L1] 165Hz本地输入采样；网络发送由独立60Hz线程完成 ---
                 long inputStartTime = System.nanoTime();
-                if (now - lastInputSendTime >= inputInterval) {
-                    sendInput();
-                    lastInputSendTime = now;
-                }
+                publishLocalInputState(updateLocalAimVisual());
                 perfTimeLogic_SendInput += (System.nanoTime() - inputStartTime);
 
                 // --- [L2] 插值/平滑 ---
-                // [修复] 计算精确的 deltaTime (秒) 用于平滑插值，确保预测位移与服务器 120 TPS 协调
+                // [修复] 计算精确的 deltaTime；速度字段仍使用兼容的120Hz运动单位。
                 double deltaTime = timeSinceLastHandle / 1_000_000_000.0;
                 if (deltaTime <= 0 || deltaTime > 0.1)
                     deltaTime = 1.0 / 60.0; // 防御性处理
 
                 long interpStartTime = System.nanoTime();
-                updateLocalAimVisual();
                 updateRecoil(deltaTime); // [修复] 传入 deltaTime
                 final double finalDeltaTime = deltaTime;
                 clientPlayers.values().forEach(p -> p.updateRenderPosition(finalDeltaTime));
@@ -3381,37 +3400,53 @@ public class GameClient extends Application {
     // } // [新] 在函数末尾释放锁
     // }
 
-    // 向服务器发送玩家的输入状态
-    private void sendInput() {
-        // 如果客户端不在游戏状态，或者没有玩家ID/对象，则不发送
-        if (clientState != cs2d.client.GameClient.ClientState.PLAYING || myPlayerId == null || me == null)
+    private synchronized void ensureInputSendLoop() {
+        if (inputSendHandle != null && !inputSendHandle.isCancelled() && !inputSendHandle.isDone())
             return;
+        long intervalNanos = 1_000_000_000L / INPUT_SEND_RATE;
+        inputSendHandle = inputSendExecutor.scheduleAtFixedRate(this::sendSubtickInputBatch,
+                0L, intervalNanos, TimeUnit.NANOSECONDS);
+    }
 
-        // 本地视觉角度每个165Hz渲染帧都会更新；这里读取并发送当前结果，
-        // 网络发送频率仍保持120Hz，不再反向限制瞄准手感。
-        double angle = updateLocalAimVisual();
+    /** JavaFX线程调用：以显示帧率采样最新角度和按键状态。 */
+    private void publishLocalInputState(double angle) {
+        if (!Double.isFinite(angle))
+            return;
+        latestLocalInput.set(new LocalInputState(angle, currentInputButtons()));
+    }
 
-        // 创建一个 JSON 对象用于存储输入信息
-        JsonObject input = new JsonObject();
-        input.addProperty("type", "playerInput"); // 消息类型
-        addProtocolMetadata(input);
-        input.addProperty("angle", angle); // 朝向角度
-        // 只有当我活着的时候，开火状态才为true
-        input.addProperty("shooting", isShooting && getBool(me.data, "isAlive"));
+    private int currentInputButtons() {
+        boolean alive = me != null && me.data != null && getBool(me.data, "isAlive");
+        int buttons = 0;
+        if (keysDown.contains(KeyCode.W)) buttons |= SubtickInputTransmitter.BUTTON_FORWARD;
+        if (keysDown.contains(KeyCode.S)) buttons |= SubtickInputTransmitter.BUTTON_BACK;
+        if (keysDown.contains(KeyCode.A)) buttons |= SubtickInputTransmitter.BUTTON_LEFT;
+        if (keysDown.contains(KeyCode.D)) buttons |= SubtickInputTransmitter.BUTTON_RIGHT;
+        if (alive && isShooting) buttons |= SubtickInputTransmitter.BUTTON_FIRE;
+        if (isWalking) buttons |= SubtickInputTransmitter.BUTTON_WALK;
+        if (alive && isInteracting) buttons |= SubtickInputTransmitter.BUTTON_INTERACT;
+        if (alive && isUnderhandThrowing) buttons |= SubtickInputTransmitter.BUTTON_UNDERHAND;
+        return buttons;
+    }
 
-        // 重新将 isUnderhandThrowing 的状态包含在每一次输入更新中，以确保服务器能够接收到低抛指令
-        input.addProperty("underhand", isUnderhandThrowing && getBool(me.data, "isAlive"));
-        input.addProperty("walking", isWalking);// 静步
+    /** 独立60Hz线程调用；重发尚未ACK的短窗口，UDP丢包不会吞掉输入边沿。 */
+    private void sendSubtickInputBatch() {
+        if (clientState != cs2d.client.GameClient.ClientState.PLAYING
+                || myPlayerId == null || me == null || serverSessionId == null)
+            return;
+        LocalInputState inputState = latestLocalInput.get();
+        JsonObject batch = subtickInputTransmitter.captureAndBuildBatch(System.nanoTime(),
+                inputState.angle(), inputState.buttons());
+        addProtocolMetadata(batch);
+        sendMessage(gson.toJson(batch));
+    }
 
-        // 将当前按下的所有键的名称转换为 JSON 数组并添加到消息中
-        input.add("keys", gson.toJsonTree(keysDown.stream().map(KeyCode::getName).collect(Collectors.toList())));
-
-        // 使用 Gson 将 JSON 对象转换为字符串，并发送给服务器
-        sendMessage(gson.toJson(input));
-
-        // --- 新增：客户端本地后坐力预测 ---
-        // 如果正在开火，并且有武器
-
+    /** 按下/释放边沿立即发出，同时仍由60Hz心跳重发直到服务器ACK。 */
+    private void sendSubtickInputImmediately() {
+        if (clientState != cs2d.client.GameClient.ClientState.PLAYING || me == null)
+            return;
+        publishLocalInputState(updateLocalAimVisual());
+        sendSubtickInputBatch();
     }
 
     private double updateLocalAimVisual() {
@@ -3421,7 +3456,7 @@ public class GameClient extends Application {
         double angle = Math.atan2(mouseWorld.getY() - me.renderY, mouseWorld.getX() - me.renderX);
         if (Double.isFinite(angle)) {
             // 本地玩家的视觉朝向以鼠标为准。服务器仍会收到角度并进行权威射击判定，
-            // 但服务器快照不能把本地准星/角色朝向降回120Hz。
+            // 但服务器快照不能把本地准星/角色朝向降回60Hz。
             me.angle = angle;
             me.targetAngle = angle;
         }
@@ -5906,6 +5941,11 @@ public class GameClient extends Application {
 
     }
 
+    private static boolean isSubtickInputKey(KeyCode code) {
+        return code == KeyCode.W || code == KeyCode.A || code == KeyCode.S || code == KeyCode.D
+                || code == KeyCode.SHIFT || code == KeyCode.X || code == KeyCode.E;
+    }
+
     // 为场景设置输入监听器
     private void setupInputListeners(Scene scene) {
         scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> { // 添加键盘按下事件过滤器
@@ -6063,6 +6103,8 @@ public class GameClient extends Application {
                 default:
                     break;
             }
+            if (firstPress && isSubtickInputKey(event.getCode()))
+                sendSubtickInputImmediately();
         });
 
         scene.addEventFilter(KeyEvent.KEY_RELEASED, event -> { // 键盘释放事件
@@ -6098,6 +6140,9 @@ public class GameClient extends Application {
                 // 死亡时，释放E键不做任何事，释放/夺舍逻辑在 KEY_PRESSED 中处理
             }
 
+            if (isSubtickInputKey(event.getCode()))
+                sendSubtickInputImmediately();
+
         });
 
         canvas.setOnMousePressed(event -> { // 鼠标按下事件
@@ -6122,12 +6167,16 @@ public class GameClient extends Application {
                     }
                 }
             }
+            if (event.getButton() == MouseButton.PRIMARY || event.getButton() == MouseButton.SECONDARY)
+                sendSubtickInputImmediately();
         });
         canvas.setOnMouseReleased(event -> { // 鼠标释放事件
             if (event.getButton() == MouseButton.PRIMARY)
                 isShooting = false; // 停止开火
             if (event.getButton() == MouseButton.SECONDARY)
                 isUnderhandThrowing = false; // 停止低抛
+            if (event.getButton() == MouseButton.PRIMARY || event.getButton() == MouseButton.SECONDARY)
+                sendSubtickInputImmediately();
         });
 
         canvas.setOnMouseMoved(event -> {
@@ -7997,7 +8046,7 @@ public class GameClient extends Application {
         synchronized void updateRenderPosition(double deltaTime) {
             if (health > 0) {
                 // [修复] 将服务器的速度 (每tick位移) 转换为每秒位移，再乘以实际帧间隔 deltaTime
-                double speedMultiplier = deltaTime * SERVER_TICK_RATE;
+                double speedMultiplier = deltaTime * LEGACY_PHYSICS_RATE;
                 this.targetX += this.vx * speedMultiplier;
                 this.targetY += this.vy * speedMultiplier;
 
@@ -9258,7 +9307,7 @@ public class GameClient extends Application {
         double vy = throwVy + me.vy;
 
         // --- 3. [核心修正] 基于【连续碰撞检测】的物理模拟 ---
-        int maxSteps = (int) (flightTime * SERVER_TICK_RATE);
+        int maxSteps = (int) (flightTime * LEGACY_PHYSICS_RATE);
 
         // --- VVVV 核心修改 VVVV ---
         // JsonArray obstacles = mapData.getAsJsonArray("obstacles"); // <-- [删除]
@@ -9590,7 +9639,7 @@ public class GameClient extends Application {
             this.renderY += (this.targetY - this.renderY) * actualLerp;
 
             // [修复] 预测位移，并增加简易碰撞检测防止穿墙抖动
-            double speedMultiplier = deltaTime * SERVER_TICK_RATE;
+            double speedMultiplier = deltaTime * LEGACY_PHYSICS_RATE;
             double nextTargetX = this.targetX + this.vx * speedMultiplier;
             double nextTargetY = this.targetY + this.vy * speedMultiplier;
 
