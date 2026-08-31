@@ -17,8 +17,10 @@ final class RuntimePerformanceMonitor {
 
     private final ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
     private final List<GarbageCollectorMXBean> garbageCollectors = ManagementFactory.getGarbageCollectorMXBeans();
-    private final com.sun.management.OperatingSystemMXBean osBean;
+    private final int availableProcessors = Math.max(1, Runtime.getRuntime().availableProcessors());
 
+    private long previousAllThreadCpuNanos;
+    private long previousSampleNanos;
     private long previousFxCpuNanos;
     private long previousRenderCpuNanos;
     private long previousGcCollections;
@@ -32,14 +34,11 @@ final class RuntimePerformanceMonitor {
                 // Runtime diagnostics remain usable without per-thread CPU time.
             }
         }
-        java.lang.management.OperatingSystemMXBean platformOsBean =
-                ManagementFactory.getOperatingSystemMXBean();
-        osBean = platformOsBean instanceof com.sun.management.OperatingSystemMXBean extended
-                ? extended
-                : null;
     }
 
     Snapshot snapshotAndReset() {
+        long sampleNanos = System.nanoTime();
+        long allThreadCpuNanos = 0L;
         long fxCpuNanos = 0L;
         long renderCpuNanos = 0L;
         String fxState = "missing";
@@ -54,6 +53,7 @@ final class RuntimePerformanceMonitor {
 
             String name = info.getThreadName();
             long cpuNanos = threadCpuNanos(threadIds[i]);
+            allThreadCpuNanos += cpuNanos;
             if (FX_THREAD_NAME.equals(name)) {
                 fxCpuNanos += cpuNanos;
                 fxState = info.getThreadState().name();
@@ -80,8 +80,13 @@ final class RuntimePerformanceMonitor {
         previousGcMillis = gcMillis;
 
         MemoryUsage heap = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
-        double processCpuLoad = osBean == null ? -1.0 : osBean.getProcessCpuLoad();
-        double processCpuPercent = processCpuLoad < 0.0 ? -1.0 : processCpuLoad * 100.0;
+        double processCpuPercent = normalizedCpuPercent(
+                positiveDelta(allThreadCpuNanos, previousAllThreadCpuNanos),
+                positiveDelta(sampleNanos, previousSampleNanos),
+                availableProcessors,
+                previousSampleNanos != 0L && allThreadCpuNanos >= previousAllThreadCpuNanos);
+        previousAllThreadCpuNanos = allThreadCpuNanos;
+        previousSampleNanos = sampleNanos;
         return new Snapshot(
                 processCpuPercent,
                 fxCpuDelta / 1_000_000.0,
@@ -110,6 +115,19 @@ final class RuntimePerformanceMonitor {
 
     private static long nonNegative(long value) {
         return Math.max(0L, value);
+    }
+
+    /**
+     * 用Java线程累计CPU时间估算整个客户端CPU占用，避免Windows原生
+     * OperatingSystemMXBean.getProcessCpuLoad0()偶发阻塞数秒并拖延Safepoint。
+     */
+    static double normalizedCpuPercent(long cpuDeltaNanos, long elapsedNanos,
+            int processors, boolean hasPreviousSample) {
+        if (!hasPreviousSample || elapsedNanos <= 0L || cpuDeltaNanos < 0L)
+            return 0.0;
+        double normalized = cpuDeltaNanos * 100.0
+                / (elapsedNanos * (double) Math.max(1, processors));
+        return Math.max(0.0, Math.min(100.0, normalized));
     }
 
     private static double bytesToMiB(long bytes) {
