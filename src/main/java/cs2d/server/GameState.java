@@ -1602,7 +1602,7 @@ public class GameState {
                 double damage = maxDamage * (1.0 - (dist / blastRadius));
                 if (isBlocked) {
                     damage = damage * 0.1;
-                    System.out.println("龟内被挡住了");
+                    AiDiagnostics.trace("grenadeBlocked", logger, () -> "手雷爆炸伤害被障碍物阻挡");
                 }
 
                 if (damage > 0) {
@@ -3375,7 +3375,8 @@ public class GameState {
         }
 
         // --- 直接在服务器线程上执行逻辑和日志，不再使用 Platform.runLater ---
-        logger.accept("=================[ Weapon Switch Log ]=================");
+        AiDiagnostics.trace("weaponSwitch", logger,
+                () -> "[Weapon Switch] " + actionTarget.name + " requested slot " + slot);
         // logger.accept(String.format("[REQUEST] Player '%s' requested switch to slot
         // %d for target '%s'.", humanPlayer.name, slot, actionTarget.name));
 
@@ -3394,7 +3395,6 @@ public class GameState {
             // logger.accept(String.format(" [RESULT] FAILED. Slot for '%s' remains %d.",
             // actionTarget.name, oldSlot));
         }
-        logger.accept("======================================================");
     }
 
     /**

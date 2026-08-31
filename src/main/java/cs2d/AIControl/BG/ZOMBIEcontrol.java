@@ -13,6 +13,7 @@ import cs2d.server.AIService.AIInput;
 import cs2d.server.AIService.AIWorldView;
 import cs2d.server.AIDifficulty;
 import cs2d.server.GameState;
+import cs2d.server.AiDiagnostics;
 import cs2d.server.Item; // 导入 Item 枚举
 
 import java.awt.geom.Point2D;
@@ -359,8 +360,10 @@ public class ZOMBIEcontrol {
         if (itemToThrow != null) {
             boolean accepted = grenadeModule.requestThrow(itemToThrow, primaryTarget.position);
             if (accepted) {
-                logger.accept(
-                        "Survivor [" + owner.name + "] decided to throw " + itemToThrow.name() + " at zombie horde.");
+                Item decidedItem = itemToThrow;
+                AiDiagnostics.trace("grenadeDecision", logger,
+                        () -> "Survivor [" + owner.name + "] decided to throw " + decidedItem.name()
+                                + " at zombie horde.");
             }
             // 无论是否接受，都重置冷却
             nextTacticalDecisionTime = currentTime + TACTICAL_DECISION_COOLDOWN;

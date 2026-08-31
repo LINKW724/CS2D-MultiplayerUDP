@@ -5,6 +5,7 @@ import cs2d.playerAndAi.Vector2D;
 import cs2d.playerAndAi.Weapon; // 假设 AIDifficulty 在这个包或已导入
 import cs2d.server.AIDifficulty;
 import cs2d.server.GameState;
+import cs2d.server.AiDiagnostics;
 import cs2d.server.MapData;
 
 // 使用 PathfindingModule 的内嵌类
@@ -137,7 +138,8 @@ public class GrenadeModule {
         // 1. 检查超时
         if (currentState != ModuleState.IDLE
                 && System.currentTimeMillis() - grenadePlanStartTime > GRENADE_THROW_TIMEOUT_MS) {
-            logger.accept(self.name + " 的投掷动作超时（超过5秒），已强制取消。");
+            AiDiagnostics.trace("grenadeTimeout", logger,
+                    () -> self.name + " 的投掷动作超时（超过5秒），已强制取消。");
             resetGrenadeState();
             return Optional.empty();
         }
@@ -155,8 +157,9 @@ public class GrenadeModule {
             this.currentState = ModuleState.PREPARING_GRENADE; // 进入准备状态
             this.grenadePlanStartTime = System.currentTimeMillis(); // 开始计时
 
-            logger.accept(String.format("%s's calculation is complete! Executing plan to throw %s.", self.name,
-                    plan.itemToThrow().name()));
+            AiDiagnostics.trace("grenadePlanReady", logger,
+                    () -> String.format("%s's calculation is complete! Executing plan to throw %s.", self.name,
+                            plan.itemToThrow().name()));
 
             // 返回“切换武器”指令
             return Optional.of(new GrenadeCommand(ActionType.SWITCH_SLOT, null, -1, getSlotForItem(grenadeToThrow)));
@@ -204,8 +207,9 @@ public class GrenadeModule {
             // --- 在正确的位置 ---
             if (isStationary) {
                 // 已停稳，执行投掷
-                logger.accept(String.format("%s is throwing %s to target (%.1f, %.1f)",
-                        self.name, grenadeToThrow.name(), grenadeTargetPosition.x, grenadeTargetPosition.y));
+                AiDiagnostics.trace("grenadeThrow", logger,
+                        () -> String.format("%s is throwing %s to target (%.1f, %.1f)",
+                                self.name, grenadeToThrow.name(), grenadeTargetPosition.x, grenadeTargetPosition.y));
 
                 // 记录：实际的 gameState.throwGrenade(self) 由 AIController 在收到 THROW_NOW 后调用
                 resetGrenadeState(); // 清理状态
@@ -295,8 +299,9 @@ public class GrenadeModule {
                 if (plan != null && generation == calculationGeneration.get() && !gameState.shouldFreezeAi()) {
                     // 计算成功，将结果放入待处理队列
                     this.pendingGrenadePlan = plan;
-                    logger.accept(String.format("Background Calc OK for %s: Found a valid throw plan for %s.",
-                            self.name, item.name()));
+                    AiDiagnostics.trace("grenadeCalcOk", logger,
+                            () -> String.format("Background Calc OK for %s: Found a valid throw plan for %s.",
+                                    self.name, item.name()));
                 }
             } catch (Exception e) {
                 if (generation == calculationGeneration.get() && !gameState.shouldFreezeAi()) {

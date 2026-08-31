@@ -15,6 +15,7 @@ import cs2d.server.AIService.AIInput;
 import cs2d.server.AIService.AIWorldView;
 import cs2d.server.AIDifficulty;
 import cs2d.server.GameState;
+import cs2d.server.AiDiagnostics;
 
 import java.awt.*;
 import java.awt.geom.Point2D;
@@ -256,7 +257,8 @@ public class TEAM_DEATHMATCHcontrol {
         // 如果AI正在执行预设路径 但 突然看到了敌人
         if (isTargetVisible && pathfindingModule.isFollowingPresetPath()) {
             if (logger != null) {
-                logger.accept("AI [" + owner.name + "] 正在执行预设路径，但发现敌人！取消预设路径！");
+                AiDiagnostics.trace("presetPathCancelled", logger,
+                        () -> "AI [" + owner.name + "] 正在执行预设路径，但发现敌人！取消预设路径！");
             }
             // 命令寻路模块取消，并回退到标准A*
             pathfindingModule.cancelPresetPath();
@@ -410,11 +412,15 @@ public class TEAM_DEATHMATCHcontrol {
         if (itemToThrow != null) {
             boolean accepted = grenadeModule.requestThrow(itemToThrow, throwTargetPos);
             if (accepted) {
-                logger.accept("AI [" + owner.name + "] decided to throw " + itemToThrow.name() + " at ("
-                        + (int) throwTargetPos.x + "," + (int) throwTargetPos.y + ")");
+                Item decidedItem = itemToThrow;
+                AiDiagnostics.trace("grenadeDecision", logger,
+                        () -> "AI [" + owner.name + "] decided to throw " + decidedItem.name() + " at ("
+                                + (int) throwTargetPos.x + "," + (int) throwTargetPos.y + ")");
             } else if (!gameState.shouldFreezeAi() && logger != null) {
-                logger.accept("AI [" + owner.name + "] grenade request for " + itemToThrow.name()
-                        + " was rejected (busy or cooldown).");
+                Item rejectedItem = itemToThrow;
+                AiDiagnostics.trace("grenadeRejected", logger,
+                        () -> "AI [" + owner.name + "] grenade request for " + rejectedItem.name()
+                                + " was rejected (busy or cooldown).");
             }
             // 不论是否接受，都重置冷却计时器
             nextTacticalDecisionTime = currentTime + TACTICAL_DECISION_COOLDOWN;
@@ -1070,7 +1076,8 @@ public class TEAM_DEATHMATCHcontrol {
             return; // 添加冻结检查
 
         if (logger != null) {
-            logger.accept("AI [" + owner.name + "] 被队友卡住! 执行侧向避让。");
+            AiDiagnostics.trace("unstuck", logger,
+                    () -> "AI [" + owner.name + "] 被队友卡住! 执行侧向避让。");
         }
 
         // 1. 清除当前寻路目标（打断死锁）

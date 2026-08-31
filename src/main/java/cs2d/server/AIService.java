@@ -406,7 +406,10 @@ public class AIService implements Runnable {
 
                 // 审计日志
                 if (!memory.containsKey(p.id()) && !p.isAI()) {
-                    logger.accept(String.format("[Perception Audit] %s detected %s via %s", ai.name, p.name(), reason));
+                    PerceptionReason detectionReason = reason;
+                    AiDiagnostics.trace("perception", logger,
+                            () -> String.format("[Perception Audit] %s detected %s via %s",
+                                    ai.name, p.name(), detectionReason));
                 }
             }
         }
