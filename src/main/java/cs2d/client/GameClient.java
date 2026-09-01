@@ -4888,10 +4888,12 @@ public class GameClient extends Application {
             addTeamSection(scoreboardContent, section, mode);
 
         if (finalScoreboard) {
-            Button backButton = new Button("Back to Lobby");
+            Button backButton = new Button("Back to Main Menu");
             styleButton(backButton);
             backButton.setFont(hudFont);
-            backButton.setOnAction(e -> setClientState(cs2d.client.GameClient.ClientState.LOBBY));
+            // 不能只切到 LOBBY：服务器仍持续发送 isGameOver=true，下一包会把界面
+            // 再次推回结算页。走完整断开流程，清除旧比赛并直接显示主界面。
+            backButton.setOnAction(e -> disconnect());
             scoreboardContent.getChildren().add(backButton);
         }
         scoreboardScrollPane.setVvalue(retainedScrollPosition);
