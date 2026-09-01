@@ -123,36 +123,6 @@ class TacticalTaskBoardTest {
     }
 
     @Test
-    void completedAdvanceReopensWhenARespawnCreatesANewAssignment() {
-        long now = 5_650L;
-        TacticalTask advance = new TacticalTask("route-advance", TaskType.ADVANCE, "route-a",
-                new Vec2(100, 100), 1, 2, 60, 0.0,
-                EngagementRule.IGNORE_REMOTE_SOUNDS, 80.0, Set.of(), now + 2_000L);
-        TacticalPlan firstLife = new TacticalPlan(List.of(advance), Map.of(
-                "a", order("a", advance.taskId(), TaskType.ADVANCE, now)));
-        TeamTacticalSnapshot arrived = new TeamTacticalSnapshot("CT", now, 1_600, 900,
-                List.of(new AgentSnapshot("a", new Vec2(100, 100), 100,
-                        false, false, "route-a", List.of())),
-                List.of(), List.of());
-        assertEquals(TaskStatus.COMPLETED,
-                board.reconcile("CT", firstLife, arrived, now)
-                        .taskStates().get(advance.taskId()).status());
-
-        TacticalPlan respawnLife = new TacticalPlan(List.of(advance), Map.of(
-                "b", order("b", advance.taskId(), TaskType.ADVANCE, now + 1L)));
-        TeamTacticalSnapshot respawned = new TeamTacticalSnapshot("CT", now + 1L, 1_600, 900,
-                List.of(new AgentSnapshot("b", new Vec2(0, 0), 100,
-                        false, false, null, List.of())),
-                List.of(), List.of());
-
-        TacticalTaskBoard.ReconciledPlan reopened = board.reconcile(
-                "CT", respawnLife, respawned, now + 1L);
-
-        assertEquals(TaskStatus.ACTIVE, reopened.taskStates().get(advance.taskId()).status());
-        assertEquals(Set.of("b"), reopened.activeOrders().keySet());
-    }
-
-    @Test
     void flankArrivalCompletesItsSuppressLegAndReleasesWholeOperation() {
         long now = 5_800L;
         String operationId = "pincer-arrived";

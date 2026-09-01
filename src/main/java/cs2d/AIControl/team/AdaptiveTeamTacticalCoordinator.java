@@ -35,24 +35,14 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
     private static final double LOCAL_SOUND_RESPONSE_DISTANCE = 520.0;
     private static final double ROUTE_SOUND_CORRIDOR = 500.0;
     private static final double CONTACT_OBJECTIVE_GRID = 160.0;
-    private final RouteAssignmentPolicy routeAssignmentPolicy;
     private final List<TacticalPlanRefiner> planRefiners;
 
     public AdaptiveTeamTacticalCoordinator() {
-        this(new BalancedRouteAssignmentPolicy(), List.of(new ElasticManeuverRefiner()));
+        this(List.of(new ElasticManeuverRefiner()));
     }
 
     /** Allows game modes or extensions to add/replace doctrines without changing this coordinator. */
     public AdaptiveTeamTacticalCoordinator(List<TacticalPlanRefiner> planRefiners) {
-        this(new BalancedRouteAssignmentPolicy(), planRefiners);
-    }
-
-    /** Allows alternate route allocation and maneuver doctrines to be injected independently. */
-    public AdaptiveTeamTacticalCoordinator(RouteAssignmentPolicy routeAssignmentPolicy,
-            List<TacticalPlanRefiner> planRefiners) {
-        this.routeAssignmentPolicy = routeAssignmentPolicy == null
-                ? snapshot -> Map.of()
-                : routeAssignmentPolicy;
         this.planRefiners = planRefiners == null ? List.of() : List.copyOf(planRefiners);
     }
 
@@ -79,24 +69,17 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
             return new TacticalPlan(List.of(), Map.of());
         }
 
-        Map<String, String> initialRouteAssignments = routeAssignmentPolicy.assign(snapshot);
-        Map<String, RouteStats> routes = buildRouteStats(
-                agents, snapshot.routes(), snapshot.hazards(), initialRouteAssignments);
+        Map<String, RouteStats> routes = buildRouteStats(agents, snapshot.routes(), snapshot.hazards());
         Map<String, DraftOrder> drafts = new LinkedHashMap<>();
         double soundChaseDistance = soundChaseDistance(agents.size());
 
         for (AgentSnapshot agent : agents) {
-            String routeId = effectiveRouteId(agent, initialRouteAssignments);
-            double routeRisk = routeRisk(agent, routeId, routes, snapshot.hazards());
-            Role role = routeId == null ? Role.FREE : Role.ENTRY;
-            TaskType task = routeId == null ? TaskType.CONTROL_ROUTE : TaskType.ADVANCE;
-            DraftOrder draft = new DraftOrder(agent, task, role, routeId, routeRisk, soundChaseDistance);
-            RouteStats route = routes.get(routeId);
-            if (route != null) {
-                draft.taskObjective = route.endpoint();
-                draft.movementTarget = route.endpoint();
-                draft.arrivalRadius = 180.0;
-            }
+            double routeRisk = routeRisk(agent, routes, snapshot.hazards());
+            Role role = agent.routeId() == null ? Role.FREE : Role.ENTRY;
+            TaskType task = agent.routeId() == null ? TaskType.CONTROL_ROUTE : TaskType.ADVANCE;
+            DraftOrder draft = new DraftOrder(agent, task, role, routeRisk, soundChaseDistance);
+            RouteStats route = routes.get(agent.routeId());
+            draft.taskObjective = route == null ? null : route.midpoint();
             drafts.put(agent.id(), draft);
         }
 
@@ -445,12 +428,11 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
     }
 
     private Map<String, RouteStats> buildRouteStats(List<AgentSnapshot> agents, List<RouteSnapshot> catalogRoutes,
-            List<HazardSnapshot> hazards, Map<String, String> initialRouteAssignments) {
+            List<HazardSnapshot> hazards) {
         Map<String, List<AgentSnapshot>> grouped = new HashMap<>();
         for (AgentSnapshot agent : agents) {
-            String routeId = effectiveRouteId(agent, initialRouteAssignments);
-            if (routeId != null) {
-                grouped.computeIfAbsent(routeId, ignored -> new ArrayList<>()).add(agent);
+            if (agent.routeId() != null && !agent.routeId().isBlank()) {
+                grouped.computeIfAbsent(agent.routeId(), ignored -> new ArrayList<>()).add(agent);
             }
         }
 
@@ -480,20 +462,12 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
         return result;
     }
 
-    private double routeRisk(AgentSnapshot agent, String routeId,
-            Map<String, RouteStats> routes, List<HazardSnapshot> hazards) {
-        RouteStats route = routes.get(routeId);
+    private double routeRisk(AgentSnapshot agent, Map<String, RouteStats> routes, List<HazardSnapshot> hazards) {
+        RouteStats route = routes.get(agent.routeId());
         if (route != null) {
             return route.risk;
         }
         return riskAt(agent.position(), hazards);
-    }
-
-    private static String effectiveRouteId(AgentSnapshot agent, Map<String, String> initialRouteAssignments) {
-        if (agent.routeId() != null && !agent.routeId().isBlank()) {
-            return agent.routeId();
-        }
-        return initialRouteAssignments.get(agent.id());
     }
 
     private double riskAlong(List<Vec2> routePoints, List<AgentSnapshot> agents, List<HazardSnapshot> hazards) {
@@ -594,12 +568,12 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
         private double maxSoundResponseDistance;
         private final double routeRisk;
 
-        private DraftOrder(AgentSnapshot agent, TaskType taskType, Role role, String routeId, double routeRisk,
+        private DraftOrder(AgentSnapshot agent, TaskType taskType, Role role, double routeRisk,
                 double maxSoundResponseDistance) {
             this.agent = agent;
             this.taskType = taskType;
             this.role = role;
-            this.routeId = routeId;
+            this.routeId = agent.routeId();
             this.routeRisk = routeRisk;
             this.maxSoundResponseDistance = maxSoundResponseDistance;
         }
@@ -681,11 +655,5 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
             return agents.isEmpty() ? null : agents.get(0).position();
         }
 
-        private Vec2 endpoint() {
-            if (!points.isEmpty()) {
-                return points.get(points.size() - 1);
-            }
-            return agents.isEmpty() ? null : agents.get(0).position();
-        }
     }
 }

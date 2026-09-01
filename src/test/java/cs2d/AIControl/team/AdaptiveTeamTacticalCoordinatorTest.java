@@ -24,43 +24,6 @@ class AdaptiveTeamTacticalCoordinatorTest {
     private final AdaptiveTeamTacticalCoordinator coordinator = new AdaptiveTeamTacticalCoordinator();
 
     @Test
-    void bootstrapAssignsExplicitAuthoredRoutesAndEndpointsToWholeSpawnWave() {
-        long now = 9_000L;
-        AdaptiveTeamTacticalCoordinator bootstrapCoordinator = new AdaptiveTeamTacticalCoordinator(
-                new BalancedRouteAssignmentPolicy(), List.of());
-        List<AgentSnapshot> agents = new ArrayList<>();
-        for (int i = 0; i < 10; i++) {
-            agents.add(agent(String.format("bot-%02d", i), 2_466 + i, 1_086, null, List.of()));
-        }
-        List<RouteSnapshot> routes = List.of(
-                route("route-0", points(2_466, 1_086, 1_700, 4_230)),
-                route("route-1", points(2_466, 1_086, 1_600, 4_230)),
-                route("route-2", points(2_466, 1_086, 1_500, 4_230)),
-                route("route-3", points(2_466, 1_086, 1_400, 4_230)),
-                route("route-4", points(2_466, 1_086, 1_300, 4_230)));
-        TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 4_392, 4_500,
-                routes, agents, List.of(), List.of());
-
-        TacticalPlan plan = bootstrapCoordinator.plan(snapshot);
-        Map<String, Long> routeCounts = plan.orders().values().stream()
-                .collect(java.util.stream.Collectors.groupingBy(TacticalOrder::routeId,
-                        java.util.stream.Collectors.counting()));
-
-        assertEquals(10, plan.orders().size());
-        assertEquals(5, routeCounts.size());
-        assertTrue(routeCounts.values().stream().allMatch(count -> count == 2L));
-        assertTrue(plan.orders().values().stream().allMatch(order ->
-                order.taskType() == TaskType.ADVANCE
-                        && order.routeId() != null
-                        && order.movementTarget() != null
-                        && order.preserveMapRoute()));
-        assertTrue(plan.orders().values().stream().allMatch(order -> routes.stream()
-                .filter(route -> route.routeId().equals(order.routeId()))
-                .anyMatch(route -> route.keyPoints().get(route.keyPoints().size() - 1)
-                        .equals(order.movementTarget()))));
-    }
-
-    @Test
     void singleAgentReceivesUsefulOrderWithoutFixedSquadRequirement() {
         long now = 10_000L;
         AgentSnapshot solo = agent("solo", 100, 100, "route-a", points(100, 100, 600, 100));

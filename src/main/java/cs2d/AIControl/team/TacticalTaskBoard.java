@@ -60,23 +60,14 @@ public final class TacticalTaskBoard {
             TaskState previous = states.get(stateKey);
 
             List<TacticalOrder> assigned = assignmentsByTask.getOrDefault(task.taskId(), List.of());
-            Set<String> assignedAgentIds = assigned.stream()
-                    .map(TacticalOrder::agentId)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
-            boolean completedMovementHasNewAssignment = previous != null
-                    && previous.status() == TaskStatus.COMPLETED
-                    && isFiniteMovementTask(task.taskType())
-                    && !previous.assignedAgentIds().equals(assignedAgentIds);
 
             TaskStatus status;
             if (task.isExpired(now)) {
                 status = TaskStatus.EXPIRED;
             } else if (task.operationId() != null && failedOperations.contains(task.operationId())) {
                 status = TaskStatus.FAILED;
-            } else if (previous != null && previous.status() == TaskStatus.FAILED) {
-                status = previous.status();
-            } else if (previous != null && previous.status() == TaskStatus.COMPLETED
-                    && !completedMovementHasNewAssignment) {
+            } else if (previous != null
+                    && (previous.status() == TaskStatus.COMPLETED || previous.status() == TaskStatus.FAILED)) {
                 status = previous.status();
             } else if (task.operationId() != null && completedOperations.contains(task.operationId())) {
                 status = TaskStatus.COMPLETED;
@@ -92,6 +83,9 @@ public final class TacticalTaskBoard {
             }
 
             long changedAt = previous != null && previous.status() == status ? previous.statusChangedAt() : now;
+            Set<String> assignedAgentIds = assigned.stream()
+                    .map(TacticalOrder::agentId)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
             states.put(stateKey, new TaskState(safeTeamId, task, status, assignedAgentIds, changedAt));
 
             if (status == TaskStatus.ACTIVE) {
