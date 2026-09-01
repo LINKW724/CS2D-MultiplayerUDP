@@ -42,7 +42,6 @@ final class PcmAudioMixer implements AutoCloseable {
     static final long DEVICE_BATCH_DURATION_NANOS = BUFFER_DURATION_NANOS * DEVICE_BATCH_BLOCKS;
     static final long DEVICE_STALL_TIMEOUT_NANOS = TimeUnit.MILLISECONDS.toNanos(150);
     private static final long DEVICE_POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
-    private static final long WATCHDOG_POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(10);
     private static final long REOPEN_RETRY_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
     static final AudioFormat OUTPUT_FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE, 16, CHANNELS,
@@ -156,14 +155,12 @@ final class PcmAudioMixer implements AutoCloseable {
     private final AtomicInteger peakVoiceCount = new AtomicInteger();
     private final AtomicInteger minimumBufferedBlocks = new AtomicInteger(PREBUFFER_BLOCKS);
     private final AtomicLong maximumWriteNanos = new AtomicLong();
-    private final AtomicLong writeStartedNanos = new AtomicLong();
     private final AtomicLong statisticsEpochNanos = new AtomicLong(System.nanoTime());
     private final Object lineLifecycleLock = new Object();
     private volatile SourceDataLine outputLine;
     private volatile PcmBlockRing blockRing;
     private volatile Thread mixerThread;
     private volatile Thread writerThread;
-    private volatile Thread watchdogThread;
 
     boolean start() {
         if (running.get())
@@ -181,25 +178,19 @@ final class PcmAudioMixer implements AutoCloseable {
         clearRequested.set(false);
         flushRequested.set(false);
         recoveryRequested.set(false);
-        writeStartedNanos.set(0L);
         minimumBufferedBlocks.set(PREBUFFER_BLOCKS);
         statisticsEpochNanos.set(System.nanoTime());
         running.set(true);
         Thread mixThread = new Thread(() -> mixLoop(ring, prebufferReady), "CS2D-PCM-Mixer");
         Thread writeThread = new Thread(() -> writeLoop(ring, prebufferReady), "CS2D-PCM-Writer");
-        Thread watchThread = new Thread(() -> watchdogLoop(ring), "CS2D-PCM-Watchdog");
         mixThread.setDaemon(true);
         writeThread.setDaemon(true);
-        watchThread.setDaemon(true);
         mixThread.setPriority(Thread.NORM_PRIORITY);
         writeThread.setPriority(Thread.NORM_PRIORITY);
-        watchThread.setPriority(Thread.NORM_PRIORITY);
         mixerThread = mixThread;
         writerThread = writeThread;
-        watchdogThread = watchThread;
         mixThread.start();
         writeThread.start();
-        watchThread.start();
         System.out.println("[PCM-MIXER] 双线程环形缓冲已启动: 48000Hz / 16-bit / stereo / 256-frame");
         return true;
     }
@@ -404,16 +395,12 @@ final class PcmAudioMixer implements AutoCloseable {
                 continue;
             }
 
-            long callStarted = System.nanoTime();
-            writeStartedNanos.set(callStarted);
             int count;
             try {
                 count = line.write(deviceBatch, written, writable);
             } catch (RuntimeException writeFailure) {
                 requestRecovery(ring);
                 return written;
-            } finally {
-                writeStartedNanos.compareAndSet(callStarted, 0L);
             }
             if (count <= 0) {
                 if (hasDeviceStalled(lastProgressNanos, System.nanoTime())) {
@@ -440,19 +427,6 @@ final class PcmAudioMixer implements AutoCloseable {
         return lastProgressNanos > 0L && nowNanos - lastProgressNanos >= DEVICE_STALL_TIMEOUT_NANOS;
     }
 
-    private void watchdogLoop(PcmBlockRing ring) {
-        while (running.get()) {
-            long started = writeStartedNanos.get();
-            if (started > 0L && hasDeviceStalled(started, System.nanoTime())) {
-                requestRecovery(ring);
-                closeDetachedLine(detachOutputLine(outputLine));
-            }
-            LockSupport.parkNanos(WATCHDOG_POLL_NANOS);
-            if (Thread.interrupted() && !running.get())
-                return;
-        }
-    }
-
     private void requestRecovery(PcmBlockRing ring) {
         if (!recoveryRequested.compareAndSet(false, true))
             return;
@@ -470,7 +444,6 @@ final class PcmAudioMixer implements AutoCloseable {
                 replacement.start();
                 installOutputLine(replacement);
                 recoveryRequested.set(false);
-                writeStartedNanos.set(0L);
                 deviceRecoveryCount.increment();
                 System.out.println("[PCM-MIXER] 音频设备已恢复，陈旧PCM已丢弃。");
                 return replacement;
@@ -538,9 +511,6 @@ final class PcmAudioMixer implements AutoCloseable {
             Thread other = thread == mixerThread ? writerThread : mixerThread;
             if (other != null)
                 other.interrupt();
-            Thread watchdog = watchdogThread;
-            if (watchdog != null)
-                watchdog.interrupt();
             closeLine();
         }
     }
@@ -583,13 +553,10 @@ final class PcmAudioMixer implements AutoCloseable {
         running.set(false);
         Thread mixer = mixerThread;
         Thread writer = writerThread;
-        Thread watchdog = watchdogThread;
         if (mixer != null)
             mixer.interrupt();
         if (writer != null)
             writer.interrupt();
-        if (watchdog != null)
-            watchdog.interrupt();
         closeLine();
         requests.clear();
         PcmBlockRing ring = blockRing;

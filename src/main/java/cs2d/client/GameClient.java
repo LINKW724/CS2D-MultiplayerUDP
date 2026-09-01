@@ -590,6 +590,8 @@ public class GameClient extends Application {
         t.setDaemon(true);
         return t;
     });
+    /** 慢控制台只允许保留一份诊断报告，不能形成后台输出积压。 */
+    private final AtomicBoolean diagnosticsReportPending = new AtomicBoolean(false);
     /** 状态线程只发刷新信号；JavaFX帧边界合并消费，避免120Hz runLater任务堆积。 */
     private final AtomicBoolean buyMenuRefreshPending = new AtomicBoolean(false);
     // 用于处理连接和重连的定时任务执行器
@@ -2501,85 +2503,89 @@ public class GameClient extends Application {
                         perfFogRasterizations = 0;
                         perfFogTransformOnlyFrames = 0;
 
-                        diagnosticsExecutor.execute(() -> {
-                            RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
-                            System.out.println("--- 客户端性能 (最终诊断) (每 ~2s 更新) ---");
-                            System.out.printf("  [A] 帧间总耗时 (Real FPS Time): \t%.3f ms (约 %d FPS)\n", avg_A_TotalFrameTime,
+                        if (diagnosticsReportPending.compareAndSet(false, true)) {
+                            diagnosticsExecutor.execute(() -> {
+                                StringWriter reportBuffer = new StringWriter(4096);
+                                PrintWriter report = new PrintWriter(reportBuffer);
+                                try {
+                                    RuntimePerformanceMonitor.Snapshot runtime = runtimePerformanceMonitor.snapshotAndReset();
+                                    report.println("--- 客户端性能 (最终诊断) (每 ~2s 更新) ---");
+                                    report.printf("  [A] 帧间总耗时 (Real FPS Time): \t%.3f ms (约 %d FPS)\n", avg_A_TotalFrameTime,
                                     (int) (1000.0 / avg_A_TotalFrameTime));
-                            System.out.printf("  [B] 帧内代码 (Code in handle()): \t%.3f ms\n", avg_B_OnFrameCodeTime);
-                            System.out.printf("  [M] 消息处理 (handleServerMessage): \t%.3f ms\n", avg_M_Total);
-                            System.out.printf("  [PACE] 帧外间隔 (目标等待 + Pulse/Prism/系统调度): \t%.3f ms\n",
+                                    report.printf("  [B] 帧内代码 (Code in handle()): \t%.3f ms\n", avg_B_OnFrameCodeTime);
+                                    report.printf("  [M] 消息处理 (handleServerMessage): \t%.3f ms\n", avg_M_Total);
+                                    report.printf("  [PACE] 帧外间隔 (目标等待 + Pulse/Prism/系统调度): \t%.3f ms\n",
                                     avgFramePacingWait);
-                            System.out.printf("  [REAL] 目标 %d Hz | 实际 %.1f FPS | 1%% Low %.1f FPS | p99 %.3f ms | 最大 %.3f ms | 严重迟帧 %d/%d\n",
+                                    report.printf("  [REAL] 目标 %d Hz | 实际 %.1f FPS | 1%% Low %.1f FPS | p99 %.3f ms | 最大 %.3f ms | 严重迟帧 %d/%d\n",
                                     TARGET_RENDER_RATE, pacing.observedFps(), pacing.onePercentLowFps(),
                                     pacing.p99Millis(), pacing.maxMillis(), pacing.severelyLateFrames(),
                                     pacing.sampleCount());
-                            System.out.printf("  [RUNTIME] 进程CPU %.1f%% | FX线程CPU %.1fms (%s) | Prism线程CPU %.1fms (%s)%n",
+                                    report.printf("  [RUNTIME] 进程CPU %.1f%% | FX线程CPU %.1fms (%s) | Prism线程CPU %.1fms (%s)%n",
                                     runtime.processCpuPercent(), runtime.fxThreadCpuMillis(), runtime.fxThreadState(),
                                     runtime.renderThreadCpuMillis(), runtime.renderThreadState());
-                            System.out.printf("            GC %d次 / 停顿%dms | Heap %.1f/%.1f MiB%n",
+                                    report.printf("            GC %d次 / 停顿%dms | Heap %.1f/%.1f MiB%n",
                                     runtime.gcCollections(), runtime.gcPauseMillis(),
                                     runtime.heapUsedMiB(), runtime.heapCommittedMiB());
-                            System.out.printf("  [STATIC-MAP] active=%s | mode=%s | visibleTiles=%d/%d%n",
+                                    report.printf("  [STATIC-MAP] active=%s | mode=%s | visibleTiles=%d/%d%n",
                                     staticMapLayerActive, staticMapLayerMode,
                                     staticMapVisibleTiles, staticMapCachedTiles);
-                            System.out.printf("  [STATIC-VIEWPORT] 重建 %d | 合并块 %d | active=%s%n",
+                                    report.printf("  [STATIC-VIEWPORT] 重建 %d | 合并块 %d | active=%s%n",
                                     staticViewportRebuilds, staticViewportTileBlits, staticViewportActive);
-                            System.out.printf("                    后台 %.3f ms | 覆盖请求 %d | 缓冲 %dx%d%n",
+                                    report.printf("                    后台 %.3f ms | 覆盖请求 %d | 缓冲 %dx%d%n",
                                     staticViewportRebuilds == 0 ? 0.0
                                             : staticViewportBackgroundNanos / (double) staticViewportRebuilds / 1_000_000.0,
                                     staticViewportReplacements, staticViewportWidth, staticViewportHeight);
-                            System.out.printf("  [STATIC-ATLAS] 启动期构建 %d | 节点 %d | 运动中重建 0%n",
+                                    report.printf("  [STATIC-ATLAS] 启动期构建 %d | 节点 %d | 运动中重建 0%n",
                                     staticAtlasBuilds, staticAtlasNodes);
-                            System.out.printf("  [SPRITE-CACHE] 玩家绘制 %d | 地面武器绘制 %d | 新建纹理 %d"
+                                    report.printf("  [SPRITE-CACHE] 玩家绘制 %d | 地面武器绘制 %d | 新建纹理 %d"
                                             + " | 玩家缓存 %d | 武器缓存 %d%n",
                                     playerSpriteDraws, droppedWeaponSpriteDraws, spriteBuilds,
                                     playerSpriteCacheSize, droppedWeaponSpriteCacheSize);
-                            System.out.printf("  [FOG-GEOMETRY] 顶点更新 %d | 仅变换 %d | 复用率 %.1f%%%n",
+                                    report.printf("  [FOG-GEOMETRY] 顶点更新 %d | 仅变换 %d | 复用率 %.1f%%%n",
                                     fogRasterizations, fogTransformOnlyFrames,
                                     fogRasterizations + fogTransformOnlyFrames == 0 ? 0.0
                                             : fogTransformOnlyFrames * 100.0
                                                     / (fogRasterizations + fogTransformOnlyFrames));
-                            System.out.printf("  [FOG-MASK] 请求 %d | 发布 %d | 覆盖 %d | 后台 %.3f ms"
+                                    report.printf("  [FOG-MASK] 请求 %d | 发布 %d | 覆盖 %d | 后台 %.3f ms"
                                             + " | 平均脏区 %.1f Kpix%n",
                                     fogMaskRequests, fogMaskPublished, fogMaskReplacements,
                                     fogMaskPublished == 0 ? 0.0
                                             : fogMaskBackgroundNanos / (double) fogMaskPublished / 1_000_000.0,
                                     fogMaskPublished == 0 ? 0.0
                                             : fogMaskDirtyPixels / (double) fogMaskPublished / 1000.0);
-                            System.out.println("  --- 帧内耗时 [B] 的详细分解 ---");
-                            System.out.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
-                            System.out.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
-                            System.out.println("  --- (渲染 [R] 的详细分解) ---");
-                            System.out.printf("          [1] FOV计算: \t\t%.3f ms\n", avgFov);
-                            System.out.printf("          [2] 世界渲染: \t\t%.3f ms\n", avgWorld);
-                            System.out.printf("          [3] 迷雾绘制: \t\t%.3f ms\n", avgFog);
-                            System.out.printf("          [4] HUD 绘制: \t\t%.3f ms\n", avgHud);
-                            System.out.printf("  [FOV-BG] 请求 %d | 实算 %d | 发布 %d | 待算覆盖 %d | 过期结果 %d\n",
+                                    report.println("  --- 帧内耗时 [B] 的详细分解 ---");
+                                    report.printf("      [L] 游戏逻辑 (Logic): \t\t%.3f ms\n", avgLogicTotal);
+                                    report.printf("      [R] 渲染总耗时 (draw()): \t%.3f ms\n", avgTotalDraw);
+                                    report.println("  --- (渲染 [R] 的详细分解) ---");
+                                    report.printf("          [1] FOV计算: \t\t%.3f ms\n", avgFov);
+                                    report.printf("          [2] 世界渲染: \t\t%.3f ms\n", avgWorld);
+                                    report.printf("          [3] 迷雾绘制: \t\t%.3f ms\n", avgFog);
+                                    report.printf("          [4] HUD 绘制: \t\t%.3f ms\n", avgHud);
+                                    report.printf("  [FOV-BG] 请求 %d | 实算 %d | 发布 %d | 待算覆盖 %d | 过期结果 %d\n",
                                     fovRequests, fovCalculations, fovPublished, fovPendingReplaced, fovStaleResults);
-                            System.out.printf("           后台耗时 avg %.3f ms / max %.3f ms"
+                                    report.printf("           后台耗时 avg %.3f ms / max %.3f ms"
                                             + " | 查询 %.3f ms | 边提取 %.3f ms | 求交 %.3f ms\n",
                                     fovBackgroundAvgMs, fovMaxNanos / 1_000_000.0,
                                     fovCalculations == 0 ? 0.0 : fovQueryTotal / (double) fovCalculations / 1_000_000.0,
                                     fovCalculations == 0 ? 0.0 : fovEdgeTotal / (double) fovCalculations / 1_000_000.0,
                                     fovCalculations == 0 ? 0.0
                                             : fovIntersectionTotal / (double) fovCalculations / 1_000_000.0);
-                            System.out.printf("           候选障碍 avg %.1f | 顶点 avg %.1f -> %.1f | 最新发布顶点 %d\n",
+                                    report.printf("           候选障碍 avg %.1f | 顶点 avg %.1f -> %.1f | 最新发布顶点 %d\n",
                                     fovCalculations == 0 ? 0.0 : fovCandidateTotal / (double) fovCalculations,
                                     fovCalculations == 0 ? 0.0 : fovRawVertices / (double) fovCalculations,
                                     fovCalculations == 0 ? 0.0 : fovFinalVertices / (double) fovCalculations,
                                     fovLatestVertices);
-                            System.out.printf("  [HUD-CACHE] 装备节点重建 %d | 全局可见性遍历 %d\n",
+                                    report.printf("  [HUD-CACHE] 装备节点重建 %d | 全局可见性遍历 %d\n",
                                     equipmentHudRebuilds, hudVisibilityPasses);
-                            System.out.printf("  [NET-CHUNK] UDP分片 %d | 完整消息 %d | 后台拼包 %.3f ms/帧\n",
+                                    report.printf("  [NET-CHUNK] UDP分片 %d | 完整消息 %d | 后台拼包 %.3f ms/帧\n",
                                     chunkDatagrams, completedChunkMessages, avg_M3_Chunk);
-                            System.out.printf("  [NET-STATE] 覆盖旧快照 %d | 待消费状态 %d | 排队事件 %d\n",
+                                    report.printf("  [NET-STATE] 覆盖旧快照 %d | 待消费状态 %d | 排队事件 %d\n",
                                     coalescedStateMessages, pendingStateCount, queuedEventCount);
-                            System.out.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
+                                    report.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
                                     mediaSoundsPlayed, mediaSoundsSuppressed);
-                            System.out.printf("  [AUDIO-EVENT] 同来源脚步/换弹重复丢弃 %d%n",
+                                    report.printf("  [AUDIO-EVENT] 同来源脚步/换弹重复丢弃 %d%n",
                                     repeatedWorldSoundsSuppressed);
-                            System.out.printf("  [AUDIO-PCM] 请求 %d | 已混音 %d | 活动 %d | 峰值 %d | 排队 %d"
+                                    report.printf("  [AUDIO-PCM] 请求 %d | 已混音 %d | 活动 %d | 峰值 %d | 排队 %d"
                                             + " | 缓冲 %d块/min %d | 欠载 %d"
                                             + " | 写入 %d批/%d帧 实时%.1f%% %.3f/%.3fms | 迟写 %d"
                                             + " | 设备恢复 %d | 陈旧块丢弃 %d"
@@ -2592,14 +2598,21 @@ public class GameClient extends Application {
                                     pcmSnapshot.maximumWriteMillis(), pcmSnapshot.lateWrites(),
                                     pcmSnapshot.deviceRecoveries(), pcmSnapshot.staleBlocksDropped(),
                                     pcmFallbackCount, pcmSnapshot.running());
-                            System.out.println("  --- (消息处理 [M] 的详细分解) ---");
-                            System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
-                            System.out.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
-                            System.out.printf("      [M3] Chunk: \t\t%.3f ms\n", avg_M3_Chunk);
-                            System.out.printf("      [M4] Map Data: \t\t%.3f ms\n", avg_M4_Map);
-                            System.out.printf("      [M5] Events: \t\t%.3f ms\n", avg_M5_Events);
-                            System.out.println("----------------------------------------");
-                        });
+                                    report.println("  --- (消息处理 [M] 的详细分解) ---");
+                                    report.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
+                                    report.printf("      [M2] Small Update: \t%.3f ms\n", avg_M2_Small);
+                                    report.printf("      [M3] Chunk: \t\t%.3f ms\n", avg_M3_Chunk);
+                                    report.printf("      [M4] Map Data: \t\t%.3f ms\n", avg_M4_Map);
+                                    report.printf("      [M5] Events: \t\t%.3f ms\n", avg_M5_Events);
+                                    report.println("----------------------------------------");
+                                } finally {
+                                    report.flush();
+                                    // 单次写入，避免 IDEA 为几十次 println 连续刷新控制台并抢占 Prism。
+                                    System.out.print(reportBuffer);
+                                    diagnosticsReportPending.set(false);
+                                }
+                            });
+                        }
 
                         // 重置所有累加器
                         perfTime_A_TotalFrameTime = 0;
