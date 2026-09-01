@@ -3273,13 +3273,7 @@ public class GameState {
                 && actionTarget.getCurrentWeapon().magazineSize != actionTarget.currentAmmo) {
             // 尝试开始换弹，如果换弹成功（例如，成功修改了状态），则继续
             actionTarget.startReload();
-
-            // 此时，角色刚刚进入换弹状态，广播音效
-            Weapon weapon = actionTarget.getCurrentWeapon();
-            if (weapon != null) {
-                addSoundEvent(SoundEvent.SoundType.RELOAD, weapon.name() + "_reload", actionTarget.position.x,
-                        actionTarget.position.y, actionTarget.id);
-            }
+            // Player.startReload() 已负责广播一次换弹音效，不能在这里重复广播。
         }
         // 如果角色已经在换弹中，则不执行任何操作（包括不广播音效）
     }
