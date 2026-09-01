@@ -366,6 +366,60 @@ public class PathfindingModule {
                 .toList();
     }
 
+    /**
+     * Executes one commander-selected authored route. The route is trimmed at
+     * the tactical objective, so a hold/suppress order does not run all the way
+     * to the enemy spawn. Repeated 4 Hz orders for the same route do not restart
+     * the relay path.
+     */
+    public synchronized boolean followPresetRoute(String routeId, Point2D.Double finalTarget) {
+        if (routeId == null || finalTarget == null || presetPathModule == null || !presetPathModule.isLoaded()) {
+            return false;
+        }
+        if (routeId.equals(assignedPresetRouteId) && isFollowingPresetPath
+                && targetPosition != null && targetPosition.distanceSq(finalTarget) <= 25.0 * 25.0) {
+            targetPosition = new Point2D.Double(finalTarget.x, finalTarget.y);
+            return true;
+        }
+
+        PresetPathModule.PresetPathSelection selection = presetPathModule.getPresetPathSelection(routeId);
+        if (selection == null || selection.keyPoints().isEmpty()) {
+            return false;
+        }
+        List<Point2D.Double> fullRoute = selection.keyPoints();
+        int targetIndex = nearestPointIndex(fullRoute, finalTarget, fullRoute.size() - 1);
+        List<Point2D.Double> tacticalRoute = List.copyOf(fullRoute.subList(0, targetIndex + 1));
+        int startIndex = nearestPointIndex(tacticalRoute, owner.position, targetIndex);
+
+        this.targetPosition = new Point2D.Double(finalTarget.x, finalTarget.y);
+        this.presetKeyPoints = tacticalRoute;
+        this.presetKeyPointIndex = startIndex;
+        this.isFollowingPresetPath = true;
+        this.hasUsedPresetPathThisLife = true;
+        this.assignedPresetRouteId = routeId;
+        this.assignedPresetRoutePoints = List.copyOf(fullRoute);
+        this.isActive = true;
+        clearPath();
+        return true;
+    }
+
+    private static int nearestPointIndex(List<Point2D.Double> points, Point2D.Double target, int maximumIndex) {
+        if (target == null || points.isEmpty()) {
+            return 0;
+        }
+        int limit = Math.min(maximumIndex, points.size() - 1);
+        int nearestIndex = 0;
+        double nearestDistanceSq = Double.POSITIVE_INFINITY;
+        for (int i = 0; i <= limit; i++) {
+            double distanceSq = points.get(i).distanceSq(target);
+            if (distanceSq < nearestDistanceSq) {
+                nearestDistanceSq = distanceSq;
+                nearestIndex = i;
+            }
+        }
+        return nearestIndex;
+    }
+
     // =========================================================================
     // --- 核心逻辑 ---
     // =========================================================================

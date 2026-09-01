@@ -12,10 +12,12 @@ import java.util.List;
  */
 final class TeamSoundResponsePolicy {
 
-    private static final double GUNSHOT_RESPONSE_RATIO = 0.16;
-    private static final int MAX_GUNSHOT_RESPONDERS = 4;
-    private static final double FOOTSTEP_RESPONSE_RATIO = 0.08;
-    private static final int MAX_FOOTSTEP_RESPONDERS = 2;
+    private static final double GUNSHOT_RESPONSE_RATIO = 0.10;
+    private static final int MAX_GUNSHOT_RESPONDERS = 3;
+    private static final double FOOTSTEP_RESPONSE_RATIO = 0.05;
+    private static final int MAX_FOOTSTEP_RESPONDERS = 1;
+    private static final double MAX_GUNSHOT_RESPONSE_DISTANCE = 900.0;
+    private static final double MAX_FOOTSTEP_RESPONSE_DISTANCE = 650.0;
 
     private TeamSoundResponsePolicy() {
     }
@@ -33,6 +35,12 @@ final class TeamSoundResponsePolicy {
         }
 
         double ownerDistanceSq = owner.position.distanceSq(soundPosition);
+        double maximumDistance = type == PerceptionType.GUNSHOT
+                ? MAX_GUNSHOT_RESPONSE_DISTANCE
+                : MAX_FOOTSTEP_RESPONSE_DISTANCE;
+        if (ownerDistanceSq > maximumDistance * maximumDistance) {
+            return false;
+        }
         int candidatesAhead = 0;
         boolean ownerIsEligible = false;
 

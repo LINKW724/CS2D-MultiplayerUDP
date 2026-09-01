@@ -55,6 +55,7 @@ public class TEAM_DEATHMATCHcontrol {
     private AIState currentState = AIState.PATROLLING;
     private Player primaryTarget = null;
     private Point2D.Double lastKnownPosition = null;
+    private final SoundPursuitGate soundPursuitGate = new SoundPursuitGate();
 
     // --- 状态机计时器 ---
     private long lastStateChangeTime = 0;
@@ -175,6 +176,8 @@ public class TEAM_DEATHMATCHcontrol {
      * intent. Sight and immediate survival remain local responsibilities.
      */
     public AIInput update(AIWorldView worldView, long currentTime, TacticalOrder tacticalOrder) {
+
+        soundPursuitGate.updateOrder(tacticalOrder, currentTime);
 
         // --- 新增：步骤 0 - 处理 GrenadeModule 指令 (最高优先级) ---
         boolean isStationary = (owner.vx * owner.vx + owner.vy * owner.vy < 0.1);
@@ -636,6 +639,8 @@ public class TEAM_DEATHMATCHcontrol {
         // --- ^^^^ [修复结束] ^^^^ ---
 
         double minScore = Double.POSITIVE_INFINITY; // 初始化最低分数为无穷大
+        int bestPerceptionTier = Integer.MAX_VALUE;
+        PerceptionType newBestType = null;
         List<Player> eligibleSoundResponders = null;
 
         // 添加 perceptionModule null 检查
@@ -643,6 +648,15 @@ public class TEAM_DEATHMATCHcontrol {
             this.primaryTarget = null;
             this.lastKnownPosition = null;
             return;
+        }
+
+        String lockedSoundTargetId = soundPursuitGate.lockedTargetId(currentTime);
+        if (lockedSoundTargetId != null) {
+            PerceptionModule.PerceptionInfo lockedInfo = perceptionModule.getPerceptionInfo(lockedSoundTargetId);
+            Player lockedPlayer = gameState.getPlayerById(lockedSoundTargetId);
+            if (lockedInfo == null || lockedPlayer == null || !lockedPlayer.isAlive()) {
+                soundPursuitGate.clearTargetLock();
+            }
         }
 
         // 遍历感知模块提供的所有敌人信息
@@ -662,7 +676,9 @@ public class TEAM_DEATHMATCHcontrol {
             if (info.type() != PerceptionType.SIGHT) {
                 double soundDistance = owner.position.distance(info.lastKnownPosition());
                 if (tacticalOrder != null && tacticalOrder.isActive(currentTime)) {
-                    if (!tacticalOrder.allowsSoundTarget(info.enemyId(), soundDistance)) {
+                    if (!soundPursuitGate.canPursue(tacticalOrder, currentTime)
+                            || !tacticalOrder.allowsSoundTarget(info.enemyId(), soundDistance)
+                            || !soundPursuitGate.acceptsTarget(info.enemyId(), currentTime)) {
                         continue;
                     }
                 } else {
@@ -678,6 +694,7 @@ public class TEAM_DEATHMATCHcontrol {
 
             double distanceSq = owner.position.distanceSq(info.lastKnownPosition());
             double score = distanceSq; // 基础分数是距离
+            int perceptionTier = info.type() == PerceptionType.SIGHT ? 0 : 1;
 
             // 根据感知类型调整分数（视觉优先，脚步声次之）
             switch (info.type()) {
@@ -703,12 +720,31 @@ public class TEAM_DEATHMATCHcontrol {
                 age = 0;
             score *= (1.0 + (double) age / 2000.0); // 每过2秒优先级降低一倍
 
-            if (score < minScore) {
+            if (perceptionTier < bestPerceptionTier
+                    || (perceptionTier == bestPerceptionTier && score < minScore)) {
+                bestPerceptionTier = perceptionTier;
                 minScore = score; // 更新最低分数
                 newBestTarget = enemyPlayer; // 更新最佳目标
-                newBestLKP = info.lastKnownPosition(); // 更新最佳目标位置
+                newBestType = info.type();
+                if (perceptionTier == 1 && tacticalOrder != null
+                        && tacticalOrder.taskType() == TacticalOrder.TaskType.RESPOND_TO_CONTACT
+                        && tacticalOrder.movementTarget() != null) {
+                    Vec2 objective = tacticalOrder.movementTarget();
+                    Point2D.Double fixedBattleZone = new Point2D.Double(objective.x(), objective.y());
+                    newBestLKP = pathfindingModule != null && pathfindingModule.isWalkable(fixedBattleZone)
+                            ? fixedBattleZone
+                            : info.lastKnownPosition();
+                } else {
+                    newBestLKP = info.lastKnownPosition(); // 更新最佳目标位置
+                }
             }
         } // --- 敌人信息遍历结束 ---
+
+        if (newBestType == PerceptionType.SIGHT) {
+            soundPursuitGate.clearTargetLock();
+        } else if (newBestTarget != null) {
+            soundPursuitGate.lockTarget(newBestTarget.id, currentTime);
+        }
 
         if (oldTarget != newBestTarget) {
             this.targetAcquiredTime = currentTime; // 重置反应计时器
@@ -732,14 +768,31 @@ public class TEAM_DEATHMATCHcontrol {
                 || primaryTarget != null || pathfindingModule == null || owner.position == null) {
             return false;
         }
+        if (order.taskType() == TacticalOrder.TaskType.RESPOND_TO_CONTACT
+                && !soundPursuitGate.canPursue(order, currentTime)) {
+            return false;
+        }
 
         Vec2 target = order.movementTarget();
         Point2D.Double targetPoint = new Point2D.Double(target.x(), target.y());
+        if (order.taskType() == TacticalOrder.TaskType.RESPOND_TO_CONTACT
+                && !pathfindingModule.isWalkable(targetPoint)) {
+            return false;
+        }
         double arrivalRadius = Math.max(20.0, order.arrivalRadius());
         if (owner.position.distanceSq(targetPoint) <= arrivalRadius * arrivalRadius) {
             if (pathfindingModule.isActive()) {
                 pathfindingModule.setTarget(null);
             }
+            return true;
+        }
+
+        boolean authoredManeuverRoute = order.preserveMapRoute()
+                && order.routeId() != null
+                && (order.taskType() == TacticalOrder.TaskType.FLANK
+                || order.taskType() == TacticalOrder.TaskType.SUPPRESS
+                || order.taskType() == TacticalOrder.TaskType.ADVANCE);
+        if (authoredManeuverRoute && pathfindingModule.followPresetRoute(order.routeId(), targetPoint)) {
             return true;
         }
 
@@ -937,6 +990,7 @@ public class TEAM_DEATHMATCHcontrol {
         // 1. 清除所有战术和目标信息
         this.primaryTarget = null;
         this.lastKnownPosition = null;
+        this.soundPursuitGate.reset();
 
         // 2. 重置状态机
         this.currentState = AIState.PATROLLING; // 重生后默认进入巡逻
@@ -1004,6 +1058,7 @@ public class TEAM_DEATHMATCHcontrol {
     public void cancelPendingActions() {
         primaryTarget = null;
         lastKnownPosition = null;
+        soundPursuitGate.reset();
         currentState = AIState.PATROLLING;
         if (pathfindingModule != null)
             pathfindingModule.reset();
@@ -1038,6 +1093,7 @@ public class TEAM_DEATHMATCHcontrol {
         // 击杀发生后，清除所有目标和记忆。
         this.primaryTarget = null;
         this.lastKnownPosition = null;
+        this.soundPursuitGate.reset();
 
         // 通知 PerceptionModule 清除所有感知信息
         if (this.perceptionModule != null) {

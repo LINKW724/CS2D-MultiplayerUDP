@@ -16,12 +16,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class TeamSoundResponsePolicyTest {
 
     @Test
-    void capsLargeTeamGunshotResponseAtFourNearestAi() {
+    void capsLargeTeamGunshotResponseAtThreeNearbyAi() {
         List<Player> team = lineOfPlayers(25);
         Point2D.Double sound = new Point2D.Double(0, 0);
 
         for (int i = 0; i < team.size(); i++) {
-            assertEquals(i < 4,
+            assertEquals(i < 3,
                     TeamSoundResponsePolicy.shouldRespond(team.get(i), sound, PerceptionType.GUNSHOT, team));
         }
     }
@@ -29,9 +29,9 @@ class TeamSoundResponsePolicyTest {
     @Test
     void usesSmallerSquadsForSmallTeamsAndFootsteps() {
         assertEquals(1, TeamSoundResponsePolicy.responseLimit(PerceptionType.GUNSHOT, 5));
-        assertEquals(2, TeamSoundResponsePolicy.responseLimit(PerceptionType.GUNSHOT, 10));
-        assertEquals(4, TeamSoundResponsePolicy.responseLimit(PerceptionType.GUNSHOT, 25));
-        assertEquals(2, TeamSoundResponsePolicy.responseLimit(PerceptionType.FOOTSTEP, 25));
+        assertEquals(1, TeamSoundResponsePolicy.responseLimit(PerceptionType.GUNSHOT, 10));
+        assertEquals(3, TeamSoundResponsePolicy.responseLimit(PerceptionType.GUNSHOT, 25));
+        assertEquals(1, TeamSoundResponsePolicy.responseLimit(PerceptionType.FOOTSTEP, 25));
     }
 
     @Test
@@ -52,6 +52,17 @@ class TeamSoundResponsePolicyTest {
         assertEquals(0, TeamSoundResponsePolicy.responseLimit(PerceptionType.SIGHT, team.size()));
         assertFalse(TeamSoundResponsePolicy.shouldRespond(team.get(0), new Point2D.Double(),
                 PerceptionType.SIGHT, team));
+    }
+
+    @Test
+    void doesNotChaseSoundsOutsideShortParticipationWindow() {
+        Player owner = player("owner", 0, 0);
+        List<Player> team = List.of(owner);
+
+        assertFalse(TeamSoundResponsePolicy.shouldRespond(owner,
+                new Point2D.Double(901, 0), PerceptionType.GUNSHOT, team));
+        assertFalse(TeamSoundResponsePolicy.shouldRespond(owner,
+                new Point2D.Double(651, 0), PerceptionType.FOOTSTEP, team));
     }
 
     private static List<Player> lineOfPlayers(int count) {

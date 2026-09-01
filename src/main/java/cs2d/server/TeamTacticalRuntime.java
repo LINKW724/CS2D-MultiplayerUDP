@@ -1,15 +1,21 @@
 package cs2d.server;
 
 import cs2d.AIControl.A.PathfindingModule;
+import cs2d.AIControl.route.PresetRouteCatalogRepository;
+import cs2d.AIControl.route.RouteCatalog;
+import cs2d.AIControl.route.RouteDescriptor;
 import cs2d.AIControl.team.TacticalCoordinator;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalOrderProvider;
+import cs2d.AIControl.team.TacticalPlan;
+import cs2d.AIControl.team.TacticalTaskBoard;
 import cs2d.AIControl.team.TeamTacticalSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.AgentSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.ContactSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.ContactType;
 import cs2d.AIControl.team.TeamTacticalSnapshot.HazardSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.HazardType;
+import cs2d.AIControl.team.TeamTacticalSnapshot.RouteSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
 import cs2d.playerAndAi.Player;
 
@@ -35,13 +41,20 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
 
     private final GameState gameState;
     private final TacticalCoordinator coordinator;
+    private final RouteCatalog routeCatalog;
+    private final TacticalTaskBoard taskBoard = new TacticalTaskBoard();
     private final Map<String, SoundEvent> recentContacts = new LinkedHashMap<>();
     private volatile Map<String, TacticalOrder> orders = Map.of();
     private long lastPlanTime;
 
     TeamTacticalRuntime(GameState gameState, TacticalCoordinator coordinator) {
+        this(gameState, coordinator, PresetRouteCatalogRepository.load(GameServer.getMapName()));
+    }
+
+    TeamTacticalRuntime(GameState gameState, TacticalCoordinator coordinator, RouteCatalog routeCatalog) {
         this.gameState = Objects.requireNonNull(gameState, "gameState");
         this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
+        this.routeCatalog = Objects.requireNonNull(routeCatalog, "routeCatalog");
     }
 
     void update(long now, List<SoundEvent> sounds, List<Player> independentAis) {
@@ -70,10 +83,10 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
         Map<String, TacticalOrder> nextOrders = new LinkedHashMap<>();
         for (Map.Entry<Player.Team, List<Player>> entry : teams.entrySet()) {
             TeamTacticalSnapshot snapshot = buildSnapshot(now, entry.getKey(), entry.getValue(), playersById);
-            Map<String, TacticalOrder> teamOrders = coordinator.coordinate(snapshot);
-            if (teamOrders != null) {
-                nextOrders.putAll(teamOrders);
-            }
+            TacticalPlan proposed = coordinator.plan(snapshot);
+            TacticalTaskBoard.ReconciledPlan reconciled = taskBoard.reconcile(
+                    entry.getKey().name(), proposed, snapshot, now);
+            nextOrders.putAll(reconciled.activeOrders());
         }
         orders = Map.copyOf(nextOrders);
     }
@@ -91,6 +104,7 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
 
     void clear() {
         recentContacts.clear();
+        taskBoard.clear();
         orders = Map.of();
         lastPlanTime = 0L;
     }
@@ -99,6 +113,10 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
             Map<String, Player> playersById) {
         List<AgentSnapshot> agentSnapshots = agents.stream()
                 .map(ai -> toAgentSnapshot(now, ai))
+                .toList();
+        List<RouteSnapshot> routeSnapshots = routeCatalog.routes().stream()
+                .filter(route -> route.type().isTdm() && route.type().teamId().equals(team.name()))
+                .map(TeamTacticalRuntime::toRouteSnapshot)
                 .toList();
         List<ContactSnapshot> contacts = new ArrayList<>();
         List<HazardSnapshot> hazards = new ArrayList<>();
@@ -140,7 +158,7 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
         }
 
         return new TeamTacticalSnapshot(team.name(), now, gameState.getMapWidth(), gameState.getMapHeight(),
-                agentSnapshots, contacts, hazards);
+                routeSnapshots, agentSnapshots, contacts, hazards);
     }
 
     private AgentSnapshot toAgentSnapshot(long now, Player ai) {
@@ -172,6 +190,14 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
 
     private static Vec2 toVec(Point2D.Double point) {
         return new Vec2(point.x, point.y);
+    }
+
+    private static RouteSnapshot toRouteSnapshot(RouteDescriptor route) {
+        List<Vec2> points = route.keyPoints().stream()
+                .map(point -> new Vec2(point.x(), point.y()))
+                .toList();
+        return new RouteSnapshot(route.routeId(), route.type().name(), points, route.length(),
+                route.suggestedCapacity(), route.overlappingRouteIds().stream().sorted().toList());
     }
 
     private static double remainingFraction(long age, long lifetime) {

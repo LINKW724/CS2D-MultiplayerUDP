@@ -7,6 +7,7 @@ import cs2d.AIControl.team.TeamTacticalSnapshot.ContactSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.ContactType;
 import cs2d.AIControl.team.TeamTacticalSnapshot.HazardSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.HazardType;
+import cs2d.AIControl.team.TeamTacticalSnapshot.RouteSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
 import org.junit.jupiter.api.Test;
 
@@ -50,7 +51,7 @@ class AdaptiveTeamTacticalCoordinatorTest {
     }
 
     @Test
-    void largeTeamSendsOnlyFourClosestAgentsToGunshot() {
+    void largeTeamSendsOnlyThreeNearbyAgentsToGunshot() {
         long now = 30_000L;
         List<AgentSnapshot> agents = new ArrayList<>();
         for (int i = 0; i < 25; i++) {
@@ -64,7 +65,7 @@ class AdaptiveTeamTacticalCoordinatorTest {
         long responders = orders.values().stream()
                 .filter(order -> order.allowedSoundTargetIds().contains("enemy"))
                 .count();
-        assertEquals(4, responders);
+        assertEquals(3, responders);
     }
 
     @Test
@@ -84,10 +85,79 @@ class AdaptiveTeamTacticalCoordinatorTest {
         long responders = orders.values().stream()
                 .filter(order -> !order.allowedSoundTargetIds().isEmpty())
                 .count();
-        assertEquals(4, responders);
+        assertEquals(3, responders);
         assertTrue(orders.values().stream()
                 .filter(order -> !order.allowedSoundTargetIds().isEmpty())
                 .allMatch(order -> order.allowedSoundTargetIds().size() == 25));
+
+        TacticalPlan plan = coordinator.plan(snapshot(now, agents, contacts, List.of()));
+        List<TacticalTask> responseTasks = plan.tasks().stream()
+                .filter(task -> task.taskType() == TaskType.RESPOND_TO_CONTACT)
+                .toList();
+        assertEquals(1, responseTasks.size());
+        assertEquals(1, responseTasks.get(0).minimumAgents());
+        assertEquals(3, responseTasks.get(0).maximumAgents());
+        assertEquals(3, plan.orders().values().stream()
+                .filter(order -> responseTasks.get(0).taskId().equals(order.taskId()))
+                .count());
+    }
+
+    @Test
+    void ignoresGunshotThatCannotBeReachedWithinParticipationWindow() {
+        long now = 36_000L;
+        List<AgentSnapshot> agents = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            agents.add(agent("bot-" + i, i * 20, 0, null, List.of()));
+        }
+        ContactSnapshot remote = new ContactSnapshot("enemy", new Vec2(2_000, 0),
+                ContactType.GUNSHOT, now);
+
+        TacticalPlan plan = coordinator.plan(snapshot(now, agents, List.of(remote), List.of()));
+
+        assertTrue(plan.orders().values().stream()
+                .noneMatch(order -> order.taskType() == TaskType.RESPOND_TO_CONTACT));
+    }
+
+    @Test
+    void ignoresRemoteSoundOutsideOrBehindAuthoredRouteButAcceptsNearbySound() {
+        long now = 36_500L;
+        List<Vec2> route = points(0, 0, 500, 0, 1_000, 0);
+        List<AgentSnapshot> agents = List.of(
+                agent("a", 900, 0, "route", route),
+                agent("b", 930, 0, "route", route),
+                agent("c", 960, 0, "route", route));
+        ContactSnapshot behind = new ContactSnapshot("behind", new Vec2(100, 0),
+                ContactType.GUNSHOT, now);
+        ContactSnapshot offRoute = new ContactSnapshot("off-route", new Vec2(600, 700),
+                ContactType.GUNSHOT, now);
+
+        TacticalPlan rejected = coordinator.plan(snapshot(now, agents, List.of(behind, offRoute), List.of()));
+        assertTrue(rejected.orders().values().stream()
+                .noneMatch(order -> order.taskType() == TaskType.RESPOND_TO_CONTACT));
+
+        ContactSnapshot nearby = new ContactSnapshot("nearby", new Vec2(700, 0),
+                ContactType.GUNSHOT, now);
+        TacticalPlan accepted = coordinator.plan(snapshot(now, agents, List.of(nearby), List.of()));
+        assertTrue(accepted.orders().values().stream()
+                .anyMatch(order -> order.taskType() == TaskType.RESPOND_TO_CONTACT));
+    }
+
+    @Test
+    void everyAdaptiveOrderBelongsToAnExplicitBoundedTask() {
+        long now = 37_000L;
+        List<AgentSnapshot> agents = List.of(
+                agent("a", 100, 100, "route-a", points(100, 100, 500, 100)),
+                agent("b", 180, 100, "route-a", points(100, 100, 500, 100)),
+                agent("c", 900, 100, "route-b", points(900, 100, 1_200, 100)));
+
+        TacticalPlan plan = coordinator.plan(snapshot(now, agents, List.of(), List.of()));
+
+        assertEquals(agents.size(), plan.orders().size());
+        assertTrue(plan.orders().values().stream().allMatch(order -> order.taskId() != null));
+        assertTrue(plan.tasks().stream().allMatch(task -> task.minimumAgents() >= 1
+                && task.maximumAgents() >= task.minimumAgents()));
+        assertTrue(plan.orders().values().stream().allMatch(order -> plan.tasks().stream()
+                .anyMatch(task -> task.taskId().equals(order.taskId()))));
     }
 
     @Test
@@ -115,6 +185,32 @@ class AdaptiveTeamTacticalCoordinatorTest {
     }
 
     @Test
+    void canAssignAnAuthoredRouteThatCurrentlyHasNoAgents() {
+        long now = 45_000L;
+        List<Vec2> riskyRoute = points(100, 100, 300, 100, 500, 100);
+        List<Vec2> occupiedRoute = points(650, 100, 850, 100, 1_050, 100);
+        List<Vec2> unusedSafeRoute = points(700, 500, 900, 500, 1_100, 500);
+        List<AgentSnapshot> agents = List.of(
+                agent("a1", 100, 100, "risky", riskyRoute),
+                agent("a2", 150, 100, "risky", riskyRoute),
+                agent("b1", 650, 100, "occupied", occupiedRoute),
+                agent("b2", 700, 100, "occupied", occupiedRoute));
+        List<RouteSnapshot> routes = List.of(
+                route("risky", riskyRoute),
+                route("occupied", occupiedRoute),
+                route("unused-safe", unusedSafeRoute));
+        List<HazardSnapshot> hazards = List.of(
+                new HazardSnapshot(new Vec2(300, 100), 5.0, HazardType.FRIENDLY_DEATH, now));
+        TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 4_392, 3_840,
+                routes, agents, List.of(), hazards);
+
+        Map<String, TacticalOrder> orders = coordinator.coordinate(snapshot);
+
+        assertTrue(orders.values().stream().anyMatch(order -> order.taskType() == TaskType.FLANK
+                && "unused-safe".equals(order.routeId())));
+    }
+
+    @Test
     void isolatedAgentIsOrderedToRegroupWithNearestTeammate() {
         long now = 50_000L;
         List<AgentSnapshot> agents = List.of(
@@ -137,6 +233,10 @@ class AdaptiveTeamTacticalCoordinatorTest {
 
     private static AgentSnapshot agent(String id, double x, double y, String routeId, List<Vec2> routePoints) {
         return new AgentSnapshot(id, new Vec2(x, y), 100, false, false, routeId, routePoints);
+    }
+
+    private static RouteSnapshot route(String id, List<Vec2> points) {
+        return new RouteSnapshot(id, "TDM_CT_T", points, 1_000.0, 0, List.of());
     }
 
     private static List<Vec2> points(double... coordinates) {

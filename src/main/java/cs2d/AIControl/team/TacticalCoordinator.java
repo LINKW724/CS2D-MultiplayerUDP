@@ -9,4 +9,12 @@ import java.util.Map;
 @FunctionalInterface
 public interface TacticalCoordinator {
     Map<String, TacticalOrder> coordinate(TeamTacticalSnapshot snapshot);
+
+    /**
+     * Extended planning API. Existing coordinators remain source-compatible and
+     * are treated as order-only planners until they opt into explicit tasks.
+     */
+    default TacticalPlan plan(TeamTacticalSnapshot snapshot) {
+        return TacticalPlan.ordersOnly(coordinate(snapshot));
+    }
 }
