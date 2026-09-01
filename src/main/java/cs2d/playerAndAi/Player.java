@@ -565,6 +565,12 @@ public class Player {
                         this.secondary_currentAmmo = this.secondaryWeapon.magazineSize;
                         this.secondary_reserveAmmo = this.secondaryWeapon.magazineSize * ammoMultiplier;
                   }
+                  // 如果死亡时正拿着手枪，先同步刚补满的副武器弹药。否则 switchToSlot(1)
+                  // 会把死亡前的 currentAmmo/reserveAmmo 重新写回副武器槽，覆盖复活补给。
+                  if (this.currentSlot == 2 && this.secondaryWeapon != null) {
+                        this.currentAmmo = this.secondary_currentAmmo;
+                        this.reserveAmmo = this.secondary_reserveAmmo;
+                  }
                   this.switchToSlot(1);
             } else if (gameMode == GameMode.ZOMBIE_MODE) {
                   if (team == Team.CT) {
