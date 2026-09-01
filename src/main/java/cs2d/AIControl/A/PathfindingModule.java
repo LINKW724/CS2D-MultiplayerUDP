@@ -78,6 +78,9 @@ public class PathfindingModule {
     // --- [新] "接力赛" 状态字段 ---
     /** 预设路径的关键点列表 (例如 [P1, P2 ... P10]) */
     private List<Point2D.Double> presetKeyPoints;
+    /** Map-authored route assigned for this life; retained after local combat interrupts it. */
+    private String assignedPresetRouteId;
+    private List<Point2D.Double> assignedPresetRoutePoints = List.of();
     /** "接力赛" 当前的目标点索引 (例如 0 代表 P1) */
     private int presetKeyPointIndex;
 
@@ -144,6 +147,8 @@ public class PathfindingModule {
         this.hasUsedPresetPathThisLife = false;
         this.isFollowingPresetPath = false;
         this.presetKeyPoints = null;
+        this.assignedPresetRouteId = null;
+        this.assignedPresetRoutePoints = List.of();
         this.pathTargetAngle = owner.angle;
         this.pathCurrentAngle = owner.angle;
         this.presetKeyPointIndex = 0;
@@ -289,7 +294,9 @@ public class PathfindingModule {
         // 4. 如果找到了合适的路径类型
         if (selectedPathType != null) {
             // 尝试获取预设路径点
-            List<Point2D.Double> keyPoints = presetPathModule.getPresetKeyPoints(owner.team, selectedPathType);
+            PresetPathModule.PresetPathSelection selection = presetPathModule
+                    .getPresetPathSelection(owner.team, selectedPathType);
+            List<Point2D.Double> keyPoints = selection == null ? null : selection.keyPoints();
 
             if (keyPoints != null && !keyPoints.isEmpty()) {
                 // 5. 成功获取"接力赛"路径！
@@ -297,6 +304,8 @@ public class PathfindingModule {
                 this.presetKeyPointIndex = 0; // 指向 P1
                 this.isFollowingPresetPath = true;
                 this.hasUsedPresetPathThisLife = true;
+                this.assignedPresetRouteId = selectedPathType.name() + ":" + selection.routeIndex();
+                this.assignedPresetRoutePoints = List.copyOf(keyPoints);
 
                 // 6. 启动接力赛的第一棒
                 this.isActive = true; // 激活模块
@@ -345,6 +354,16 @@ public class PathfindingModule {
      */
     public synchronized Point2D.Double getTargetPosition() {
         return this.targetPosition;
+    }
+
+    public synchronized String getAssignedPresetRouteId() {
+        return assignedPresetRouteId;
+    }
+
+    public synchronized List<Point2D.Double> getAssignedPresetRoutePoints() {
+        return assignedPresetRoutePoints.stream()
+                .map(point -> new Point2D.Double(point.x, point.y))
+                .toList();
     }
 
     // =========================================================================

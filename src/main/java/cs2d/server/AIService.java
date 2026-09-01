@@ -4,6 +4,9 @@ package cs2d.server;
 import cs2d.AIControl.A.PathfindingModule;
 import cs2d.AIControl.BG.TEAM_DEATHMATCHcontrol;
 import cs2d.AIControl.BG.ZOMBIEcontrol;
+import cs2d.AIControl.team.AdaptiveTeamTacticalCoordinator;
+import cs2d.AIControl.team.TacticalCoordinator;
+import cs2d.AIControl.team.TacticalOrder;
 import cs2d.playerAndAi.Player;
 
 import java.awt.Shape;
@@ -42,6 +45,7 @@ public class AIService implements Runnable {
     private volatile boolean running = false;
     private boolean freezeCleanupApplied = false;
     private final int aiTps;
+    private final TeamTacticalRuntime tacticalRuntime;
 
     private final Consumer<String> logger;
 
@@ -57,12 +61,20 @@ public class AIService implements Runnable {
     public AIService(GameState gameState, ConcurrentHashMap<String, AIInput> aiInputMailbox,
             ConcurrentHashMap<String, cs2d.server.rl.RLMacroCommand> rlMacroMailbox, int threadCount, int aiTps,
             Consumer<String> logger) {
+        this(gameState, aiInputMailbox, rlMacroMailbox, threadCount, aiTps, logger,
+                new AdaptiveTeamTacticalCoordinator());
+    }
+
+    public AIService(GameState gameState, ConcurrentHashMap<String, AIInput> aiInputMailbox,
+            ConcurrentHashMap<String, cs2d.server.rl.RLMacroCommand> rlMacroMailbox, int threadCount, int aiTps,
+            Consumer<String> logger, TacticalCoordinator tacticalCoordinator) {
         this.gameState = gameState;
         this.aiThreadPool = Executors.newFixedThreadPool(threadCount);
         this.aiInputMailbox = aiInputMailbox;
         this.rlMacroMailbox = rlMacroMailbox;
         this.aiTps = aiTps;
         this.logger = logger;
+        this.tacticalRuntime = new TeamTacticalRuntime(gameState, tacticalCoordinator);
     }
 
     public void start() {
@@ -124,6 +136,7 @@ public class AIService implements Runnable {
                 }
                 aiShortTermMemory.clear();
                 aiPerceptionTimestamps.clear();
+                tacticalRuntime.clear();
                 freezeCleanupApplied = true;
             }
             for (Player ai : allAIs) {
@@ -160,6 +173,12 @@ public class AIService implements Runnable {
                 .filter(p -> p != null && p.isAI && p.isAlive() && !p.isControlledByPlayer())
                 .collect(Collectors.toList());
 
+        if (currentMode == GameMode.TEAM_DEATHMATCH) {
+            tacticalRuntime.update(currentTime, sounds, independentAIs);
+        } else {
+            tacticalRuntime.clear();
+        }
+
         for (Player ai : independentAIs) {
             if (aiThreadPool.isShutdown())
                 break;
@@ -193,7 +212,10 @@ public class AIService implements Runnable {
                     if (currentMode == GameMode.TEAM_DEATHMATCH || currentMode == GameMode.DEATHMATCH) {
                         TEAM_DEATHMATCHcontrol tdmController = ai.getTdmController();
                         if (tdmController != null) {
-                            finalInput = tdmController.update(perception, currentTime);
+                            TacticalOrder tacticalOrder = currentMode == GameMode.TEAM_DEATHMATCH
+                                    ? tacticalRuntime.orderFor(ai.id).orElse(null)
+                                    : null;
+                            finalInput = tdmController.update(perception, currentTime, tacticalOrder);
                         }
                     } else if (currentMode == GameMode.ZOMBIE_MODE) {
                         ZOMBIEcontrol zombieController = ai.getZombieController();

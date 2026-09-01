@@ -9,6 +9,8 @@ import cs2d.AIControl.A.AttackModule;
 import cs2d.AIControl.A.PathfindingModule; // 导入 A 包
 import cs2d.AIControl.B.PerceptionModule;
 import cs2d.AIControl.B.PerceptionType;
+import cs2d.AIControl.team.TacticalOrder;
+import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
 import cs2d.playerAndAi.Player;
 
 import cs2d.playerAndAi.Weapon;
@@ -164,7 +166,15 @@ public class TEAM_DEATHMATCHcontrol {
      * @param currentTime 当前系统时间戳(毫秒)
      * @return 当前帧的 AI 输入指令
      */
-    public AIInput update(AIWorldView worldView, long currentTime) { // <-- 签名已修改，移除 List<SoundEvent>
+    public AIInput update(AIWorldView worldView, long currentTime) {
+        return update(worldView, currentTime, null);
+    }
+
+    /**
+     * Updates local combat behavior while optionally consuming a generic team
+     * intent. Sight and immediate survival remain local responsibilities.
+     */
+    public AIInput update(AIWorldView worldView, long currentTime, TacticalOrder tacticalOrder) {
 
         // --- 新增：步骤 0 - 处理 GrenadeModule 指令 (最高优先级) ---
         boolean isStationary = (owner.vx * owner.vx + owner.vy * owner.vy < 0.1);
@@ -237,7 +247,7 @@ public class TEAM_DEATHMATCHcontrol {
             if (cmd.action() != GrenadeModule.ActionType.DO_NOTHING
                     && cmd.action() != GrenadeModule.ActionType.MOVE_TO_SPOT) {
                 // 对于 SWITCH_SLOT, HOLD_AND_AIM, THROW_NOW，既然已经处理了，就直接返回，不再执行后续逻辑
-                return executeActions(worldView, currentTime); // 确保即使返回也要合并一下移动和瞄准？或者直接返回 grenadeActionInput ? 选后者更安全
+                return executeActions(worldView, currentTime, tacticalOrder); // 确保即使返回也要合并一下移动和瞄准？或者直接返回 grenadeActionInput ? 选后者更安全
                 // return grenadeActionInput; // <--- 修正：应该直接返回指令
             }
         }
@@ -247,7 +257,7 @@ public class TEAM_DEATHMATCHcontrol {
         perceptionModule.update(worldView, /* 移除 relevantSounds */ currentTime); // <-- 调用已修改
 
         // 2. 选择目标 (逻辑不变)
-        selectPrimaryTarget(currentTime);
+        selectPrimaryTarget(currentTime, tacticalOrder);
 
         // 检查是否看到了敌人
         PerceptionModule.PerceptionInfo targetInfo = (this.primaryTarget != null)
@@ -275,7 +285,7 @@ public class TEAM_DEATHMATCHcontrol {
         }
 
         // 5. 执行并合并模块 (逻辑不变)
-        return executeActions(worldView, currentTime);
+        return executeActions(worldView, currentTime, tacticalOrder);
     }
 
     /**
@@ -433,7 +443,7 @@ public class TEAM_DEATHMATCHcontrol {
      * 根据当前状态，执行并合并攻击和寻路模块的输出。
      * 确保在 GrenadeModule 活动时不干扰其瞄准。
      */
-    private AIInput executeActions(AIWorldView worldView, long currentTime) {
+    private AIInput executeActions(AIWorldView worldView, long currentTime, TacticalOrder tacticalOrder) {
         AIInput attackInput = null;
         AIInput pathInput = null;
 
@@ -444,7 +454,8 @@ public class TEAM_DEATHMATCHcontrol {
 
         // 1. 根据状态设置寻路模块的“意图目标”
         // 如果 GrenadeModule 正在移动，则大脑不设置寻路目标
-        if (!isGrenadeModuleMoving && !isGrenadeModuleAiming) { // <-- 添加检查
+        boolean tacticalMovementApplied = applyTacticalMovementIntent(tacticalOrder, currentTime);
+        if (!isGrenadeModuleMoving && !isGrenadeModuleAiming && !tacticalMovementApplied) { // <-- 添加检查
             switch (currentState) {
                 case ATTACKING:
                     // 在设置目标前，先检查目标点是否可行走
@@ -616,7 +627,7 @@ public class TEAM_DEATHMATCHcontrol {
      * 根据当前的 perceptionMap 选择最优先处理的目标。
      * [已修复] 确保在目标死亡或丢失时能正确清除 lastKnownPosition。
      */
-    private void selectPrimaryTarget(long currentTime) {
+    private void selectPrimaryTarget(long currentTime, TacticalOrder tacticalOrder) {
         Player oldTarget = this.primaryTarget; // 保留下旧目标用于比较
 
         // --- VVVV VVVV ---
@@ -649,12 +660,19 @@ public class TEAM_DEATHMATCHcontrol {
 
             // 枪声和脚步只调动全队中距离最近的小组；视觉接敌始终立即响应。
             if (info.type() != PerceptionType.SIGHT) {
-                if (eligibleSoundResponders == null) {
-                    eligibleSoundResponders = collectEligibleSoundResponders();
-                }
-                if (!TeamSoundResponsePolicy.shouldRespond(owner, info.lastKnownPosition(), info.type(),
-                        eligibleSoundResponders)) {
-                    continue;
+                double soundDistance = owner.position.distance(info.lastKnownPosition());
+                if (tacticalOrder != null && tacticalOrder.isActive(currentTime)) {
+                    if (!tacticalOrder.allowsSoundTarget(info.enemyId(), soundDistance)) {
+                        continue;
+                    }
+                } else {
+                    if (eligibleSoundResponders == null) {
+                        eligibleSoundResponders = collectEligibleSoundResponders();
+                    }
+                    if (!TeamSoundResponsePolicy.shouldRespond(owner, info.lastKnownPosition(), info.type(),
+                            eligibleSoundResponders)) {
+                        continue;
+                    }
                 }
             }
 
@@ -703,6 +721,36 @@ public class TEAM_DEATHMATCHcontrol {
 
         this.primaryTarget = newBestTarget;
         this.lastKnownPosition = newBestLKP;
+    }
+
+    /**
+     * Translates a high-level movement objective into the existing path module.
+     * The tactical layer does not know about keys, A* or controller states.
+     */
+    private boolean applyTacticalMovementIntent(TacticalOrder order, long currentTime) {
+        if (order == null || !order.isActive(currentTime) || order.movementTarget() == null
+                || primaryTarget != null || pathfindingModule == null || owner.position == null) {
+            return false;
+        }
+
+        Vec2 target = order.movementTarget();
+        Point2D.Double targetPoint = new Point2D.Double(target.x(), target.y());
+        double arrivalRadius = Math.max(20.0, order.arrivalRadius());
+        if (owner.position.distanceSq(targetPoint) <= arrivalRadius * arrivalRadius) {
+            if (pathfindingModule.isActive()) {
+                pathfindingModule.setTarget(null);
+            }
+            return true;
+        }
+
+        if (!order.preserveMapRoute() && pathfindingModule.isFollowingPresetPath()) {
+            pathfindingModule.cancelPresetPath();
+        }
+        Point2D.Double existing = pathfindingModule.getTargetPosition();
+        if (existing == null || existing.distanceSq(targetPoint) > 25.0 * 25.0) {
+            pathfindingModule.setTarget(targetPoint);
+        }
+        return true;
     }
 
     private List<Player> collectEligibleSoundResponders() {

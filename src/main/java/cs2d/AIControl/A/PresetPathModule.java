@@ -24,6 +24,13 @@ import cs2d.AIControl.BW.MapViz.DynamicPathfinderVisualizer.*; // 导入 PathTyp
  */
 public class PresetPathModule {
 
+    /** A selected map-authored route together with its stable index. */
+    public record PresetPathSelection(int routeIndex, List<Point2D.Double> keyPoints) {
+        public PresetPathSelection {
+            keyPoints = List.copyOf(keyPoints);
+        }
+    }
+
     private static final String PRE_PATH_DIR = "O:\\java\\games\\CS2D-MultiplayerUDP\\maps\\prePath";
 
     // =========================================================================
@@ -169,6 +176,16 @@ public class PresetPathModule {
      * @return 一个 Point2D.Double 列表 (约10个点)，如果失败则返回 null
      */
     public List<Point2D.Double> getPresetKeyPoints(Player.Team team, PathType pathType) {
+        PresetPathSelection selection = getPresetPathSelection(team, pathType);
+        return selection == null ? null : selection.keyPoints();
+    }
+
+    /**
+     * Selects a balanced route and exposes its index for higher-level tactical
+     * occupancy analysis. Callers that only need points should use
+     * {@link #getPresetKeyPoints(Player.Team, PathType)}.
+     */
+    public PresetPathSelection getPresetPathSelection(Player.Team team, PathType pathType) {
 
         if (!isLoaded || loadedCollection == null) {
             return null; // 未加载
@@ -213,7 +230,7 @@ public class PresetPathModule {
         }
 
         // 2. 返回这个 "点列表"
-        return chosenPathPoints;
+        return new PresetPathSelection(routeIndex, chosenPathPoints);
     }
 
     /**
