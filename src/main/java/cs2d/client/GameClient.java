@@ -760,6 +760,7 @@ public class GameClient extends Application {
     private final PcmAudioMixer pcmAudioMixer = new PcmAudioMixer();
     private final Map<String, PcmAudioMixer.Sound> pcmSounds = new ConcurrentHashMap<>();
     private final LongAdder pcmFallbackPlays = new LongAdder();
+    private final RepeatedWorldSoundGate repeatedWorldSoundGate = new RepeatedWorldSoundGate();
     /** MP3会进入JavaFX MediaPlayer后端；远程语音必须串行，避免每次重叠播放创建原生线程群。 */
     private final Set<String> mediaBackedSoundKeys = ConcurrentHashMap.newKeySet();
     private final MediaSoundGate mediaSoundGate = new MediaSoundGate(TimeUnit.MILLISECONDS.toNanos(250));
@@ -1036,6 +1037,7 @@ public class GameClient extends Application {
             loopingSounds.values().forEach(javafx.scene.media.AudioClip::stop);
             loopingSounds.clear();
             pcmAudioMixer.stopAll();
+            repeatedWorldSoundGate.clear();
 
             // 重置核心引用和状态
             myPlayerId = null;
@@ -1581,6 +1583,7 @@ public class GameClient extends Application {
                 JsonObject s = e.getAsJsonObject();
                 String soundTypeString = getString(s, "type");
                 String soundName = getString(s, "soundName");
+                String sourcePlayerId = getString(s, "sourcePlayerId");
                 Point2D soundPos = new Point2D(getDouble(s, "x"), getDouble(s, "y"));
 
                 boolean isFireSound = "FIRE".equals(soundTypeString);
@@ -1589,8 +1592,6 @@ public class GameClient extends Application {
                 if ((isFireSound || isReloadSound) && !isPointInPolygon(soundPos, fovPoints)) {
                     cs2d.client.GameClient.ClientPlayer povSource = (me != null && getBool(me.data, "isAlive")) ? me
                             : getSpectatorTarget();
-                    String sourcePlayerId = getString(s, "sourcePlayerId");
-
                     if (povSource != null && sourcePlayerId != null && !sourcePlayerId.isEmpty()) {
                         cs2d.client.GameClient.ClientPlayer sourcePlayer = clientPlayers.get(sourcePlayerId);
 
@@ -1633,7 +1634,8 @@ public class GameClient extends Application {
                         fireLoop.stop();
                         playSound("fire_loop_fadeout_01", soundPos);
                     }
-                } else {
+                } else if (repeatedWorldSoundGate.shouldPlay(
+                        soundTypeString, sourcePlayerId, System.nanoTime())) {
                     playSound(soundName, soundPos);
                 }
             });
@@ -2458,6 +2460,7 @@ public class GameClient extends Application {
                         long mediaSoundsPlayed = mediaBackedWorldSoundsPlayed.sumThenReset();
                         long mediaSoundsSuppressed = mediaBackedWorldSoundsSuppressed.sumThenReset();
                         long pcmFallbackCount = pcmFallbackPlays.sumThenReset();
+                        long repeatedWorldSoundsSuppressed = repeatedWorldSoundGate.suppressedThenReset();
                         PcmAudioMixer.Snapshot pcmSnapshot = pcmAudioMixer.snapshotAndReset();
                         perfEquipmentHudRebuilds = 0;
                         perfHudVisibilityPasses = 0;
@@ -2574,9 +2577,12 @@ public class GameClient extends Application {
                                     coalescedStateMessages, pendingStateCount, queuedEventCount);
                             System.out.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
                                     mediaSoundsPlayed, mediaSoundsSuppressed);
+                            System.out.printf("  [AUDIO-EVENT] 同来源脚步/换弹重复丢弃 %d%n",
+                                    repeatedWorldSoundsSuppressed);
                             System.out.printf("  [AUDIO-PCM] 请求 %d | 已混音 %d | 活动 %d | 峰值 %d | 排队 %d"
                                             + " | 缓冲 %d块/min %d | 欠载 %d"
                                             + " | 写入 %d批/%d帧 实时%.1f%% %.3f/%.3fms | 迟写 %d"
+                                            + " | 设备恢复 %d | 陈旧块丢弃 %d"
                                             + " | JavaFX回退 %d | running=%s%n",
                                     pcmSnapshot.requestedVoices(), pcmSnapshot.mixedVoices(),
                                     pcmSnapshot.activeVoices(), pcmSnapshot.peakVoices(), pcmSnapshot.queuedVoices(),
@@ -2584,6 +2590,7 @@ public class GameClient extends Application {
                                     pcmSnapshot.underruns(), pcmSnapshot.outputWrites(), pcmSnapshot.outputFrames(),
                                     pcmSnapshot.outputRealtimePercent(), pcmSnapshot.averageWriteMillis(),
                                     pcmSnapshot.maximumWriteMillis(), pcmSnapshot.lateWrites(),
+                                    pcmSnapshot.deviceRecoveries(), pcmSnapshot.staleBlocksDropped(),
                                     pcmFallbackCount, pcmSnapshot.running());
                             System.out.println("  --- (消息处理 [M] 的详细分解) ---");
                             System.out.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
