@@ -2,6 +2,8 @@ package cs2d.AIControl.team;
 
 import cs2d.AIControl.team.TacticalOrder.TaskType;
 import cs2d.AIControl.team.TeamTacticalSnapshot.AgentSnapshot;
+import cs2d.AIControl.team.TeamTacticalSnapshot.ContactSnapshot;
+import cs2d.AIControl.team.TeamTacticalSnapshot.ContactType;
 import cs2d.AIControl.team.TeamTacticalSnapshot.RouteSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
 import org.junit.jupiter.api.Test;
@@ -25,7 +27,7 @@ class ElasticManeuverRefinerTest {
         long now = 10_000L;
         RouteSnapshot main = route("main", List.of(), points(0, 0, 500, 0, 1_000, 0));
         RouteSnapshot flank = route("flank", List.of(), points(0, 500, 500, 500, 1_000, 500));
-        TeamTacticalSnapshot snapshot = snapshot(now, List.of(main, flank), List.of(
+        TeamTacticalSnapshot snapshot = snapshotWithGunshot(now, List.of(main, flank), List.of(
                 agent("a", 700, 0, "main"),
                 agent("b", 750, 0, "main"),
                 agent("c", 700, 500, "flank")));
@@ -45,6 +47,9 @@ class ElasticManeuverRefinerTest {
         assertEquals(1, flankTask.minimumAgents());
         assertEquals(2, refined.orders().values().stream()
                 .filter(order -> order.taskType() == TaskType.SUPPRESS).count());
+        assertTrue(refined.orders().values().stream()
+                .filter(order -> order.taskType() == TaskType.SUPPRESS)
+                .allMatch(order -> order.movementTarget().x() >= 1_000.0));
         assertEquals(1, refined.orders().values().stream()
                 .filter(order -> order.taskType() == TaskType.FLANK).count());
     }
@@ -54,10 +59,48 @@ class ElasticManeuverRefinerTest {
         long now = 20_000L;
         RouteSnapshot main = route("main", List.of("same"), points(0, 0, 500, 0, 1_000, 0));
         RouteSnapshot same = route("same", List.of("main"), points(0, 20, 500, 20, 1_000, 20));
-        TeamTacticalSnapshot snapshot = snapshot(now, List.of(main, same), List.of(
+        TeamTacticalSnapshot snapshot = snapshotWithGunshot(now, List.of(main, same), List.of(
                 agent("a", 700, 0, "main"),
                 agent("b", 750, 0, "main"),
                 agent("c", 700, 20, "same")));
+
+        TacticalPlan base = baseCoordinator.plan(snapshot);
+        TacticalPlan refined = refiner.refine(snapshot, base);
+
+        assertTrue(refined.tasks().stream().noneMatch(task -> task.operationId() != null));
+        assertEquals(base.orders(), refined.orders());
+    }
+
+    @Test
+    void noGunshotDoesNotInventPincerOperation() {
+        long now = 25_000L;
+        RouteSnapshot main = route("main", List.of(), points(0, 0, 500, 0, 1_000, 0));
+        RouteSnapshot flank = route("flank", List.of(), points(0, 500, 500, 500, 1_000, 500));
+        TeamTacticalSnapshot snapshot = snapshot(now, List.of(main, flank), List.of(
+                agent("a", 700, 0, "main"),
+                agent("b", 750, 0, "main"),
+                agent("c", 700, 500, "flank")));
+
+        TacticalPlan base = baseCoordinator.plan(snapshot);
+        TacticalPlan refined = refiner.refine(snapshot, base);
+
+        assertTrue(refined.tasks().stream().noneMatch(task -> task.operationId() != null));
+        assertEquals(base.orders(), refined.orders());
+    }
+
+    @Test
+    void irrelevantRemoteGunshotDoesNotLaunchPincer() {
+        long now = 27_000L;
+        RouteSnapshot main = route("main", List.of(), points(0, 0, 500, 0, 1_000, 0));
+        RouteSnapshot flank = route("flank", List.of(), points(0, 500, 500, 500, 1_000, 500));
+        List<AgentSnapshot> agents = List.of(
+                agent("a", 700, 0, "main"),
+                agent("b", 750, 0, "main"),
+                agent("c", 700, 500, "flank"));
+        ContactSnapshot remote = new ContactSnapshot("enemy", new Vec2(5_000, 5_000),
+                ContactType.GUNSHOT, now);
+        TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 2_000, 1_200,
+                List.of(main, flank), agents, List.of(remote), List.of());
 
         TacticalPlan base = baseCoordinator.plan(snapshot);
         TacticalPlan refined = refiner.refine(snapshot, base);
@@ -112,6 +155,14 @@ class ElasticManeuverRefinerTest {
             List<AgentSnapshot> agents) {
         return new TeamTacticalSnapshot("CT", now, 2_000, 1_200,
                 routes, agents, List.of(), List.of());
+    }
+
+    private static TeamTacticalSnapshot snapshotWithGunshot(long now, List<RouteSnapshot> routes,
+            List<AgentSnapshot> agents) {
+        ContactSnapshot gunshot = new ContactSnapshot("enemy", new Vec2(900, 250),
+                ContactType.GUNSHOT, now);
+        return new TeamTacticalSnapshot("CT", now, 2_000, 1_200,
+                routes, agents, List.of(gunshot), List.of());
     }
 
     private static AgentSnapshot agent(String id, double x, double y, String routeId) {

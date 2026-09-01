@@ -51,6 +51,8 @@ public final class TacticalTaskBoard {
         Map<String, Boolean> operationReady = operationReadiness(
                 safeTeamId, tasksById.values(), assignmentsByTask, now);
         Set<String> failedOperations = failedOperations(safeTeamId, tasksById.values());
+        Set<String> completedOperations = completedOperations(
+                tasksById.values(), assignmentsByTask, snapshot);
 
         for (TacticalTask task : tasksById.values()) {
             String stateKey = stateKey(safeTeamId, task.taskId());
@@ -58,15 +60,26 @@ public final class TacticalTaskBoard {
             TaskState previous = states.get(stateKey);
 
             List<TacticalOrder> assigned = assignmentsByTask.getOrDefault(task.taskId(), List.of());
+            Set<String> assignedAgentIds = assigned.stream()
+                    .map(TacticalOrder::agentId)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            boolean completedMovementHasNewAssignment = previous != null
+                    && previous.status() == TaskStatus.COMPLETED
+                    && isFiniteMovementTask(task.taskType())
+                    && !previous.assignedAgentIds().equals(assignedAgentIds);
 
             TaskStatus status;
             if (task.isExpired(now)) {
                 status = TaskStatus.EXPIRED;
             } else if (task.operationId() != null && failedOperations.contains(task.operationId())) {
                 status = TaskStatus.FAILED;
-            } else if (previous != null
-                    && (previous.status() == TaskStatus.COMPLETED || previous.status() == TaskStatus.FAILED)) {
+            } else if (previous != null && previous.status() == TaskStatus.FAILED) {
                 status = previous.status();
+            } else if (previous != null && previous.status() == TaskStatus.COMPLETED
+                    && !completedMovementHasNewAssignment) {
+                status = previous.status();
+            } else if (task.operationId() != null && completedOperations.contains(task.operationId())) {
+                status = TaskStatus.COMPLETED;
             } else if (task.operationId() != null
                     && !operationReady.getOrDefault(task.operationId(), false)) {
                 status = TaskStatus.PROPOSED;
@@ -79,9 +92,6 @@ public final class TacticalTaskBoard {
             }
 
             long changedAt = previous != null && previous.status() == status ? previous.statusChangedAt() : now;
-            Set<String> assignedAgentIds = assigned.stream()
-                    .map(TacticalOrder::agentId)
-                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
             states.put(stateKey, new TaskState(safeTeamId, task, status, assignedAgentIds, changedAt));
 
             if (status == TaskStatus.ACTIVE) {
@@ -147,6 +157,25 @@ public final class TacticalTaskBoard {
         return result;
     }
 
+    private Set<String> completedOperations(java.util.Collection<TacticalTask> tasks,
+            Map<String, List<TacticalOrder>> assignmentsByTask, TeamTacticalSnapshot snapshot) {
+        Map<String, List<TacticalTask>> flankLegs = new HashMap<>();
+        for (TacticalTask task : tasks) {
+            if (task.operationId() != null && task.taskType() == TacticalOrder.TaskType.FLANK) {
+                flankLegs.computeIfAbsent(task.operationId(), ignored -> new ArrayList<>()).add(task);
+            }
+        }
+        Set<String> completed = new HashSet<>();
+        for (Map.Entry<String, List<TacticalTask>> entry : flankLegs.entrySet()) {
+            boolean allFlankLegsArrived = entry.getValue().stream().allMatch(task ->
+                    hasReachedObjective(task, assignmentsByTask.getOrDefault(task.taskId(), List.of()), snapshot));
+            if (allFlankLegsArrived) {
+                completed.add(entry.getKey());
+            }
+        }
+        return completed;
+    }
+
     public void complete(String teamId, String taskId, long now) {
         setTerminalStatus(teamId, taskId, TaskStatus.COMPLETED, now);
     }
@@ -191,9 +220,7 @@ public final class TacticalTaskBoard {
     private static boolean hasReachedObjective(TacticalTask task, List<TacticalOrder> assigned,
             TeamTacticalSnapshot snapshot) {
         if (snapshot == null || task.objectivePosition() == null || task.arrivalRadius() <= 0.0
-                || (task.taskType() != TacticalOrder.TaskType.FLANK
-                && task.taskType() != TacticalOrder.TaskType.SUPPORT
-                && task.taskType() != TacticalOrder.TaskType.REGROUP)) {
+                || !isFiniteMovementTask(task.taskType())) {
             return false;
         }
         Map<String, TeamTacticalSnapshot.AgentSnapshot> agentsById = new HashMap<>();
@@ -207,6 +234,14 @@ public final class TacticalTaskBoard {
             TeamTacticalSnapshot.AgentSnapshot agent = agentsById.get(order.agentId());
             return agent != null && agent.position().distanceSq(task.objectivePosition()) <= arrivalRadiusSq;
         });
+    }
+
+    private static boolean isFiniteMovementTask(TacticalOrder.TaskType type) {
+        return type == TacticalOrder.TaskType.ASSEMBLE
+                || type == TacticalOrder.TaskType.ADVANCE
+                || type == TacticalOrder.TaskType.FLANK
+                || type == TacticalOrder.TaskType.SUPPORT
+                || type == TacticalOrder.TaskType.REGROUP;
     }
 
     private static String stateKey(String teamId, String taskId) {

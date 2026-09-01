@@ -9,7 +9,12 @@ import cs2d.AIControl.A.AttackModule;
 import cs2d.AIControl.A.PathfindingModule; // 导入 A 包
 import cs2d.AIControl.B.PerceptionModule;
 import cs2d.AIControl.B.PerceptionType;
+import cs2d.AIControl.movement.LocalAvoidancePlanner;
+import cs2d.AIControl.movement.MovementArbiter;
+import cs2d.AIControl.movement.MovementDecision;
+import cs2d.AIControl.movement.MovementIntent;
 import cs2d.AIControl.team.TacticalOrder;
+import cs2d.AIControl.team.TacticalIdlePolicy;
 import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
 import cs2d.playerAndAi.Player;
 
@@ -56,6 +61,9 @@ public class TEAM_DEATHMATCHcontrol {
     private Player primaryTarget = null;
     private Point2D.Double lastKnownPosition = null;
     private final SoundPursuitGate soundPursuitGate = new SoundPursuitGate();
+    private final MovementArbiter movementArbiter = new MovementArbiter();
+    private final LocalAvoidancePlanner localAvoidancePlanner = new LocalAvoidancePlanner();
+    private final TacticalIdlePolicy tacticalIdlePolicy = new TacticalIdlePolicy();
 
     // --- 状态机计时器 ---
     private long lastStateChangeTime = 0;
@@ -281,14 +289,11 @@ public class TEAM_DEATHMATCHcontrol {
         // 3. 更新状态机 (会在这里触发扔雷请求)
         runTdmStateMachine(currentTime);
 
-        // 4. 避让 (逻辑不变)
-        AIInput avoidanceInput = handleTeammateAvoidance(currentTime, worldView);
-        if (avoidanceInput != null) {
-            return avoidanceInput;
-        }
+        // 4. 只生成局部脱困提案，不直接返回或覆盖最终行动
+        AIInput unstuckMovement = handleTeammateAvoidance(currentTime);
 
-        // 5. 执行并合并模块 (逻辑不变)
-        return executeActions(worldView, currentTime, tacticalOrder);
+        // 5. 统一仲裁所有移动提案，再产生唯一的最终行动
+        return executeActions(worldView, currentTime, tacticalOrder, unstuckMovement);
     }
 
     /**
@@ -447,17 +452,31 @@ public class TEAM_DEATHMATCHcontrol {
      * 确保在 GrenadeModule 活动时不干扰其瞄准。
      */
     private AIInput executeActions(AIWorldView worldView, long currentTime, TacticalOrder tacticalOrder) {
+        return executeActions(worldView, currentTime, tacticalOrder, null);
+    }
+
+    private AIInput executeActions(AIWorldView worldView, long currentTime, TacticalOrder tacticalOrder,
+            AIInput unstuckMovement) {
         AIInput attackInput = null;
         AIInput pathInput = null;
+        boolean unstuckMovementActive = unstuckMovement != null;
 
         // --- 新增：检查 GrenadeModule 状态 ---
         boolean isGrenadeModuleAiming = (currentState == AIState.PREPARING_GRENADE);
         boolean isGrenadeModuleMoving = (currentState == AIState.MOVING_TO_THROW_SPOT);
         // --- 结束新增 ---
 
+        TacticalIdlePolicy.Decision idleDecision = tacticalIdlePolicy.decide(tacticalOrder, currentTime,
+                primaryTarget != null, pathfindingModule != null && pathfindingModule.isActive());
+        if (idleDecision.holdPosition() && pathfindingModule != null && pathfindingModule.isActive()) {
+            pathfindingModule.setTarget(null);
+        }
+
         // 1. 根据状态设置寻路模块的“意图目标”
         // 如果 GrenadeModule 正在移动，则大脑不设置寻路目标
-        boolean tacticalMovementApplied = applyTacticalMovementIntent(tacticalOrder, currentTime);
+        boolean tacticalMovementApplied = unstuckMovementActive
+                || idleDecision.holdPosition()
+                || applyTacticalMovementIntent(tacticalOrder, currentTime);
         if (!isGrenadeModuleMoving && !isGrenadeModuleAiming && !tacticalMovementApplied) { // <-- 添加检查
             switch (currentState) {
                 case ATTACKING:
@@ -545,12 +564,13 @@ public class TEAM_DEATHMATCHcontrol {
         } // <-- 结束 GrenadeModule 状态检查
 
         // 2. 更新（调用）子模块
-        if (attackModule != null) {
+        if (!unstuckMovementActive && attackModule != null) {
             attackInput = attackModule.update(this.primaryTarget, this.lastKnownPosition, currentTime);
         }
-        // 只有当 GrenadeModule 不在移动时，才让寻路模块更新并获取输入
-        if (pathfindingModule != null /* && !isGrenadeModuleMoving */) { // <--- 移除这个 !isGrenadeModuleMoving
-                                                                         // 条件，让移动合并逻辑处理
+        if (unstuckMovementActive) {
+            pathInput = unstuckMovement;
+        } else if (pathfindingModule != null /* && !isGrenadeModuleMoving */) { // <--- 移除这个 !isGrenadeModuleMoving
+                                                                          // 条件，让移动合并逻辑处理
             pathInput = pathfindingModule.update(worldView);
         }
 
@@ -558,50 +578,29 @@ public class TEAM_DEATHMATCHcontrol {
         List<String> finalKeys = new ArrayList<>();
         double finalAngle = owner.angle;
         boolean finalShooting = false;
-        boolean finalWalking = false;
+        boolean finalWalking = idleDecision.walkSilently();
 
-        // --- 决定移动按键 ---
-        if (attackInput != null && !attackInput.keys().isEmpty()) {
-            // 优先级 1: 急停/战斗移动 (来自 AttackModule)
-            finalKeys = attackInput.keys();
-
+        // 所有思考模块只提交不可变意图；移动仲裁器是唯一按键决策者。
+        List<MovementIntent> movementIntents = new ArrayList<>();
+        if (unstuckMovementActive) {
+            movementIntents.add(MovementIntent.exclusive("unstuck", 500, unstuckMovement.keys()));
+        } else if (attackInput != null && !attackInput.keys().isEmpty()) {
+            movementIntents.add(MovementIntent.exclusive("combat", 400, attackInput.keys()));
         } else if (isGrenadeModuleMoving && pathInput != null) {
-            // 优先级 2: 扔雷移动 (来自 PathfindingModule，在 GrenadeModule 控制下)
-            finalKeys = pathInput.keys();
-
-        } else if (!isGrenadeModuleAiming && !isGrenadeModuleMoving) {
-            // 优先级 3: 正常寻路（已合并主动避让）
-
-            // --- 调用主动避让系统 ---
-            List<String> avoidanceKeys = calculateProactiveAvoidanceKeys();
-
-            if (!avoidanceKeys.isEmpty()) {
-                // 我们正在主动避让！
-                // 使用 Set 来合并寻路键 (例如 "W") 和 避让键 (例如 "A")
-                // 结果将是 ["W", "A"]，使 AI 斜向移动，完美解决问题！
-                Set<String> mergedKeys = new HashSet<>();
-
-                // 1. 添加寻路模块的意图 (例如 "W")
-                if (pathInput != null) {
-                    mergedKeys.addAll(pathInput.keys());
-                }
-
-                // 2. 添加避让模块的意图 (例如 "A" 或 "D")
-                mergedKeys.addAll(avoidanceKeys);
-
-                finalKeys = new ArrayList<>(mergedKeys);
-
-            } else if (pathInput != null) {
-                // [原逻辑] 没有检测到需要避让的队友，正常使用寻路
-                finalKeys = pathInput.keys();
-            }
-            // 优先级 4: 原地不动 (如果 pathInput 也为 null, finalKeys 保持为空)
-
+            movementIntents.add(MovementIntent.exclusive("grenade", 300, pathInput.keys()));
+        } else if (!isGrenadeModuleAiming && !isGrenadeModuleMoving && pathInput != null) {
+            movementIntents.add(MovementIntent.base("path", 100, pathInput.keys()));
+            movementIntents.add(localAvoidancePlanner.plan(currentTime, owner.id, pathInput.keys(),
+                    calculateProactiveAvoidanceObservation()));
         }
-        // --- [新增逻辑结束] ---
+        MovementDecision movementDecision = movementArbiter.decide(movementIntents);
+        finalKeys = new ArrayList<>(movementDecision.keys());
 
         // --- 决定瞄准角度和射击 ---
-        if (isGrenadeModuleAiming) {
+        if (unstuckMovementActive) {
+            finalAngle = unstuckMovement.angle();
+            finalShooting = false;
+        } else if (isGrenadeModuleAiming) {
             // 优先级 1: 扔雷瞄准 (角度由 GrenadeModule 在 update 开头设置好，这里无需处理)
             // finalAngle = grenadeModule.getAimAngle(); // 假设有这个方法，或者直接使用owner.angle?
             // 不，HOLD_AND_AIM 命令已经设置了
@@ -641,7 +640,6 @@ public class TEAM_DEATHMATCHcontrol {
         double minScore = Double.POSITIVE_INFINITY; // 初始化最低分数为无穷大
         int bestPerceptionTier = Integer.MAX_VALUE;
         PerceptionType newBestType = null;
-        List<Player> eligibleSoundResponders = null;
 
         // 添加 perceptionModule null 检查
         if (perceptionModule == null) {
@@ -682,13 +680,8 @@ public class TEAM_DEATHMATCHcontrol {
                         continue;
                     }
                 } else {
-                    if (eligibleSoundResponders == null) {
-                        eligibleSoundResponders = collectEligibleSoundResponders();
-                    }
-                    if (!TeamSoundResponsePolicy.shouldRespond(owner, info.lastKnownPosition(), info.type(),
-                            eligibleSoundResponders)) {
-                        continue;
-                    }
+                    // 无指挥任务时保持伏击。声音只提供警觉，不允许自行离开位置追击。
+                    continue;
                 }
             }
 
@@ -804,21 +797,6 @@ public class TEAM_DEATHMATCHcontrol {
             pathfindingModule.setTarget(targetPoint);
         }
         return true;
-    }
-
-    private List<Player> collectEligibleSoundResponders() {
-        List<Player> responders = new ArrayList<>();
-        if (gameState == null || owner == null) {
-            return responders;
-        }
-
-        for (Player player : gameState.getAllCharacters()) {
-            if (player != null && player.isAI && player.isAlive() && player.position != null
-                    && player.team == owner.team && !player.isControlledByPlayer()) {
-                responders.add(player);
-            }
-        }
-        return responders;
     }
 
     /**
@@ -991,6 +969,10 @@ public class TEAM_DEATHMATCHcontrol {
         this.primaryTarget = null;
         this.lastKnownPosition = null;
         this.soundPursuitGate.reset();
+        this.localAvoidancePlanner.reset();
+        this.unstuckUntil = 0;
+        this.unstuckTarget = null;
+        this.stuckCount = 0;
 
         // 2. 重置状态机
         this.currentState = AIState.PATROLLING; // 重生后默认进入巡逻
@@ -1059,6 +1041,10 @@ public class TEAM_DEATHMATCHcontrol {
         primaryTarget = null;
         lastKnownPosition = null;
         soundPursuitGate.reset();
+        localAvoidancePlanner.reset();
+        unstuckUntil = 0;
+        unstuckTarget = null;
+        stuckCount = 0;
         currentState = AIState.PATROLLING;
         if (pathfindingModule != null)
             pathfindingModule.reset();
@@ -1212,15 +1198,14 @@ public class TEAM_DEATHMATCHcontrol {
                     () -> "AI [" + owner.name + "] 被队友卡住! 执行侧向避让。");
         }
 
-        // 1. 清除当前寻路目标（打断死锁）
-        pathfindingModule.setTarget(null);
-
-        // 2. 设置避让计时器
+        // 脱困只产生临时移动意图，不再修改或清空战略寻路目标。
+        // 这样侧移结束后会自然继续原路线，不会被“原任务”和“临时目标”来回拉扯。
         this.unstuckUntil = currentTime + UNSTUCK_DURATION_MS;
 
-        // 3. 计算一个随机的侧向目标点 (90度)
+        // 计算一个随机的侧向目标点 (90度)
         double currentAngle = Double.isNaN(owner.angle) ? 0.0 : owner.angle; // 处理 NaN
-        double dodgeAngle = currentAngle + (rand.nextBoolean() ? Math.PI / 2 : -Math.PI / 2);
+        double dodgeAngle = currentAngle
+                + localAvoidancePlanner.chooseUnstuckSide(currentTime, owner.id) * Math.PI / 2;
         double dodgeDist = 100.0;
         // 确保计算出的点在地图内
         int width = (gameState.width > 0) ? gameState.width : 1024;
@@ -1232,10 +1217,7 @@ public class TEAM_DEATHMATCHcontrol {
 
         this.unstuckTarget = new Point2D.Double(dodgeX, dodgeY);
 
-        // 4. 命令“腿”开始执行这个脱困路径
-        pathfindingModule.setTarget(this.unstuckTarget);
-
-        // 5. 重置计数器
+        // 重置计数器
         stuckCount = 0;
         lastStuckCheckTime = currentTime;
         // 确保 lastPositionForStuckCheck 在下次检查前有效
@@ -1250,50 +1232,55 @@ public class TEAM_DEATHMATCHcontrol {
      * 检查并处理队友碰撞避让逻辑 (最高优先级)。
      * 
      * @param currentTime 当前时间戳
-     * @param worldView   AI的世界视图 (用于执行避让动作)
      * @return 如果正在执行或刚触发了避让，则返回 AIInput；否则返回 null。
      */
-    private AIInput handleTeammateAvoidance(long currentTime, AIWorldView worldView) {
+    private AIInput handleTeammateAvoidance(long currentTime) {
         // 添加 pathfindingModule null 检查
         if (pathfindingModule == null)
             return null;
 
         // A. 检查是否正在执行避让
         if (currentTime < unstuckUntil) {
-            if (!pathfindingModule.isActive()) {
-                // 避让路径提前走完了
+            if (unstuckTarget == null || owner.position.distanceSq(unstuckTarget) <= Player.SIZE * Player.SIZE) {
                 unstuckUntil = 0;
                 unstuckTarget = null;
-                currentState = AIState.PATROLLING;
-                return null; // 避让结束，让主 update 逻辑继续
+                return null;
             }
-            // 正在避让中：继续执行避让路径，并中断主 update 逻辑
-            return pathfindingModule.update(worldView); // update 可能返回 null，需要检查
-            // AIInput avoidanceMove = pathfindingModule.update(worldView);
-            // return (avoidanceMove != null) ? avoidanceMove : new AIInput(new
-            // ArrayList<>(), owner.angle, false, false, false); // 提供默认返回值
+            return createDirectMovementIntent(unstuckTarget);
         }
-        // B. 检查是否避让刚结束
         else if (unstuckTarget != null) {
-            // 避让时间到，清除状态
             unstuckTarget = null;
-            currentState = AIState.PATROLLING;
-            pathfindingModule.setTarget(null);
-            return null; // 避让结束，让主 update 逻辑继续
+            return null;
         }
 
         // C. 检查是否 *刚刚* 被队友卡住了
         if (checkIfStuck(currentTime)) {
             performUnstuckManeuver(currentTime);
-            // 立刻开始执行避让路径，并中断主 update 逻辑
-            // 再次检查 update 的返回值
-            AIInput avoidanceMove = pathfindingModule.update(worldView);
-            return (avoidanceMove != null) ? avoidanceMove
-                    : new AIInput(new ArrayList<>(), owner.angle, false, false, false);
+            return unstuckTarget == null ? null : createDirectMovementIntent(unstuckTarget);
         }
 
         // D. 既没有在避让，也没有触发避让
         return null; // 告诉主 update 逻辑继续正常执行
+    }
+
+    private AIInput createDirectMovementIntent(Point2D.Double target) {
+        if (target == null || owner == null || owner.position == null) {
+            return null;
+        }
+        double deltaX = target.x - owner.position.x;
+        double deltaY = target.y - owner.position.y;
+        List<String> keys = new ArrayList<>(2);
+        if (deltaY < -2.0) {
+            keys.add("W");
+        } else if (deltaY > 2.0) {
+            keys.add("S");
+        }
+        if (deltaX < -2.0) {
+            keys.add("A");
+        } else if (deltaX > 2.0) {
+            keys.add("D");
+        }
+        return new AIInput(keys, Math.atan2(deltaY, deltaX), false, false, false);
     }
 
     /**
@@ -1360,14 +1347,12 @@ public class TEAM_DEATHMATCHcontrol {
      * 使用 GameState 的空间网格来计算主动的队友避让。
      * 检查 AI 周围 3x3 的网格，如果发现近距离的队友，则计算一个“排斥”向量。
      *
-     * @return 一个包含 "A" (左平移) 或 "D" (右平移) 的列表，用于引导 AI 绕开队友。
+     * @return 只包含环境事实的不可变观察；是否避让、往哪边避让由独立规划器决定。
      */
-    private List<String> calculateProactiveAvoidanceKeys() {
-        List<String> avoidanceKeys = new ArrayList<>();
-
+    private LocalAvoidancePlanner.Observation calculateProactiveAvoidanceObservation() {
         // 1. 仅当 AI 正在寻路时才需要避让
         if (pathfindingModule == null || !pathfindingModule.isActive() || gameState == null) {
-            return avoidanceKeys; // 返回空列表
+            return LocalAvoidancePlanner.Observation.clear();
         }
 
         // 2. 从 GameState 获取网格数据
@@ -1378,7 +1363,7 @@ public class TEAM_DEATHMATCHcontrol {
 
         // 3. 检查网格是否有效
         if (grid == null || cellSize <= 0 || gridWidth == 0) {
-            return avoidanceKeys; // 网格未初始化
+            return LocalAvoidancePlanner.Observation.clear();
         }
 
         // 4. 获取 AI 自己的位置和网格坐标
@@ -1388,6 +1373,8 @@ public class TEAM_DEATHMATCHcontrol {
 
         Point2D.Double totalAvoidanceVector = new Point2D.Double(0, 0);
         int neighborsFound = 0;
+        int yieldingNeighbors = 0;
+        boolean closeContact = false;
 
         // 5. 遍历 AI 周围的 3x3 网格
         for (int x = -1; x <= 1; x++) {
@@ -1403,6 +1390,9 @@ public class TEAM_DEATHMATCHcontrol {
 
                     // 6.1. 获取原始列表的引用
                     List<Player> playersInCell = grid[checkX][checkY];
+                    if (playersInCell == null) {
+                        continue;
+                    }
 
                     // 6.2. 创建一个线程安全的“快照” (snapshot)
                     List<Player> safeSnapshot;
@@ -1427,6 +1417,14 @@ public class TEAM_DEATHMATCHcontrol {
 
                         // 8. 检查是否在避让半径内 (AVOIDANCE_RADIUS_SQ = 36^2 = 1296)
                         if (distSq < AVOIDANCE_RADIUS_SQ) {
+                            neighborsFound++;
+                            // 稳定路权：ID较小者继续走原路线，ID较大者负责让行。
+                            // 双方不会同时左右躲避，避免一群AI在出生口同步摆动。
+                            if (compareStableId(owner.id, other.id) <= 0) {
+                                continue;
+                            }
+                            yieldingNeighbors++;
+                            closeContact |= distSq < Player.SIZE * Player.SIZE;
                             double dist = Math.sqrt(distSq);
                             double repulsionX, repulsionY;
 
@@ -1447,39 +1445,20 @@ public class TEAM_DEATHMATCHcontrol {
                             // 11. 累加总的排斥向量
                             totalAvoidanceVector.x += (repulsionX / dist) * force;
                             totalAvoidanceVector.y += (repulsionY / dist) * force;
-                            neighborsFound++;
                         }
                     }
                 }
             }
         }
 
-        // 12. 如果找到了需要避让的队友
-        if (neighborsFound > 0) {
-            double vecMag = totalAvoidanceVector.distance(0, 0);
-            if (vecMag < 0.1) {
-                return avoidanceKeys; // 总向量太小，忽略
-            }
+        return new LocalAvoidancePlanner.Observation(totalAvoidanceVector.x, totalAvoidanceVector.y,
+                neighborsFound, yieldingNeighbors > 0, closeContact);
+    }
 
-            // 15. 将排斥向量的 "力" 转换为平移按键
-            // 提高阈值 (由 0.3 提升至 0.6)
-            // 只有当排斥力足够大时才触发按键，有效防止 AI 在出生点轻微摩擦时的左右“鬼畜”摆动
-            double forceThreshold = 0.6;
-
-            if (totalAvoidanceVector.x < -forceThreshold) {
-                avoidanceKeys.add("A"); // "力" 指向左 (X-), 按 "A"
-            } else if (totalAvoidanceVector.x > forceThreshold) {
-                avoidanceKeys.add("D"); // "力" 指向右 (X+), 按 "D"
-            }
-
-            if (totalAvoidanceVector.y < -forceThreshold) {
-                avoidanceKeys.add("W"); // "力" 指向上 (Y-), 按 "W"
-            } else if (totalAvoidanceVector.y > forceThreshold) {
-                avoidanceKeys.add("S"); // "力" 指向下 (Y+), 按 "S"
-            }
-        }
-
-        return avoidanceKeys;
+    private static int compareStableId(String left, String right) {
+        String safeLeft = left == null ? "" : left;
+        String safeRight = right == null ? "" : right;
+        return safeLeft.compareTo(safeRight);
     }
 
     public void resetForNewRound() {

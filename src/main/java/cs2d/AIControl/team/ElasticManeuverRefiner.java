@@ -51,6 +51,10 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
         if (wavePlan != basePlan) {
             return wavePlan;
         }
+        if (basePlan.orders().values().stream().noneMatch(order -> order != null
+                && order.taskType() == TaskType.RESPOND_TO_CONTACT)) {
+            return basePlan;
+        }
         return refinePincer(snapshot, basePlan, routes, agentsById);
     }
 
@@ -129,7 +133,7 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
             return basePlan;
         }
         List<AgentSnapshot> eligible = agentsById.values().stream()
-                .filter(agent -> isManeuverEligible(basePlan.orders().get(agent.id())))
+                .filter(agent -> isPincerEligible(basePlan.orders().get(agent.id())))
                 .sorted(Comparator.comparing(AgentSnapshot::id))
                 .toList();
         if (eligible.size() < 3) {
@@ -148,12 +152,11 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
             return basePlan;
         }
 
-        Vec2 primaryTarget = routePoint(primaryRoute, 0.58);
-        Vec2 flankTarget = routePoint(flankRoute, 0.82);
+        Vec2 primarySelectionPoint = routePoint(primaryRoute, 0.58);
         List<AgentSnapshot> suppressors = eligible.stream()
                 .sorted(Comparator
                         .comparingInt((AgentSnapshot agent) -> primaryRoute.routeId().equals(agent.routeId()) ? 0 : 1)
-                        .thenComparingDouble(agent -> agent.position().distanceSq(primaryTarget))
+                        .thenComparingDouble(agent -> agent.position().distanceSq(primarySelectionPoint))
                         .thenComparing(AgentSnapshot::id))
                 .limit(suppressCount)
                 .toList();
@@ -173,6 +176,9 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
         if (flankers.size() < flankCount) {
             return basePlan;
         }
+
+        Vec2 primaryTarget = forwardRoutePoint(primaryRoute, suppressors, 0.58);
+        Vec2 flankTarget = forwardRoutePoint(flankRoute, flankers, 0.82);
 
         long expiresAt = planExpiry(basePlan, snapshot.timestamp());
         String operationId = stableId(snapshot.teamId(), "pincer",
@@ -232,6 +238,15 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
                 && order.taskType() != TaskType.ASSEMBLE;
     }
 
+    private static boolean isPincerEligible(TacticalOrder order) {
+        return order != null
+                && order.taskType() != TaskType.SUPPORT
+                && order.taskType() != TaskType.REGROUP
+                && order.taskType() != TaskType.FLANK
+                && order.taskType() != TaskType.SUPPRESS
+                && order.taskType() != TaskType.ASSEMBLE;
+    }
+
     private static RouteSnapshot selectPrimaryRoute(List<RouteSnapshot> routes,
             java.util.Collection<AgentSnapshot> agents) {
         Map<String, Integer> occupancy = new HashMap<>();
@@ -281,6 +296,46 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
         int lastIndex = route.keyPoints().size() - 1;
         int index = Math.max(0, Math.min(lastIndex, (int) Math.round(lastIndex * progress)));
         return route.keyPoints().get(index);
+    }
+
+    private static Vec2 forwardRoutePoint(RouteSnapshot route, List<AgentSnapshot> agents,
+            double minimumProgress) {
+        List<Vec2> points = route.keyPoints();
+        int lastIndex = points.size() - 1;
+        int targetIndex = Math.max(0, Math.min(lastIndex,
+                (int) Math.round(lastIndex * minimumProgress)));
+        for (AgentSnapshot agent : agents) {
+            if (agent != null && agent.position() != null) {
+                targetIndex = Math.max(targetIndex, forwardRouteIndex(points, agent.position()));
+            }
+        }
+        return points.get(targetIndex);
+    }
+
+    private static int forwardRouteIndex(List<Vec2> points, Vec2 position) {
+        if (points.size() < 2 || position == null) {
+            return 0;
+        }
+        int bestForwardIndex = 0;
+        double bestDistanceSq = Double.POSITIVE_INFINITY;
+        for (int i = 1; i < points.size(); i++) {
+            Vec2 start = points.get(i - 1);
+            Vec2 end = points.get(i);
+            double dx = end.x() - start.x();
+            double dy = end.y() - start.y();
+            double lengthSq = dx * dx + dy * dy;
+            double progress = lengthSq <= 1.0e-9 ? 0.0
+                    : ((position.x() - start.x()) * dx + (position.y() - start.y()) * dy) / lengthSq;
+            progress = Math.max(0.0, Math.min(1.0, progress));
+            double nearestX = start.x() + progress * dx;
+            double nearestY = start.y() + progress * dy;
+            double distanceSq = square(position.x() - nearestX) + square(position.y() - nearestY);
+            if (distanceSq < bestDistanceSq) {
+                bestDistanceSq = distanceSq;
+                bestForwardIndex = progress <= 0.05 ? i - 1 : i;
+            }
+        }
+        return bestForwardIndex;
     }
 
     private static boolean hasUsableRoute(RouteSnapshot route) {

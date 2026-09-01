@@ -98,6 +98,87 @@ class TacticalTaskBoardTest {
     }
 
     @Test
+    void advanceAndAssemblyCompleteAfterAssignedAgentsActuallyArrive() {
+        long now = 5_500L;
+        for (TaskType type : List.of(TaskType.ADVANCE, TaskType.ASSEMBLE)) {
+            TacticalTaskBoard localBoard = new TacticalTaskBoard();
+            String taskId = type.name().toLowerCase();
+            TacticalTask task = new TacticalTask(taskId, type, "route-a", new Vec2(100, 100),
+                    2, 2, 60, 0.0, EngagementRule.IGNORE_REMOTE_SOUNDS,
+                    80.0, Set.of(), now + 1_000L);
+            TacticalPlan plan = new TacticalPlan(List.of(task), Map.of(
+                    "a", order("a", taskId, type, now),
+                    "b", order("b", taskId, type, now)));
+            TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 1_600, 900,
+                    List.of(
+                            new AgentSnapshot("a", new Vec2(95, 100), 100, false, false, null, List.of()),
+                            new AgentSnapshot("b", new Vec2(105, 100), 100, false, false, null, List.of())),
+                    List.of(), List.of());
+
+            TacticalTaskBoard.ReconciledPlan result = localBoard.reconcile("CT", plan, snapshot, now);
+
+            assertTrue(result.activeOrders().isEmpty());
+            assertEquals(TaskStatus.COMPLETED, result.taskStates().get(taskId).status());
+        }
+    }
+
+    @Test
+    void completedAdvanceReopensWhenARespawnCreatesANewAssignment() {
+        long now = 5_650L;
+        TacticalTask advance = new TacticalTask("route-advance", TaskType.ADVANCE, "route-a",
+                new Vec2(100, 100), 1, 2, 60, 0.0,
+                EngagementRule.IGNORE_REMOTE_SOUNDS, 80.0, Set.of(), now + 2_000L);
+        TacticalPlan firstLife = new TacticalPlan(List.of(advance), Map.of(
+                "a", order("a", advance.taskId(), TaskType.ADVANCE, now)));
+        TeamTacticalSnapshot arrived = new TeamTacticalSnapshot("CT", now, 1_600, 900,
+                List.of(new AgentSnapshot("a", new Vec2(100, 100), 100,
+                        false, false, "route-a", List.of())),
+                List.of(), List.of());
+        assertEquals(TaskStatus.COMPLETED,
+                board.reconcile("CT", firstLife, arrived, now)
+                        .taskStates().get(advance.taskId()).status());
+
+        TacticalPlan respawnLife = new TacticalPlan(List.of(advance), Map.of(
+                "b", order("b", advance.taskId(), TaskType.ADVANCE, now + 1L)));
+        TeamTacticalSnapshot respawned = new TeamTacticalSnapshot("CT", now + 1L, 1_600, 900,
+                List.of(new AgentSnapshot("b", new Vec2(0, 0), 100,
+                        false, false, null, List.of())),
+                List.of(), List.of());
+
+        TacticalTaskBoard.ReconciledPlan reopened = board.reconcile(
+                "CT", respawnLife, respawned, now + 1L);
+
+        assertEquals(TaskStatus.ACTIVE, reopened.taskStates().get(advance.taskId()).status());
+        assertEquals(Set.of("b"), reopened.activeOrders().keySet());
+    }
+
+    @Test
+    void flankArrivalCompletesItsSuppressLegAndReleasesWholeOperation() {
+        long now = 5_800L;
+        String operationId = "pincer-arrived";
+        TacticalTask suppress = operationTask("suppress-arrived", TaskType.SUPPRESS, 2, 2,
+                operationId, now + 1_000L);
+        TacticalTask flank = operationTask("flank-arrived", TaskType.FLANK, 1, 1,
+                operationId, now + 1_000L);
+        TacticalPlan plan = new TacticalPlan(List.of(suppress, flank), Map.of(
+                "a", order("a", suppress.taskId(), TaskType.SUPPRESS, now),
+                "b", order("b", suppress.taskId(), TaskType.SUPPRESS, now),
+                "c", order("c", flank.taskId(), TaskType.FLANK, now)));
+        TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 1_600, 900,
+                List.of(
+                        new AgentSnapshot("a", new Vec2(20, 20), 100, false, false, null, List.of()),
+                        new AgentSnapshot("b", new Vec2(30, 20), 100, false, false, null, List.of()),
+                        new AgentSnapshot("c", new Vec2(100, 100), 100, false, false, null, List.of())),
+                List.of(), List.of());
+
+        TacticalTaskBoard.ReconciledPlan result = board.reconcile("CT", plan, snapshot, now);
+
+        assertTrue(result.activeOrders().isEmpty());
+        assertEquals(TaskStatus.COMPLETED, result.taskStates().get(suppress.taskId()).status());
+        assertEquals(TaskStatus.COMPLETED, result.taskStates().get(flank.taskId()).status());
+    }
+
+    @Test
     void compoundOperationDoesNotStartUntilEveryLegHasMinimumAgents() {
         long now = 6_000L;
         String operationId = "pincer";
@@ -135,7 +216,11 @@ class TacticalTaskBoardTest {
     }
 
     private static TacticalOrder order(String agentId, String taskId, long now) {
-        return new TacticalOrder(agentId, TaskType.FLANK, Role.FLANKER, "route-a", null,
+        return order(agentId, taskId, TaskType.FLANK, now);
+    }
+
+    private static TacticalOrder order(String agentId, String taskId, TaskType type, long now) {
+        return new TacticalOrder(agentId, type, Role.FLANKER, "route-a", null,
                 new Vec2(100, 100), false, 100.0, Set.of(), 1_000.0, 0.0, now + 1_000L, taskId);
     }
 }
