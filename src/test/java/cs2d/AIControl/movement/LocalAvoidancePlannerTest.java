@@ -86,6 +86,28 @@ class LocalAvoidancePlannerTest {
         assertEquals(List.of(), intent.keys());
     }
 
+    @Test
+    void narrowCorridorQueuesInsteadOfPushingIntoWalls() {
+        LocalAvoidancePlanner planner = new LocalAvoidancePlanner();
+
+        MovementIntent intent = planner.plan(1_000, "bot-2", List.of("W"),
+                new LocalAvoidancePlanner.Observation(1.0, 0.0, 1, true, true, false, false));
+
+        assertEquals(MovementIntent.CompositionMode.EXCLUSIVE, intent.mode());
+        assertEquals("corridor-queue", intent.sourceId());
+        assertEquals(List.of(), intent.keys());
+    }
+
+    @Test
+    void blockedPreferredSideUsesTheOnlyOpenSide() {
+        LocalAvoidancePlanner planner = new LocalAvoidancePlanner();
+
+        MovementIntent intent = planner.plan(1_000, "bot-2", List.of("W"),
+                new LocalAvoidancePlanner.Observation(-1.0, 0.0, 1, true, true, false, true));
+
+        assertEquals(List.of("D"), intent.keys());
+    }
+
     private static LocalAvoidancePlanner.Observation observation(double x, double y) {
         return new LocalAvoidancePlanner.Observation(x, y, 1, true, true);
     }

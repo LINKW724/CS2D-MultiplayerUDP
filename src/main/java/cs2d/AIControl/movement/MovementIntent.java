@@ -39,6 +39,11 @@ public record MovementIntent(
         return new MovementIntent(sourceId, priority, CompositionMode.EXCLUSIVE, keys);
     }
 
+    /** Explicitly owns locomotion while intentionally producing no movement. */
+    public static MovementIntent stop(String sourceId, int priority) {
+        return new MovementIntent(sourceId, priority, CompositionMode.EXCLUSIVE, List.of());
+    }
+
     public boolean hasMovement() {
         return !keys.isEmpty();
     }

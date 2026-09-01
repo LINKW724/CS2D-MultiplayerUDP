@@ -27,6 +27,11 @@ public final class LocalAvoidancePlanner {
 
     public MovementIntent plan(long now, String ownerId, List<String> baseKeys, Observation observation) {
         Observation safeObservation = observation == null ? Observation.clear() : observation;
+        if (safeObservation.shouldYield() && safeObservation.closeContact()
+                && !safeObservation.lateralEscapeAvailable()) {
+            clearCommitment();
+            return MovementIntent.stop("corridor-queue", 250);
+        }
         String proposedKey = choosePerpendicularKey(ownerId, baseKeys, safeObservation);
 
         if (proposedKey == null) {
@@ -90,9 +95,22 @@ public final class LocalAvoidancePlanner {
         }
 
         if (vertical) {
-            return horizontalKey(observation.repulsionX(), ownerId, observation.closeContact());
+            return available(horizontalKey(observation.repulsionX(), ownerId, observation.closeContact()),
+                    "A", "D", observation.negativeLateralClear(), observation.positiveLateralClear());
         }
-        return verticalKey(observation.repulsionY(), ownerId, observation.closeContact());
+        return available(verticalKey(observation.repulsionY(), ownerId, observation.closeContact()),
+                "W", "S", observation.negativeLateralClear(), observation.positiveLateralClear());
+    }
+
+    private static String available(String proposed, String negativeKey, String positiveKey,
+            boolean negativeClear, boolean positiveClear) {
+        if (proposed == null) {
+            return null;
+        }
+        if (proposed.equals(negativeKey)) {
+            return negativeClear ? negativeKey : (positiveClear ? positiveKey : null);
+        }
+        return positiveClear ? positiveKey : (negativeClear ? negativeKey : null);
     }
 
     private String horizontalKey(double force, String ownerId, boolean allowStableFallback) {
@@ -159,13 +177,24 @@ public final class LocalAvoidancePlanner {
             double repulsionY,
             int nearbyTeammates,
             boolean shouldYield,
-            boolean closeContact) {
+            boolean closeContact,
+            boolean negativeLateralClear,
+            boolean positiveLateralClear) {
         public Observation {
             nearbyTeammates = Math.max(0, nearbyTeammates);
         }
 
+        public Observation(double repulsionX, double repulsionY, int nearbyTeammates,
+                boolean shouldYield, boolean closeContact) {
+            this(repulsionX, repulsionY, nearbyTeammates, shouldYield, closeContact, true, true);
+        }
+
+        public boolean lateralEscapeAvailable() {
+            return negativeLateralClear || positiveLateralClear;
+        }
+
         public static Observation clear() {
-            return new Observation(0.0, 0.0, 0, false, false);
+            return new Observation(0.0, 0.0, 0, false, false, true, true);
         }
     }
 }

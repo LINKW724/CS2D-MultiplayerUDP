@@ -24,7 +24,8 @@ public final class MovementArbiter {
         }
 
         List<MovementIntent> intents = proposedIntents.stream()
-                .filter(intent -> intent != null && intent.hasMovement())
+                .filter(intent -> intent != null
+                        && (intent.hasMovement() || intent.mode() == CompositionMode.EXCLUSIVE))
                 .sorted(Comparator.comparingInt(MovementIntent::priority).reversed()
                         .thenComparing(MovementIntent::sourceId))
                 .toList();

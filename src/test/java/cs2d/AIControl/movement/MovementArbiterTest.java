@@ -60,4 +60,14 @@ class MovementArbiterTest {
 
         assertEquals(MovementDecision.idle(), decision);
     }
+
+    @Test
+    void explicitCorridorStopOwnsMovementWithoutInventingKeys() {
+        MovementDecision decision = arbiter.decide(List.of(
+                MovementIntent.base("path", 100, List.of("W")),
+                MovementIntent.stop("corridor-queue", 250)));
+
+        assertEquals(List.of(), decision.keys());
+        assertEquals(List.of("corridor-queue"), decision.contributingSources());
+    }
 }
