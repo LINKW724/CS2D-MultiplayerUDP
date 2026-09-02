@@ -10,11 +10,13 @@ import cs2d.AIControl.A.PathfindingModule; // 导入 A 包
 import cs2d.AIControl.B.PerceptionModule;
 import cs2d.AIControl.B.PerceptionType;
 import cs2d.AIControl.movement.LocalAvoidancePlanner;
+import cs2d.AIControl.movement.CoverScanBudget;
 import cs2d.AIControl.movement.LocalCoverPlanner;
 import cs2d.AIControl.movement.LocomotionFacingPolicy;
 import cs2d.AIControl.movement.MovementArbiter;
 import cs2d.AIControl.movement.MovementDecision;
 import cs2d.AIControl.movement.MovementIntent;
+import cs2d.AIControl.movement.QuadtreeCoverGeometryProbe;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalIdlePolicy;
 import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
@@ -66,6 +68,7 @@ public class TEAM_DEATHMATCHcontrol {
     private final MovementArbiter movementArbiter = new MovementArbiter();
     private final LocalAvoidancePlanner localAvoidancePlanner = new LocalAvoidancePlanner();
     private final LocalCoverPlanner localCoverPlanner = new LocalCoverPlanner();
+    private final LocalCoverPlanner.GeometryProbe coverGeometry;
     private final LocomotionFacingPolicy locomotionFacingPolicy = new LocomotionFacingPolicy();
     private final TacticalIdlePolicy tacticalIdlePolicy = new TacticalIdlePolicy();
     private boolean corridorQueueHeld;
@@ -73,6 +76,7 @@ public class TEAM_DEATHMATCHcontrol {
     private long coverCommitUntil;
     private long nextCoverResponseTime;
     private long nextRangedCoverScanTime;
+    private final long rangedCoverScanPhaseMs;
 
     // --- 状态机计时器 ---
     private long lastStateChangeTime = 0;
@@ -121,6 +125,7 @@ public class TEAM_DEATHMATCHcontrol {
     private static final long COVER_COMMIT_MS = 2_200;
     private static final long COVER_RESPONSE_COOLDOWN_MS = 2_800;
     private static final long RANGED_COVER_SCAN_INTERVAL_MS = 600;
+    private static final CoverScanBudget COVER_SCAN_BUDGET = new CoverScanBudget(2, 16);
     private static final double COVER_ARRIVAL_RADIUS_SQ = 30.0 * 30.0;
     // --- 结束新增 ---
 
@@ -161,6 +166,10 @@ public class TEAM_DEATHMATCHcontrol {
         this.perceptionModule = perceptionModule;
         this.attackModule = attackModule;
         this.pathfindingModule = pathfindingModule;
+        this.coverGeometry = new QuadtreeCoverGeometryProbe(gameState, pathfindingModule);
+        this.rangedCoverScanPhaseMs = Math.floorMod(owner.id == null ? 0 : owner.id.hashCode(),
+                RANGED_COVER_SCAN_INTERVAL_MS);
+        this.nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
         // --- 新增：初始化 GrenadeModule ---
         // 确保 rand 已经初始化
         this.rand = new Random(); // 如果之前没有初始化，在这里初始化
@@ -524,7 +533,7 @@ public class TEAM_DEATHMATCHcontrol {
 
                         if (dist > effectiveRange) {
                             // 局部几何评估是低频思考，不进入60Hz动作循环。
-                            if (currentTime >= nextRangedCoverScanTime) {
+                            if (currentTime >= nextRangedCoverScanTime && COVER_SCAN_BUDGET.tryAcquire(currentTime)) {
                                 nextRangedCoverScanTime = currentTime + RANGED_COVER_SCAN_INTERVAL_MS;
                                 Point2D.Double coverPoint = findCover(this.primaryTarget.position);
                                 if (coverPoint != null
@@ -885,28 +894,13 @@ public class TEAM_DEATHMATCHcontrol {
                 .filter(Objects::nonNull)
                 .map(point -> new Point2D.Double(point.x, point.y))
                 .toList();
-        LocalCoverPlanner.GeometryProbe geometry = new LocalCoverPlanner.GeometryProbe() {
-            @Override
-            public boolean isInBounds(Point2D.Double point) {
-                return gameState.isInBounds(point);
-            }
-
-            @Override
-            public boolean isWalkable(Point2D.Double point) {
-                return pathfindingModule.isWalkable(point);
-            }
-
-            @Override
-            public boolean hasLineOfSight(Point2D.Double from, Point2D.Double to) {
-                return pathfindingModule.pathfinder.hasLineOfSightToPointFromPoint(from, to);
-            }
-        };
-        return localCoverPlanner.findBestCover(owner.position, threatPosition, teammatePositions, geometry)
+        return localCoverPlanner.findBestCover(owner.position, threatPosition, teammatePositions, coverGeometry)
                 .orElseGet(this::calculateRetreatPosition);
     }
 
     private boolean beginCoverMovement(long currentTime, Point2D.Double threatPosition) {
-        if (pathfindingModule == null || owner == null || owner.position == null) {
+        if (pathfindingModule == null || owner == null || owner.position == null
+                || !COVER_SCAN_BUDGET.tryAcquire(currentTime)) {
             return false;
         }
         Point2D.Double coverPoint = findCover(threatPosition);
@@ -1026,7 +1020,7 @@ public class TEAM_DEATHMATCHcontrol {
         this.corridorQueueHeld = false;
         clearCoverCommitment();
         this.nextCoverResponseTime = 0;
-        this.nextRangedCoverScanTime = 0;
+        this.nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
         this.unstuckUntil = 0;
         this.unstuckTarget = null;
         this.stuckCount = 0;
@@ -1103,7 +1097,7 @@ public class TEAM_DEATHMATCHcontrol {
         corridorQueueHeld = false;
         clearCoverCommitment();
         nextCoverResponseTime = 0;
-        nextRangedCoverScanTime = 0;
+        nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
         unstuckUntil = 0;
         unstuckTarget = null;
         stuckCount = 0;
@@ -1145,7 +1139,7 @@ public class TEAM_DEATHMATCHcontrol {
         this.locomotionFacingPolicy.reset();
         this.corridorQueueHeld = false;
         clearCoverCommitment();
-        this.nextRangedCoverScanTime = 0;
+        this.nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
 
         // 通知 PerceptionModule 清除所有感知信息
         if (this.perceptionModule != null) {
