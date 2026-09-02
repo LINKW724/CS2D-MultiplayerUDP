@@ -19,6 +19,7 @@ import javafx.application.Platform;
 import javafx.geometry.*;
 // 导入 JavaFX 场景和节点相关的类
 import javafx.scene.Cursor;
+import javafx.scene.CacheHint;
 import javafx.scene.Group;
 import javafx.scene.Node;
 import javafx.scene.Scene;
@@ -7508,6 +7509,12 @@ public class GameClient extends Application {
         row.setAlignment(Pos.CENTER_RIGHT);
         row.setPadding(new Insets(4, 8, 4, 8));
         row.setStyle("-fx-background-color: rgba(45, 55, 72, 0.7); -fx-background-radius: 4;");
+        // 击杀信息创建后内容不会再变化，渐入/渐出只改变透明度。让 JavaFX 将整行
+        // （圆角背景、文字和 SVG 图标）栅格化一次并复用纹理，避免 QuantumRenderer
+        // 在每个 Pulse 中反复进入 Marlin。大量击杀时，这也避免 GC 为等待 Marlin
+        // 的长 C2 循环进入安全点而冻结画面数秒。
+        row.setCache(true);
+        row.setCacheHint(CacheHint.SPEED);
         row.setOpacity(0); // 初始透明
 
         // 创建击杀者标签 (不变)
@@ -7560,9 +7567,6 @@ public class GameClient extends Application {
         long currentTime = System.currentTimeMillis();
         long timeout = 5000; // 5秒超时
 
-        // 创建一个列表来存储需要移除的节点，避免在遍历时直接修改列表
-        List<Node> nodesToRemove = new ArrayList<>();
-
         for (Node node : killFeedVBox.getChildren()) {
             // 安全地获取创建时间
             Object creationTimeObj = node.getProperties().get("creationTime");
@@ -7578,15 +7582,12 @@ public class GameClient extends Application {
 
                     FadeTransition fadeOut = new FadeTransition(Duration.seconds(1), node);
                     fadeOut.setToValue(0);
-                    // 动画结束后，将节点加入待移除列表
-                    fadeOut.setOnFinished(e -> nodesToRemove.add(node));
+                    // 动画回调运行在 FX 线程，可以直接删除。旧实现把节点加入本次调用的
+                    // 临时列表，下一帧该列表已经丢失，导致不可见的击杀行永久留在场景图中。
+                    fadeOut.setOnFinished(e -> killFeedVBox.getChildren().remove(node));
                     fadeOut.play();
                 }
             }
-        }
-        // 统一移除所有已完成消失动画的节点
-        if (!nodesToRemove.isEmpty()) {
-            killFeedVBox.getChildren().removeAll(nodesToRemove);
         }
     }
 
