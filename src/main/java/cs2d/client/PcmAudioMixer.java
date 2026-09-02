@@ -20,9 +20,6 @@ import java.util.concurrent.atomic.LongAdder;
 import javax.sound.sampled.AudioFormat;
 import javax.sound.sampled.AudioInputStream;
 import javax.sound.sampled.AudioSystem;
-import javax.sound.sampled.DataLine;
-import javax.sound.sampled.LineUnavailableException;
-import javax.sound.sampled.SourceDataLine;
 import javax.sound.sampled.UnsupportedAudioFileException;
 
 /**
@@ -37,12 +34,9 @@ final class PcmAudioMixer implements AutoCloseable {
     static final int DEVICE_BATCH_BLOCKS = 4;
     static final int PREBUFFER_BLOCKS = DEVICE_BATCH_BLOCKS;
     static final int PCM_RING_BLOCKS = PREBUFFER_BLOCKS + 1;
-    private static final int DEVICE_BUFFER_BATCHES = 2;
     static final long BUFFER_DURATION_NANOS = Math.round(FRAMES_PER_BUFFER * 1_000_000_000.0 / SAMPLE_RATE);
     static final long DEVICE_BATCH_DURATION_NANOS = BUFFER_DURATION_NANOS * DEVICE_BATCH_BLOCKS;
     static final long DEVICE_STALL_TIMEOUT_NANOS = TimeUnit.MILLISECONDS.toNanos(150);
-    private static final long DEVICE_POLL_NANOS = TimeUnit.MILLISECONDS.toNanos(1);
-    private static final long REOPEN_RETRY_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
     static final AudioFormat OUTPUT_FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE, 16, CHANNELS,
             CHANNELS * Short.BYTES, SAMPLE_RATE, false);
@@ -141,7 +135,6 @@ final class PcmAudioMixer implements AutoCloseable {
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicBoolean clearRequested = new AtomicBoolean(false);
     private final AtomicBoolean flushRequested = new AtomicBoolean(false);
-    private final AtomicBoolean recoveryRequested = new AtomicBoolean(false);
     private final LongAdder requestedVoices = new LongAdder();
     private final LongAdder mixedVoices = new LongAdder();
     private final LongAdder underrunCount = new LongAdder();
@@ -149,15 +142,12 @@ final class PcmAudioMixer implements AutoCloseable {
     private final LongAdder outputFrameCount = new LongAdder();
     private final LongAdder outputWriteNanos = new LongAdder();
     private final LongAdder lateWriteCount = new LongAdder();
-    private final LongAdder deviceRecoveryCount = new LongAdder();
-    private final LongAdder staleBlockDropCount = new LongAdder();
     private final AtomicInteger activeVoiceCount = new AtomicInteger();
     private final AtomicInteger peakVoiceCount = new AtomicInteger();
     private final AtomicInteger minimumBufferedBlocks = new AtomicInteger(PREBUFFER_BLOCKS);
     private final AtomicLong maximumWriteNanos = new AtomicLong();
     private final AtomicLong statisticsEpochNanos = new AtomicLong(System.nanoTime());
-    private final Object lineLifecycleLock = new Object();
-    private volatile SourceDataLine outputLine;
+    private volatile PcmOutputTransport outputTransport;
     private volatile PcmBlockRing blockRing;
     private volatile Thread mixerThread;
     private volatile Thread writerThread;
@@ -165,19 +155,19 @@ final class PcmAudioMixer implements AutoCloseable {
     boolean start() {
         if (running.get())
             return true;
-        try {
-            installOutputLine(openOutputLine());
-        } catch (LineUnavailableException | IllegalArgumentException e) {
-            System.err.println("[PCM-MIXER] 无法打开48kHz立体声音频设备，将使用JavaFX回退: " + e.getMessage());
+        int batchBytes = FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize() * DEVICE_BATCH_BLOCKS;
+        PcmOutputTransport transport = new IsolatedPcmOutputTransport(batchBytes);
+        if (!transport.start()) {
+            System.err.println("[PCM-MIXER] 无法启动隔离音频输出，将使用JavaFX回退。");
             return false;
         }
+        outputTransport = transport;
         PcmBlockRing ring = new PcmBlockRing(PCM_RING_BLOCKS, PREBUFFER_BLOCKS,
                 FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize());
         CountDownLatch prebufferReady = new CountDownLatch(PREBUFFER_BLOCKS);
         blockRing = ring;
         clearRequested.set(false);
         flushRequested.set(false);
-        recoveryRequested.set(false);
         minimumBufferedBlocks.set(PREBUFFER_BLOCKS);
         statisticsEpochNanos.set(System.nanoTime());
         running.set(true);
@@ -191,7 +181,7 @@ final class PcmAudioMixer implements AutoCloseable {
         writerThread = writeThread;
         mixThread.start();
         writeThread.start();
-        System.out.println("[PCM-MIXER] 双线程环形缓冲已启动: 48000Hz / 16-bit / stereo / 256-frame");
+        System.out.println("[PCM-MIXER] 隔离进程输出已启动: 48000Hz / 16-bit / stereo / 256-frame");
         return true;
     }
 
@@ -250,6 +240,7 @@ final class PcmAudioMixer implements AutoCloseable {
 
     Snapshot snapshotAndReset() {
         PcmBlockRing ring = blockRing;
+        PcmOutputTransport transport = outputTransport;
         int bufferedBlocks = ring == null ? 0 : ring.readyCount();
         int minBuffered = minimumBufferedBlocks.getAndSet(bufferedBlocks);
         long writes = outputWriteCount.sumThenReset();
@@ -263,8 +254,8 @@ final class PcmAudioMixer implements AutoCloseable {
                 underrunCount.sumThenReset(), bufferedBlocks, minBuffered, writes, frames, realtimePercent,
                 writes == 0 ? 0.0 : writeNanos / (double) writes / 1_000_000.0,
                 maximumWriteNanos.getAndSet(0L) / 1_000_000.0,
-                lateWriteCount.sumThenReset(), deviceRecoveryCount.sumThenReset(),
-                staleBlockDropCount.sumThenReset(), running.get());
+                lateWriteCount.sumThenReset(), transport == null ? 0L : transport.recoveriesThenReset(),
+                transport == null ? 0L : transport.droppedBatchesThenReset(), running.get());
     }
 
     void stopAll() {
@@ -310,20 +301,12 @@ final class PcmAudioMixer implements AutoCloseable {
         byte[] deviceBatch = new byte[blockBytes * DEVICE_BATCH_BLOCKS];
         try {
             prebufferReady.await();
-            SourceDataLine line = outputLine;
             if (!running.get())
                 return;
-            if (line != null)
-                line.start();
+            long nextDeadlineNanos = System.nanoTime();
             while (running.get()) {
-                if (recoveryRequested.get() || line == null || !line.isOpen()) {
-                    line = recoverOutputLine(ring);
-                    if (line == null)
-                        continue;
-                }
                 if (flushRequested.getAndSet(false)) {
                     ring.discardReady();
-                    line.flush();
                 }
 
                 int bufferedBeforeWrite = ring.readyCount();
@@ -345,18 +328,21 @@ final class PcmAudioMixer implements AutoCloseable {
                 }
                 if (!running.get())
                     break;
-                if (recoveryRequested.get())
-                    continue;
+
+                nextDeadlineNanos = awaitOutputDeadline(nextDeadlineNanos);
 
                 long writeStarted = System.nanoTime();
-                int written = writeAvailable(line, ring, deviceBatch);
+                PcmOutputTransport transport = outputTransport;
+                boolean sent = transport != null && transport.offer(deviceBatch, deviceBatch.length);
                 long writeNanos = System.nanoTime() - writeStarted;
                 outputWriteCount.increment();
-                outputFrameCount.add(written / OUTPUT_FORMAT.getFrameSize());
+                if (sent)
+                    outputFrameCount.add(deviceBatch.length / OUTPUT_FORMAT.getFrameSize());
                 outputWriteNanos.add(writeNanos);
                 maximumWriteNanos.accumulateAndGet(writeNanos, Math::max);
                 if (writeNanos > DEVICE_BATCH_DURATION_NANOS * 2L)
                     lateWriteCount.increment();
+                nextDeadlineNanos += DEVICE_BATCH_DURATION_NANOS;
             }
         } catch (InterruptedException e) {
             if (running.get())
@@ -369,132 +355,21 @@ final class PcmAudioMixer implements AutoCloseable {
         }
     }
 
-    private int writeAvailable(SourceDataLine line, PcmBlockRing ring, byte[] deviceBatch)
-            throws InterruptedException {
-        int written = 0;
-        long lastProgressNanos = System.nanoTime();
-        int frameSize = OUTPUT_FORMAT.getFrameSize();
-        while (running.get() && written < deviceBatch.length && !recoveryRequested.get()) {
-            long now = System.nanoTime();
-            int writable;
-            try {
-                writable = alignedWritableBytes(line.available(), deviceBatch.length - written, frameSize);
-            } catch (RuntimeException unavailable) {
-                requestRecovery(ring);
-                return written;
-            }
-            if (writable <= 0) {
-                if (hasDeviceStalled(lastProgressNanos, now)) {
-                    requestRecovery(ring);
-                    closeDetachedLine(detachOutputLine(line));
-                    return written;
-                }
-                LockSupport.parkNanos(DEVICE_POLL_NANOS);
-                if (Thread.interrupted())
-                    throw new InterruptedException();
-                continue;
-            }
+    static long advanceOutputDeadline(long previousDeadlineNanos, long nowNanos) {
+        if (previousDeadlineNanos <= 0L || nowNanos - previousDeadlineNanos > DEVICE_BATCH_DURATION_NANOS * 2L)
+            return nowNanos;
+        return previousDeadlineNanos;
+    }
 
-            int count;
-            try {
-                count = line.write(deviceBatch, written, writable);
-            } catch (RuntimeException writeFailure) {
-                requestRecovery(ring);
-                return written;
-            }
-            if (count <= 0) {
-                if (hasDeviceStalled(lastProgressNanos, System.nanoTime())) {
-                    requestRecovery(ring);
-                    closeDetachedLine(detachOutputLine(line));
-                    return written;
-                }
-                continue;
-            }
-            written += count;
-            lastProgressNanos = System.nanoTime();
+    private long awaitOutputDeadline(long deadlineNanos) throws InterruptedException {
+        long adjustedDeadline = advanceOutputDeadline(deadlineNanos, System.nanoTime());
+        long remaining;
+        while (running.get() && (remaining = adjustedDeadline - System.nanoTime()) > 0L) {
+            LockSupport.parkNanos(remaining);
+            if (Thread.interrupted())
+                throw new InterruptedException();
         }
-        return written;
-    }
-
-    static int alignedWritableBytes(int availableBytes, int remainingBytes, int frameSize) {
-        if (availableBytes <= 0 || remainingBytes <= 0 || frameSize <= 0)
-            return 0;
-        int writable = Math.min(availableBytes, remainingBytes);
-        return writable - writable % frameSize;
-    }
-
-    static boolean hasDeviceStalled(long lastProgressNanos, long nowNanos) {
-        return lastProgressNanos > 0L && nowNanos - lastProgressNanos >= DEVICE_STALL_TIMEOUT_NANOS;
-    }
-
-    private void requestRecovery(PcmBlockRing ring) {
-        if (!recoveryRequested.compareAndSet(false, true))
-            return;
-        requests.clear();
-        clearRequested.set(true);
-        flushRequested.set(false);
-        staleBlockDropCount.add(ring.discardReady());
-    }
-
-    private SourceDataLine recoverOutputLine(PcmBlockRing ring) throws InterruptedException {
-        closeDetachedLine(detachOutputLine(null));
-        while (running.get()) {
-            try {
-                SourceDataLine replacement = openOutputLine();
-                replacement.start();
-                installOutputLine(replacement);
-                recoveryRequested.set(false);
-                deviceRecoveryCount.increment();
-                System.out.println("[PCM-MIXER] 音频设备已恢复，陈旧PCM已丢弃。");
-                return replacement;
-            } catch (LineUnavailableException | IllegalArgumentException reopenFailure) {
-                requestRecovery(ring);
-                requests.clear();
-                LockSupport.parkNanos(REOPEN_RETRY_NANOS);
-                if (Thread.interrupted())
-                    throw new InterruptedException();
-            }
-        }
-        return null;
-    }
-
-    private SourceDataLine openOutputLine() throws LineUnavailableException {
-        DataLine.Info info = new DataLine.Info(SourceDataLine.class, OUTPUT_FORMAT);
-        SourceDataLine line = (SourceDataLine) AudioSystem.getLine(info);
-        int requestedBufferBytes = FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize()
-                * DEVICE_BATCH_BLOCKS * DEVICE_BUFFER_BATCHES;
-        line.open(OUTPUT_FORMAT, requestedBufferBytes);
-        System.out.printf("[PCM-MIXER] 设备缓冲 requested=%dB actual=%dB | batch=%d frames%n",
-                requestedBufferBytes, line.getBufferSize(), FRAMES_PER_BUFFER * DEVICE_BATCH_BLOCKS);
-        return line;
-    }
-
-    private void installOutputLine(SourceDataLine line) {
-        synchronized (lineLifecycleLock) {
-            outputLine = line;
-        }
-    }
-
-    private SourceDataLine detachOutputLine(SourceDataLine expected) {
-        synchronized (lineLifecycleLock) {
-            SourceDataLine current = outputLine;
-            if (expected != null && current != expected)
-                return null;
-            outputLine = null;
-            return current;
-        }
-    }
-
-    private static void closeDetachedLine(SourceDataLine line) {
-        if (line == null)
-            return;
-        // close() is intentionally first: on Windows DirectAudio it is the operation
-        // that wakes a native write blocked on a stalled device. stop()/flush() before
-        // close can themselves wait behind that write and defeat the watchdog.
-        try {
-            line.close();
-        } catch (RuntimeException ignored) {
-        }
+        return adjustedDeadline;
     }
 
     static void copyPcmBlock(byte[] block, byte[] batch, int blockIndex) {
@@ -511,7 +386,7 @@ final class PcmAudioMixer implements AutoCloseable {
             Thread other = thread == mixerThread ? writerThread : mixerThread;
             if (other != null)
                 other.interrupt();
-            closeLine();
+            closeOutputTransport();
         }
     }
 
@@ -557,14 +432,17 @@ final class PcmAudioMixer implements AutoCloseable {
             mixer.interrupt();
         if (writer != null)
             writer.interrupt();
-        closeLine();
+        closeOutputTransport();
         requests.clear();
         PcmBlockRing ring = blockRing;
         if (ring != null)
             ring.discardReady();
     }
 
-    private void closeLine() {
-        closeDetachedLine(detachOutputLine(null));
+    private void closeOutputTransport() {
+        PcmOutputTransport transport = outputTransport;
+        outputTransport = null;
+        if (transport != null)
+            transport.close();
     }
 }

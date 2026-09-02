@@ -50,20 +50,12 @@ class PcmAudioMixerTest {
     }
 
     @Test
-    void limitsWritesToAvailableFrameAlignedBytes() {
-        assertEquals(0, PcmAudioMixer.alignedWritableBytes(0, 4096, 4));
-        assertEquals(0, PcmAudioMixer.alignedWritableBytes(3, 4096, 4));
-        assertEquals(4, PcmAudioMixer.alignedWritableBytes(6, 4096, 4));
-        assertEquals(4096, PcmAudioMixer.alignedWritableBytes(8192, 4096, 4));
-    }
-
-    @Test
-    void deviceStallThresholdIsExactlyOneHundredFiftyMilliseconds() {
-        long started = 10_000L;
-        assertTrue(!PcmAudioMixer.hasDeviceStalled(started,
-                started + PcmAudioMixer.DEVICE_STALL_TIMEOUT_NANOS - 1L));
-        assertTrue(PcmAudioMixer.hasDeviceStalled(started,
-                started + PcmAudioMixer.DEVICE_STALL_TIMEOUT_NANOS));
+    void resetsOutputPacingAfterAWriterSchedulingGap() {
+        long deadline = 10_000L;
+        assertEquals(deadline, PcmAudioMixer.advanceOutputDeadline(deadline,
+                deadline + PcmAudioMixer.DEVICE_BATCH_DURATION_NANOS));
+        long lateNow = deadline + PcmAudioMixer.DEVICE_BATCH_DURATION_NANOS * 3L;
+        assertEquals(lateNow, PcmAudioMixer.advanceOutputDeadline(deadline, lateNow));
     }
 
     @Test
