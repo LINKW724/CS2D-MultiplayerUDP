@@ -13,6 +13,7 @@ import cs2d.playerAndAi.Player;
 
 import cs2d.playerAndAi.Waypoint;
 import cs2d.playerAndAi.Weapon;
+import cs2d.playerAndAi.WeaponAmmoSnapshot;
 import cs2d.playerAndAi.doublePlayer.WaypointNode;
 import javafx.application.Platform;
 
@@ -3123,10 +3124,10 @@ public class GameState {
                 }
             }
             // 所有非僵尸模式下，死亡都会掉落主武器
-            if (target.primaryWeapon != null) {
-                addDroppedItem(new DroppedItem(target.primaryWeapon, (Point2D.Double) target.position.clone(),
-                        target.primary_currentAmmo, target.primary_reserveAmmo));
-            }
+            target.snapshotWeaponSlot(1).ifPresent(snapshot ->
+                    addDroppedItem(new DroppedItem(snapshot.weapon(),
+                            (Point2D.Double) target.position.clone(),
+                            snapshot.currentAmmo(), snapshot.reserveAmmo())));
 
             if (gameMode == GameMode.TEAM_DEATHMATCH) {
                 if (shooter.team == Player.Team.CT)
@@ -3183,9 +3184,10 @@ public class GameState {
 
         // 丢枪逻辑只能由一个存活的、且拥有主武器的单位执行
         if (actionTarget.isAlive() && actionTarget.primaryWeapon != null) {
+            WeaponAmmoSnapshot droppedWeapon = actionTarget.snapshotWeaponSlot(1).orElse(null);
+            if (droppedWeapon == null)
+                return;
 
-            // 在丢弃前，强制同步弹药数量
-            // 如果当前正拿着主武器，就把“手上”的实时弹药存回记录
             // 丢弃时正拿着主武器，则自动切换到副武器
             if (actionTarget.currentSlot == 1) {
                 actionTarget.switchToSlot(2);
@@ -3196,8 +3198,6 @@ public class GameState {
                 actionTarget.predictedRecoilAngle = 0;
                 actionTarget.r8ChargeStartTime = 0;
             }
-
-            Weapon droppedWeapon = actionTarget.primaryWeapon;
 
             // === 防卡墙逻辑，确保武器不会掉进墙里 ===
             // 计算一个在玩家前方的初始掉落位置
@@ -3219,8 +3219,8 @@ public class GameState {
             // === 防卡墙逻辑结束 ===
 
             // 在游戏世界中创建掉落物实体，并记录武器当前的弹药
-            addDroppedItem(new DroppedItem(droppedWeapon, dropPos, actionTarget.primary_currentAmmo,
-                    actionTarget.primary_reserveAmmo, actionTarget.id));
+            addDroppedItem(new DroppedItem(droppedWeapon.weapon(), dropPos, droppedWeapon.currentAmmo(),
+                    droppedWeapon.reserveAmmo(), actionTarget.id));
 
             // 从玩家（或AI）的物品栏中移除主武器
             actionTarget.primaryWeapon = null;
@@ -3232,7 +3232,7 @@ public class GameState {
                 actionTarget.switchToSlot(2);
             }
 
-            logger.accept(actionTarget.name + " 丢弃了 " + droppedWeapon.name);
+            logger.accept(actionTarget.name + " 丢弃了 " + droppedWeapon.weapon().name);
         }
     }
 

@@ -292,6 +292,35 @@ public class Player {
             };
       }
 
+      /**
+       * Captures one inventory slot, reconciling the selected slot with its live
+       * ammunition counters. Slot fields are synchronized when weapons switch, so
+       * death/drop code must use this snapshot instead of cached fields directly.
+       */
+      public Optional<WeaponAmmoSnapshot> snapshotWeaponSlot(int slot) {
+            Weapon weapon;
+            int slotCurrentAmmo;
+            int slotReserveAmmo;
+            if (slot == 1) {
+                  weapon = primaryWeapon;
+                  slotCurrentAmmo = primary_currentAmmo;
+                  slotReserveAmmo = primary_reserveAmmo;
+            } else if (slot == 2) {
+                  weapon = secondaryWeapon;
+                  slotCurrentAmmo = secondary_currentAmmo;
+                  slotReserveAmmo = secondary_reserveAmmo;
+            } else {
+                  return Optional.empty();
+            }
+            if (weapon == null)
+                  return Optional.empty();
+            if (currentSlot == slot) {
+                  slotCurrentAmmo = currentAmmo;
+                  slotReserveAmmo = reserveAmmo;
+            }
+            return Optional.of(new WeaponAmmoSnapshot(weapon, slotCurrentAmmo, slotReserveAmmo));
+      }
+
       public Item getCurrentGrenade() {
             return switch (currentSlot) {
                   case 6 -> Item.FLASHBANG;
