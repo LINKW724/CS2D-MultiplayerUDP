@@ -8043,8 +8043,6 @@ public class GameClient extends Application {
         volatile boolean isShooting, isReloading;
         volatile JsonObject data;
         private boolean isInitialized = false;
-        // 用于检测换弹状态是否刚开始
-        private boolean wasReloadingLastFrame = false;
         private final cs2d.client.GameClient clientInstance;
         private long soundRevealExpireTime = 0;
 
@@ -8135,18 +8133,9 @@ public class GameClient extends Application {
             } else {
                 this.targetAngle = serverAngle;
             }
-            if (currentIsReloading && !this.wasReloadingLastFrame) {
-                String weaponKey = getString(currentData, "weaponKey");
-                if (weaponKey != null && !weaponKey.isEmpty()) {
-                    String reloadSoundKey = weaponKey + "_reload";
-                    Point2D playerPos = new Point2D(getDouble(currentData, "x"), getDouble(currentData, "y"));
-                    Platform.runLater(() -> {
-                        this.clientInstance.playSound(reloadSoundKey, playerPos);
-                    });
-                }
-            }
+            // 换弹声只能由服务器的 RELOAD 瞬时事件触发。isReloading 是持续状态，
+            // 在完整/增量快照中重复出现，不能在实体同步层再次合成声音。
             this.isReloading = currentIsReloading;
-            this.wasReloadingLastFrame = currentIsReloading;
 
             this.predictedRecoilAngle = getDouble(currentData, "predictedRecoilAngle");
         }
@@ -10352,32 +10341,6 @@ public class GameClient extends Application {
             return (System.currentTimeMillis() / 1000.0) - startTime > duration;
         }
     }
-
-    // /**
-    // * 遍历所有玩家，检查其换弹状态是否刚从 'false' 变为 'true'，并在此时播放音效。
-    // */
-    // private void handleReloadSound() {
-    // // 遍历所有玩家（包括僵尸，如果它们能换弹）
-    // clientPlayers.values().forEach(this::checkAndPlayReloadSound);
-    // clientZombies.values().forEach(this::checkAndPlayReloadSound);
-    // }
-    //
-    // /**
-    // * 单个玩家的换弹音效播放逻辑。
-    // */
-    // private void checkAndPlayReloadSound(ClientPlayer player) {
-    // // 获取玩家本地的上一帧状态，以及服务器的当前帧状态
-    // boolean currentIsReloading = getBool(player.data, "isReloading");
-    //
-    // // 假设您在 ClientPlayer 中添加了 public 访问器（getter）来获取 wasReloadingLastFrame
-    // // 如果不想添加 getter，就必须把这个检查逻辑移动到 updateDynamic 内部。
-    // // *我们选择移动到 updateDynamic 内部，因为那是状态更新的权威位置。*
-    //
-    // // 播放逻辑已移到 ClientPlayer.updateDynamic，这里只需要确保调用了 updateDynamic
-    // // updateStateFromFull 和 updateStateFromSmall 已经调用了 updateFull/Dynamic。
-    // }
-
-    // 记录该玩家被声音暴露的过期时间戳
 
     private boolean isWalking = false;
 
