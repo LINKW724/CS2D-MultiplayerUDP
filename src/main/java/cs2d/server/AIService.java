@@ -15,8 +15,6 @@ import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -39,13 +37,16 @@ public class AIService implements Runnable {
     }
 
     private final GameState gameState;
-    private final ExecutorService aiThreadPool;
+    private final LatestOnlyAiScheduler aiScheduler;
     private final ConcurrentHashMap<String, AIInput> aiInputMailbox;
     private final ConcurrentHashMap<String, cs2d.server.rl.RLMacroCommand> rlMacroMailbox;
     private volatile boolean running = false;
     private boolean freezeCleanupApplied = false;
     private final int aiTps;
     private final TeamTacticalRuntime tacticalRuntime;
+    private static final long SCHEDULER_LOG_INTERVAL_MS = Math.max(1_000L,
+            Long.getLong("cs2d.ai.schedulerLogMs", 5_000L));
+    private long nextSchedulerLogAt;
 
     private final Consumer<String> logger;
 
@@ -69,7 +70,9 @@ public class AIService implements Runnable {
             ConcurrentHashMap<String, cs2d.server.rl.RLMacroCommand> rlMacroMailbox, int threadCount, int aiTps,
             Consumer<String> logger, TacticalCoordinator tacticalCoordinator) {
         this.gameState = gameState;
-        this.aiThreadPool = Executors.newFixedThreadPool(threadCount);
+        int queueCapacity = Math.max(threadCount,
+                Integer.getInteger("cs2d.ai.readyQueueCapacity", Math.max(256, threadCount * 32)));
+        this.aiScheduler = new LatestOnlyAiScheduler(threadCount, queueCapacity);
         this.aiInputMailbox = aiInputMailbox;
         this.rlMacroMailbox = rlMacroMailbox;
         this.aiTps = aiTps;
@@ -82,12 +85,13 @@ public class AIService implements Runnable {
         // [新增] 清空残留状态，确保重启后干净
         aiShortTermMemory.clear();
         aiPerceptionTimestamps.clear();
-        new Thread(this).start();
+        nextSchedulerLogAt = System.currentTimeMillis() + SCHEDULER_LOG_INTERVAL_MS;
+        new Thread(this, "AI-Service-Ticker").start();
     }
 
     public void stop() {
         this.running = false;
-        this.aiThreadPool.shutdownNow();
+        this.aiScheduler.close();
     }
 
     @Override
@@ -137,6 +141,7 @@ public class AIService implements Runnable {
                 aiShortTermMemory.clear();
                 aiPerceptionTimestamps.clear();
                 tacticalRuntime.clear();
+                aiScheduler.clearPending();
                 freezeCleanupApplied = true;
             }
             for (Player ai : allAIs) {
@@ -148,6 +153,7 @@ public class AIService implements Runnable {
 
         // --- 1. 获取并刷新本 Tick 的声音信息 (所有 AI 共用) ---
         List<SoundEvent> sounds = gameState.getAndClearAiSoundEvents();
+        List<SoundEvent> soundSnapshot = List.copyOf(sounds);
         List<SoundEvent> history = gameState.getAiSoundHistory();
         history.clear();
         history.addAll(sounds);
@@ -172,6 +178,10 @@ public class AIService implements Runnable {
         List<Player> independentAIs = gameState.getAllCharacters().stream()
                 .filter(p -> p != null && p.isAI && p.isAlive() && !p.isControlledByPlayer())
                 .collect(Collectors.toList());
+        Set<String> independentAiIds = independentAIs.stream()
+                .map(p -> p.id)
+                .collect(Collectors.toSet());
+        aiScheduler.retainOnly(independentAiIds);
 
         if (currentMode == GameMode.TEAM_DEATHMATCH) {
             tacticalRuntime.update(currentTime, sounds, independentAIs);
@@ -180,7 +190,7 @@ public class AIService implements Runnable {
         }
 
         for (Player ai : independentAIs) {
-            if (aiThreadPool.isShutdown())
+            if (aiScheduler.isShutdown())
                 break;
 
             // [新增] 如果 AI 已经死亡，清空其短期记忆，防止复活后立即攻击“记忆中”的敌人
@@ -190,15 +200,15 @@ public class AIService implements Runnable {
                 continue;
             }
 
-            aiThreadPool.submit(() -> {
+            aiScheduler.submitLatest(ai.id, () -> {
                 try {
-                    if (gameState.shouldFreezeAi()) {
+                    if (gameState.shouldFreezeAi() || !ai.isAlive() || ai.isControlledByPlayer()) {
                         aiInputMailbox.put(ai.id, neutralInput(ai));
                         return;
                     }
                     AIWorldView perception;
                     if (ai.getDifficulty() == AIDifficulty.REALISTIC) {
-                        perception = processRealisticPerception(ai, authoritativeSnapshots, currentTime);
+                        perception = processRealisticPerception(ai, authoritativeSnapshots, soundSnapshot, currentTime);
                     } else {
                         // 非真实难度直接看全图
                         List<PerceivedPlayer> all = authoritativeSnapshots.stream()
@@ -344,7 +354,7 @@ public class AIService implements Runnable {
                     }
 
                     // 任务提交后比赛可能已经结束；旧决策绝不能覆盖冻结输入。
-                    if (gameState.shouldFreezeAi()) {
+                    if (gameState.shouldFreezeAi() || !ai.isAlive() || ai.isControlledByPlayer()) {
                         aiInputMailbox.put(ai.id, neutralInput(ai));
                     } else if (ai.getDifficulty() == AIDifficulty.REALISTIC) {
                         injectRealisticInput(ai, finalInput);
@@ -362,6 +372,25 @@ public class AIService implements Runnable {
             });
         }
 
+        maybeLogSchedulerStats(currentTime, independentAIs.size());
+
+    }
+
+    private void maybeLogSchedulerStats(long currentTime, int activeAiCount) {
+        if (logger == null || currentTime < nextSchedulerLogAt)
+            return;
+        nextSchedulerLogAt = currentTime + SCHEDULER_LOG_INTERVAL_MS;
+        LatestOnlyAiScheduler.Stats stats = aiScheduler.snapshotAndResetStats();
+        logger.accept(String.format(Locale.ROOT,
+                "[AI调度/%.1fs] AI=%d | 提交=%d | 实算=%d | 合并旧帧=%d | 队列拒绝=%d"
+                        + " | 当前队列=%d | 工作线程=%d | AI槽=%d | 排队平均/最大=%.2f/%.2fms"
+                        + " | 计算平均/最大=%.2f/%.2fms",
+                SCHEDULER_LOG_INTERVAL_MS / 1_000.0,
+                activeAiCount,
+                stats.submitted(), stats.executed(), stats.coalesced(), stats.rejected(),
+                stats.queued(), stats.running(), stats.trackedAis(),
+                stats.averageQueueWaitMs(), stats.maximumQueueWaitMs(),
+                stats.averageExecutionMs(), stats.maximumExecutionMs()));
     }
 
     private AIInput neutralInput(Player ai) {
@@ -372,11 +401,10 @@ public class AIService implements Runnable {
      * [核心] 处理真实感知逻辑
      */
     private AIWorldView processRealisticPerception(Player ai, List<Player.PlayerSnapshot> globalSnapshots,
-            long currentTime) {
+            List<SoundEvent> sounds, long currentTime) {
         List<PerceivedPlayer> currentlyPerceived = new ArrayList<>();
 
-        // --- 1. 获取声音信息 (使用专门为 AI 准备的 100ms 缓存) ---
-        List<SoundEvent> sounds = gameState.getAiSoundHistory();
+        // --- 1. 使用本次决策帧的只读声音快照，避免下一AI Tick并发清空历史 ---
         // ID -> Type (枪声优先)
         Map<String, PerceptionReason> noisyPlayers = new HashMap<>();
         for (SoundEvent s : sounds) {
