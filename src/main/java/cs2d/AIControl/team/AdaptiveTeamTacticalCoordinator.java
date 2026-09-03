@@ -40,7 +40,8 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
     private final TacticalPostureDoctrine postureDoctrine;
 
     public AdaptiveTeamTacticalCoordinator() {
-        this(new BalancedRouteAssignmentPolicy(), List.of(new ElasticManeuverRefiner()),
+        this(new BalancedRouteAssignmentPolicy(), List.of(
+                new ElasticManeuverRefiner(), new FrontlineReinforcementRefiner()),
                 new TdmPostureDoctrine());
     }
 
