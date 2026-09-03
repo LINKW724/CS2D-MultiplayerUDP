@@ -15,6 +15,8 @@ import javafx.scene.paint.Color;
  * 游戏设置类，存储和管理客户端的游戏偏好。
  */
 public class GameSettings {
+    public static final int MIN_KILL_FEED_ENTRIES = 0;
+    public static final int MAX_KILL_FEED_ENTRIES = 10;
     private static final BooleanProperty followRecoil = new SimpleBooleanProperty(true);
     private static final BooleanProperty showAimLine = new SimpleBooleanProperty(false);
     private static final BooleanProperty wallPenetrationPrediction = new SimpleBooleanProperty(false); // 新增：穿墙伤害预测开关
@@ -108,6 +110,14 @@ public class GameSettings {
         return maxKillFeedEntries;
     }
 
+    public void setMaxKillFeedEntries(int entries) {
+        maxKillFeedEntries.set(clampKillFeedEntries(entries));
+    }
+
+    static int clampKillFeedEntries(int entries) {
+        return Math.max(MIN_KILL_FEED_ENTRIES, Math.min(MAX_KILL_FEED_ENTRIES, entries));
+    }
+
     public static double getFollowZoomFactor() {
         return followZoomFactor.get();
     }
@@ -180,7 +190,7 @@ public class GameSettings {
                 wallPenColorNone.set(Color.valueOf(json.get("wallPenColorNone").getAsString()));
             }
             if (json.has("maxKillFeedEntries")) {
-                maxKillFeedEntries.set(json.get("maxKillFeedEntries").getAsInt());
+                setMaxKillFeedEntries(json.get("maxKillFeedEntries").getAsInt());
             }
             if (json.has("followZoomFactor")) {
                 setFollowZoomFactor(json.get("followZoomFactor").getAsDouble());

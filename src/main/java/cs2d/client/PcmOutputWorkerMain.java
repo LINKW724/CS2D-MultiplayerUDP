@@ -86,7 +86,8 @@ public final class PcmOutputWorkerMain {
                         written += count;
                     }
                     long writeNanos = System.nanoTime() - writeStarted;
-                    if (writeNanos >= PcmAudioMixer.DEVICE_STALL_TIMEOUT_NANOS) {
+                    if (shouldRecoverOutput(latestLength, written, writeNanos,
+                            line.isOpen(), line.isRunning())) {
                         line.close();
                         line = openLine();
                         line.start();
@@ -108,6 +109,13 @@ public final class PcmOutputWorkerMain {
         } finally {
             line.close();
         }
+    }
+
+    static boolean shouldRecoverOutput(int expectedBytes, int writtenBytes, long writeNanos,
+            boolean lineOpen, boolean lineRunning) {
+        return expectedBytes <= 0 || writtenBytes < expectedBytes
+                || writeNanos >= PcmAudioMixer.DEVICE_STALL_TIMEOUT_NANOS
+                || !lineOpen || !lineRunning;
     }
 
     private static SourceDataLine openLine() throws Exception {

@@ -104,6 +104,44 @@ class PcmAudioMixerTest {
     }
 
     @Test
+    void voiceBudgetKeepsCurrentLoudSoundsInsteadOfStaleQuietOnes() {
+        PcmAudioMixer.Sound sound = new PcmAudioMixer.Sound(new short[] { 1, 1 });
+        List<PcmAudioMixer.Voice> voices = new ArrayList<>();
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.2f, 2));
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.8f, 2));
+
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.9f, 2));
+
+        assertEquals(2, voices.size());
+        assertTrue(voices.stream().noneMatch(voice -> voice.gain == 0.2f));
+    }
+
+    @Test
+    void voiceBudgetRejectsQuieterSoundWhenAllActiveVoicesMatterMore() {
+        PcmAudioMixer.Sound sound = new PcmAudioMixer.Sound(new short[] { 1, 1 });
+        List<PcmAudioMixer.Voice> voices = new ArrayList<>();
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.8f, 1));
+
+        assertTrue(!PcmAudioMixer.admitVoice(voices, sound, 0.1f, 1));
+        assertEquals(0.8f, voices.get(0).gain);
+    }
+
+    @Test
+    void equalLoudnessReplacesTheOldestVoice() {
+        PcmAudioMixer.Sound sound = new PcmAudioMixer.Sound(new short[] { 1, 1, 2, 2, 3, 3 });
+        List<PcmAudioMixer.Voice> voices = new ArrayList<>();
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.5f, 2));
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.5f, 2));
+        voices.get(0).sampleIndex = 4;
+        voices.get(1).sampleIndex = 2;
+
+        assertTrue(PcmAudioMixer.admitVoice(voices, sound, 0.5f, 2));
+
+        assertEquals(0, voices.get(0).sampleIndex);
+        assertEquals(2, voices.get(1).sampleIndex);
+    }
+
+    @Test
     void decodesEveryBundledWavIntoTheSharedMixerFormat() throws Exception {
         URL soundsUrl = PcmAudioMixerTest.class.getResource("/sounds");
         assertTrue(soundsUrl != null && "file".equals(soundsUrl.getProtocol()));

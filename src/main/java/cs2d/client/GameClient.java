@@ -770,6 +770,9 @@ public class GameClient extends Application {
     private volatile AudioClip activeMediaBackedWorldSound;
     private final LongAdder mediaBackedWorldSoundsPlayed = new LongAdder();
     private final LongAdder mediaBackedWorldSoundsSuppressed = new LongAdder();
+    private static final int KILL_FEED_STABLE_LAYOUT_ENTRIES = 4;
+    private static final double KILL_FEED_ROW_VERTICAL_PADDING = 8.0;
+    private static final double KILL_FEED_SPACING = 5.0;
     // 声音能传播的最大距离
     private static final double MAX_SOUND_DISTANCE = 800;
 
@@ -2590,6 +2593,7 @@ public class GameClient extends Application {
                                             + " | 缓冲 %d块/min %d | 欠载 %d"
                                             + " | 写入 %d批/%d帧 实时%.1f%% %.3f/%.3fms | 迟写 %d"
                                             + " | 设备恢复 %d | 陈旧块丢弃 %d"
+                                            + " | 声部虚拟化 %d | 过期请求 %d | 时间线重置 %d | 混音重启 %d"
                                             + " | JavaFX回退 %d | running=%s%n",
                                     pcmSnapshot.requestedVoices(), pcmSnapshot.mixedVoices(),
                                     pcmSnapshot.activeVoices(), pcmSnapshot.peakVoices(), pcmSnapshot.queuedVoices(),
@@ -2598,6 +2602,8 @@ public class GameClient extends Application {
                                     pcmSnapshot.outputRealtimePercent(), pcmSnapshot.averageWriteMillis(),
                                     pcmSnapshot.maximumWriteMillis(), pcmSnapshot.lateWrites(),
                                     pcmSnapshot.deviceRecoveries(), pcmSnapshot.staleBlocksDropped(),
+                                    pcmSnapshot.virtualizedVoices(), pcmSnapshot.staleRequestsDropped(),
+                                    pcmSnapshot.timelineResets(), pcmSnapshot.mixerRestarts(),
                                     pcmFallbackCount, pcmSnapshot.running());
                                     report.println("  --- (消息处理 [M] 的详细分解) ---");
                                     report.printf("      [M1] Full Update: \t%.3f ms\n", avg_M1_Full);
@@ -5565,7 +5571,8 @@ public class GameClient extends Application {
         killFeedLabel.setFont(smallHudFont);
         killFeedLabel.setTextFill(TEXT_LIGHT);
 
-        Slider killFeedSlider = new Slider(0, 10, gameSettings.getMaxKillFeedEntries());
+        Slider killFeedSlider = new Slider(GameSettings.MIN_KILL_FEED_ENTRIES,
+                GameSettings.MAX_KILL_FEED_ENTRIES, gameSettings.getMaxKillFeedEntries());
         killFeedSlider.setMajorTickUnit(1);
         killFeedSlider.setMinorTickCount(0);
         killFeedSlider.setShowTickLabels(true);
@@ -5577,7 +5584,11 @@ public class GameClient extends Application {
         killFeedValueLabel.textProperty().bind(killFeedSlider.valueProperty().asString("%.0f")); // 绑定滑块值
 
         killFeedSlider.valueProperty()
-                .addListener((obs, oldVal, newVal) -> gameSettings.maxKillFeedEntriesProperty().set(newVal.intValue())); // 监听滑块变化
+                .addListener((obs, oldVal, newVal) -> {
+                    int maximumEntries = GameSettings.clampKillFeedEntries(newVal.intValue());
+                    gameSettings.setMaxKillFeedEntries(maximumEntries);
+                    trimKillFeedToLimit(maximumEntries);
+                });
 
         HBox sliderBox = new HBox(10, killFeedSlider, killFeedValueLabel);
         sliderBox.setAlignment(Pos.CENTER_LEFT);
@@ -7397,7 +7408,7 @@ public class GameClient extends Application {
                     .anyMatch(node -> uniqueId.equals(node.getProperties().get("uniqueId")));
 
             // 如果没有显示，就创建并添加它
-            if (!alreadyOnScreen) {
+            if (!alreadyOnScreen && gameSettings.getMaxKillFeedEntries() > 0) {
                 // [新增打印] 确认将要为一条新的击杀信息创建UI
                 // System.out.println("[DEBUG-CLIENT] 检测到新的击杀事件 (ID: " + uniqueId +
                 // ")，准备创建UI行。");
@@ -7492,10 +7503,15 @@ public class GameClient extends Application {
         }
         // 在添加完所有新条目后，检查总量是否超过4条
         // 如果超过了，就从底部（最旧的条目）开始移除，直到剩下4条
-        while (killFeedVBox.getChildren().size() > gameSettings.getMaxKillFeedEntries()) {
-            // =======================================================
+        trimKillFeedToLimit(gameSettings.getMaxKillFeedEntries());
+    }
+
+    private void trimKillFeedToLimit(int requestedLimit) {
+        if (killFeedVBox == null)
+            return;
+        int limit = GameSettings.clampKillFeedEntries(requestedLimit);
+        while (killFeedVBox.getChildren().size() > limit)
             killFeedVBox.getChildren().remove(killFeedVBox.getChildren().size() - 1);
-        }
     }
 
     /**
@@ -7636,6 +7652,14 @@ public class GameClient extends Application {
 
         killFeedVBox = new VBox(5);
         killFeedVBox.setAlignment(Pos.TOP_RIGHT);
+        double estimatedRowHeight = Math.ceil(smallHudFont.getSize() * 1.5)
+                + KILL_FEED_ROW_VERTICAL_PADDING;
+        double stableKillFeedHeight = KILL_FEED_STABLE_LAYOUT_ENTRIES * estimatedRowHeight
+                + (KILL_FEED_STABLE_LAYOUT_ENTRIES - 1) * KILL_FEED_SPACING;
+        // The status HUD must not jump upward when the configured feed limit is
+        // below the original four-row layout. More than four real rows may still
+        // expand naturally, preserving the user's larger-feed setting.
+        killFeedVBox.setMinHeight(stableKillFeedHeight);
 
         // 恢复创建 Button
         Button cameraButton = new Button("[Enter] Toggle View");

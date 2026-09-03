@@ -25,6 +25,13 @@ class IsolatedPcmOutputTransportTest {
         assertTrue(!IsolatedPcmOutputTransport.isValidHeader(packet, 8L));
     }
 
+    @Test
+    void audioWorkerRecoversFromShortWritesAndStoppedLines() {
+        assertTrue(PcmOutputWorkerMain.shouldRecoverOutput(4096, 2048, 1L, true, true));
+        assertTrue(PcmOutputWorkerMain.shouldRecoverOutput(4096, 4096, 1L, true, false));
+        assertTrue(!PcmOutputWorkerMain.shouldRecoverOutput(4096, 4096, 1L, true, true));
+    }
+
     private static ByteBuffer packet(long token, int sequence) {
         ByteBuffer packet = ByteBuffer.allocate(IsolatedPcmOutputTransport.HEADER_BYTES)
                 .order(ByteOrder.BIG_ENDIAN);

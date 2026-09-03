@@ -9,7 +9,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,6 +36,10 @@ final class PcmAudioMixer implements AutoCloseable {
     static final long BUFFER_DURATION_NANOS = Math.round(FRAMES_PER_BUFFER * 1_000_000_000.0 / SAMPLE_RATE);
     static final long DEVICE_BATCH_DURATION_NANOS = BUFFER_DURATION_NANOS * DEVICE_BATCH_BLOCKS;
     static final long DEVICE_STALL_TIMEOUT_NANOS = TimeUnit.MILLISECONDS.toNanos(150);
+    static final long MAX_REQUEST_AGE_NANOS = TimeUnit.MILLISECONDS.toNanos(200);
+    static final int MAX_PENDING_REQUESTS = 512;
+    static final int MAX_ACTIVE_VOICES = Math.max(32,
+            Integer.getInteger("cs2d.audio.maxVoices", 128));
     static final AudioFormat OUTPUT_FORMAT = new AudioFormat(
             AudioFormat.Encoding.PCM_SIGNED, SAMPLE_RATE, 16, CHANNELS,
             CHANNELS * Short.BYTES, SAMPLE_RATE, false);
@@ -56,10 +59,11 @@ final class PcmAudioMixer implements AutoCloseable {
             int minimumBufferedBlocks, long outputWrites, long outputFrames,
             double outputRealtimePercent, double averageWriteMillis,
             double maximumWriteMillis, long lateWrites, long deviceRecoveries,
-            long staleBlocksDropped, boolean running) {
+            long staleBlocksDropped, long virtualizedVoices, long staleRequestsDropped,
+            long timelineResets, long mixerRestarts, boolean running) {
     }
 
-    private record PlayRequest(Sound sound, float gain) {
+    private record PlayRequest(Sound sound, float gain, long requestedAtNanos) {
     }
 
     static final class Voice {
@@ -131,8 +135,10 @@ final class PcmAudioMixer implements AutoCloseable {
         }
     }
 
-    private final ConcurrentLinkedQueue<PlayRequest> requests = new ConcurrentLinkedQueue<>();
+    private final ArrayBlockingQueue<PlayRequest> requests = new ArrayBlockingQueue<>(MAX_PENDING_REQUESTS);
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicBoolean restartPending = new AtomicBoolean(false);
     private final AtomicBoolean clearRequested = new AtomicBoolean(false);
     private final AtomicBoolean flushRequested = new AtomicBoolean(false);
     private final LongAdder requestedVoices = new LongAdder();
@@ -142,6 +148,10 @@ final class PcmAudioMixer implements AutoCloseable {
     private final LongAdder outputFrameCount = new LongAdder();
     private final LongAdder outputWriteNanos = new LongAdder();
     private final LongAdder lateWriteCount = new LongAdder();
+    private final LongAdder virtualizedVoiceCount = new LongAdder();
+    private final LongAdder staleRequestCount = new LongAdder();
+    private final LongAdder timelineResetCount = new LongAdder();
+    private final LongAdder mixerRestartCount = new LongAdder();
     private final AtomicInteger activeVoiceCount = new AtomicInteger();
     private final AtomicInteger peakVoiceCount = new AtomicInteger();
     private final AtomicInteger minimumBufferedBlocks = new AtomicInteger(PREBUFFER_BLOCKS);
@@ -152,7 +162,9 @@ final class PcmAudioMixer implements AutoCloseable {
     private volatile Thread mixerThread;
     private volatile Thread writerThread;
 
-    boolean start() {
+    synchronized boolean start() {
+        if (closed.get())
+            return false;
         if (running.get())
             return true;
         int batchBytes = FRAMES_PER_BUFFER * OUTPUT_FORMAT.getFrameSize() * DEVICE_BATCH_BLOCKS;
@@ -228,13 +240,23 @@ final class PcmAudioMixer implements AutoCloseable {
     }
 
     boolean play(Sound sound, double volume) {
-        if (!running.get() || sound == null || sound.frameCount() == 0)
+        if (closed.get() || sound == null || sound.frameCount() == 0)
             return false;
         float gain = (float) Math.max(0.0, Math.min(1.0, volume));
         if (gain <= 0.0f)
             return true;
-        requests.offer(new PlayRequest(sound, gain));
         requestedVoices.increment();
+        PlayRequest request = new PlayRequest(sound, gain, System.nanoTime());
+        if (!requests.offer(request)) {
+            // Keep the newest sound event. A full queue is already older than the
+            // real-time audio horizon, so replaying its head later would be wrong.
+            if (requests.poll() != null)
+                virtualizedVoiceCount.increment();
+            if (!requests.offer(request))
+                virtualizedVoiceCount.increment();
+        }
+        if (!running.get())
+            requestRestart();
         return true;
     }
 
@@ -255,7 +277,9 @@ final class PcmAudioMixer implements AutoCloseable {
                 writes == 0 ? 0.0 : writeNanos / (double) writes / 1_000_000.0,
                 maximumWriteNanos.getAndSet(0L) / 1_000_000.0,
                 lateWriteCount.sumThenReset(), transport == null ? 0L : transport.recoveriesThenReset(),
-                transport == null ? 0L : transport.droppedBatchesThenReset(), running.get());
+                transport == null ? 0L : transport.droppedBatchesThenReset(),
+                virtualizedVoiceCount.sumThenReset(), staleRequestCount.sumThenReset(),
+                timelineResetCount.sumThenReset(), mixerRestartCount.sumThenReset(), running.get());
     }
 
     void stopAll() {
@@ -342,6 +366,10 @@ final class PcmAudioMixer implements AutoCloseable {
                 maximumWriteNanos.accumulateAndGet(writeNanos, Math::max);
                 if (writeNanos > DEVICE_BATCH_DURATION_NANOS * 2L)
                     lateWriteCount.increment();
+                if (!sent || writeNanos >= DEVICE_STALL_TIMEOUT_NANOS) {
+                    discardStaleTimeline();
+                    nextDeadlineNanos = System.nanoTime();
+                }
                 nextDeadlineNanos += DEVICE_BATCH_DURATION_NANOS;
             }
         } catch (InterruptedException e) {
@@ -381,24 +409,92 @@ final class PcmAudioMixer implements AutoCloseable {
         System.arraycopy(block, 0, batch, offset, block.length);
     }
 
-    private void stopFromAudioThread(Thread thread) {
-        if (running.compareAndSet(true, false)) {
-            Thread other = thread == mixerThread ? writerThread : mixerThread;
-            if (other != null)
-                other.interrupt();
-            closeOutputTransport();
-        }
+    private synchronized void stopFromAudioThread(Thread thread) {
+        if (!running.compareAndSet(true, false))
+            return;
+        Thread other = thread == mixerThread ? writerThread : mixerThread;
+        if (other != null)
+            other.interrupt();
+        closeOutputTransport();
+    }
+
+    private void requestRestart() {
+        if (closed.get() || running.get() || !restartPending.compareAndSet(false, true))
+            return;
+        Thread recovery = new Thread(() -> {
+            try {
+                if (start()) {
+                    mixerRestartCount.increment();
+                    System.out.println("[PCM-MIXER] 混音管线已自动恢复。");
+                }
+            } finally {
+                restartPending.set(false);
+            }
+        }, "CS2D-PCM-Recovery");
+        recovery.setDaemon(true);
+        recovery.setPriority(Thread.NORM_PRIORITY);
+        recovery.start();
+    }
+
+    private void discardStaleTimeline() {
+        int queued = requests.size();
+        requests.clear();
+        if (queued > 0)
+            staleRequestCount.add(queued);
+        clearRequested.set(true);
+        flushRequested.set(true);
+        timelineResetCount.increment();
+        // The writer owns flushing through the flag, avoiding a race with the
+        // mixer's block publication and keeping block ownership single-sided.
     }
 
     private void drainRequests(List<Voice> voices) {
+        long now = System.nanoTime();
         PlayRequest request;
         while ((request = requests.poll()) != null) {
-            voices.add(new Voice(request.sound(), request.gain()));
-            mixedVoices.increment();
+            if (now - request.requestedAtNanos() > MAX_REQUEST_AGE_NANOS) {
+                staleRequestCount.increment();
+                continue;
+            }
+            if (admitVoice(voices, request.sound(), request.gain(), MAX_ACTIVE_VOICES))
+                mixedVoices.increment();
+            else
+                virtualizedVoiceCount.increment();
         }
         int active = voices.size();
         activeVoiceCount.set(active);
         peakVoiceCount.accumulateAndGet(active, Math::max);
+    }
+
+    static boolean admitVoice(List<Voice> voices, Sound sound, float gain, int maximumVoices) {
+        if (voices == null || sound == null || sound.frameCount() == 0 || maximumVoices <= 0)
+            return false;
+        Voice incoming = new Voice(sound, gain);
+        if (voices.size() < maximumVoices) {
+            voices.add(incoming);
+            return true;
+        }
+
+        int quietestIndex = 0;
+        float quietestGain = voices.get(0).gain;
+        int oldestProgress = voices.get(0).sampleIndex;
+        for (int i = 1; i < voices.size(); i++) {
+            Voice candidate = voices.get(i);
+            float candidateGain = candidate.gain;
+            if (candidateGain < quietestGain
+                    || (Float.compare(candidateGain, quietestGain) == 0
+                            && candidate.sampleIndex > oldestProgress)) {
+                quietestGain = candidateGain;
+                oldestProgress = candidate.sampleIndex;
+                quietestIndex = i;
+            }
+        }
+        if (gain < quietestGain)
+            return false;
+        // At equal loudness, replace the oldest matching voice so current shots
+        // remain synchronized with the picture instead of replaying stale tails.
+        voices.set(quietestIndex, incoming);
+        return true;
     }
 
     static void mixVoices(List<Voice> voices, int[] mix, int frames) {
@@ -424,7 +520,8 @@ final class PcmAudioMixer implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
+        closed.set(true);
         running.set(false);
         Thread mixer = mixerThread;
         Thread writer = writerThread;
