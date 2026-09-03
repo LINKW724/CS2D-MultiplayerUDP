@@ -763,6 +763,9 @@ public class GameClient extends Application {
     private final PcmAudioMixer pcmAudioMixer = new PcmAudioMixer();
     private final Map<String, PcmAudioMixer.Sound> pcmSounds = new ConcurrentHashMap<>();
     private final LongAdder pcmFallbackPlays = new LongAdder();
+    private final EventDeduplicator transientEventDeduplicator = new EventDeduplicator();
+    private final LongAdder networkAudioEventsReceived = new LongAdder();
+    private final LongAdder duplicateAudioEventsSuppressed = new LongAdder();
     private final RepeatedWorldSoundGate repeatedWorldSoundGate = new RepeatedWorldSoundGate();
     /** MP3会进入JavaFX MediaPlayer后端；远程语音必须串行，避免每次重叠播放创建原生线程群。 */
     private final Set<String> mediaBackedSoundKeys = ConcurrentHashMap.newKeySet();
@@ -1538,6 +1541,7 @@ public class GameClient extends Application {
                 }
                 if (serverSessionId != null && !serverSessionId.equals(incomingSessionId)) {
                     lastStateSequence.set(-1);
+                    transientEventDeduplicator.clear();
                     subtickInputTransmitter.reset();
                     latestLocalInput.set(new LocalInputState(0.0, 0));
                     chunkBuffers.clear();
@@ -1587,6 +1591,11 @@ public class GameClient extends Application {
         if (json.has("soundEvents")) {
             json.getAsJsonArray("soundEvents").forEach(e -> {
                 JsonObject s = e.getAsJsonObject();
+                networkAudioEventsReceived.increment();
+                if (!shouldProcessTransientEvent(s)) {
+                    duplicateAudioEventsSuppressed.increment();
+                    return;
+                }
                 String soundTypeString = getString(s, "type");
                 String soundName = getString(s, "soundName");
                 String sourcePlayerId = getString(s, "sourcePlayerId");
@@ -1651,6 +1660,11 @@ public class GameClient extends Application {
         if (json.has("privateSoundEvents")) {
             json.getAsJsonArray("privateSoundEvents").forEach(e -> {
                 JsonObject s = e.getAsJsonObject();
+                networkAudioEventsReceived.increment();
+                if (!shouldProcessTransientEvent(s)) {
+                    duplicateAudioEventsSuppressed.increment();
+                    return;
+                }
                 if (myPlayerId != null && myPlayerId.equals(getString(s, "recipientId"))) {
                     playSound(getString(s, "soundName"), null);
                 }
@@ -1666,6 +1680,8 @@ public class GameClient extends Application {
         if (json.has("flashEvents")) {
             json.getAsJsonArray("flashEvents").forEach(e -> {
                 JsonObject flash = e.getAsJsonObject();
+                if (!shouldProcessTransientEvent(flash))
+                    return;
                 if (myPlayerId != null && myPlayerId.equals(getString(flash, "playerId"))) {
                     triggerFlashbangEffect(getLong(flash, "duration"));
                 }
@@ -1677,6 +1693,8 @@ public class GameClient extends Application {
             JsonArray damageEvents = json.getAsJsonArray("damageLogEvents");
             damageEvents.forEach(msgElement -> {
                 JsonObject msg = msgElement.getAsJsonObject();
+                if (!shouldProcessTransientEvent(msg))
+                    return;
                 if (myPlayerId != null && myPlayerId.equals(getString(msg, "to"))) {
                     JsonObject payload = msg.getAsJsonObject("payload");
 
@@ -1722,6 +1740,8 @@ public class GameClient extends Application {
         if (json.has("footstepReveals")) {
             json.getAsJsonArray("footstepReveals").forEach(e -> {
                 JsonObject reveal = e.getAsJsonObject();
+                if (!shouldProcessTransientEvent(reveal))
+                    return;
                 String recipientId = getString(reveal, "revealedToPlayerId");
                 String controlledBotId = null;
                 if (me != null && me.data != null && "CONTROLLING_BOT".equals(getString(me.data, "spectatorMode"))) {
@@ -1752,6 +1772,14 @@ public class GameClient extends Application {
                 && json.has("protocolVersion")
                 && getInt(json, "protocolVersion") == SUPPORTED_PROTOCOL_VERSION
                 && serverSessionId.equals(getString(json, "sessionId"));
+    }
+
+    private boolean shouldProcessTransientEvent(JsonObject event) {
+        if (event == null || !event.has("eventId") || !event.get("eventId").isJsonPrimitive()
+                || !event.getAsJsonPrimitive("eventId").isNumber()) {
+            return true;
+        }
+        return transientEventDeduplicator.accept(event.get("eventId").getAsLong());
     }
 
     private String assembleChunkMessage(JsonObject json) {
@@ -2466,6 +2494,8 @@ public class GameClient extends Application {
                         long mediaSoundsPlayed = mediaBackedWorldSoundsPlayed.sumThenReset();
                         long mediaSoundsSuppressed = mediaBackedWorldSoundsSuppressed.sumThenReset();
                         long pcmFallbackCount = pcmFallbackPlays.sumThenReset();
+                        long receivedAudioEvents = networkAudioEventsReceived.sumThenReset();
+                        long duplicateAudioEvents = duplicateAudioEventsSuppressed.sumThenReset();
                         long repeatedWorldSoundsSuppressed = repeatedWorldSoundGate.suppressedThenReset();
                         PcmAudioMixer.Snapshot pcmSnapshot = pcmAudioMixer.snapshotAndReset();
                         perfEquipmentHudRebuilds = 0;
@@ -2587,8 +2617,9 @@ public class GameClient extends Application {
                                     coalescedStateMessages, pendingStateCount, queuedEventCount);
                                     report.printf("  [AUDIO-MEDIA] 播放 %d | 防重叠丢弃 %d\n",
                                     mediaSoundsPlayed, mediaSoundsSuppressed);
-                                    report.printf("  [AUDIO-EVENT] 同来源脚步/换弹重复丢弃 %d%n",
-                                    repeatedWorldSoundsSuppressed);
+                                    report.printf("  [AUDIO-EVENT] 网络收到 %d | eventId重复丢弃 %d"
+                                            + " | 同来源脚步/换弹重复丢弃 %d%n",
+                                    receivedAudioEvents, duplicateAudioEvents, repeatedWorldSoundsSuppressed);
                                     report.printf("  [AUDIO-PCM] 请求 %d | 已混音 %d | 活动 %d | 峰值 %d | 排队 %d"
                                             + " | 缓冲 %d块/min %d | 欠载 %d"
                                             + " | 写入 %d批/%d帧 实时%.1f%% %.3f/%.3fms | 迟写 %d"
@@ -6969,8 +7000,12 @@ public class GameClient extends Application {
 
         // 高频WAV优先进入固定混音线程；只有设备/格式不可用时才回退JavaFX媒体后端。
         PcmAudioMixer.Sound pcmSound = pcmSounds.get(soundKey);
-        if (pcmSound != null && pcmAudioMixer.play(pcmSound, finalVolume))
-            return;
+        if (pcmSound != null) {
+            PcmAudioMixer.PlaybackResult result = pcmAudioMixer.play(pcmSound, finalVolume);
+            if (result == PcmAudioMixer.PlaybackResult.PLAYED
+                    || result == PcmAudioMixer.PlaybackResult.QUEUED)
+                return;
+        }
         pcmFallbackPlays.increment();
         clip.play(finalVolume);
     }

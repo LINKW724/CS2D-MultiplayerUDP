@@ -1,6 +1,5 @@
 package cs2d.client;
 
-import java.io.File;
 import java.io.IOException;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -137,17 +136,13 @@ final class IsolatedPcmOutputTransport implements PcmOutputTransport {
     private boolean startWorker(InetAddress loopback) throws IOException {
         int workerPort = reserveLoopbackPort(loopback);
         int parentPort = ((InetSocketAddress) channel.getLocalAddress()).getPort();
-        String javaCommand = ProcessHandle.current().info().command()
-                .orElseGet(() -> System.getProperty("java.home") + File.separator + "bin" + File.separator + "java");
-        ProcessBuilder builder = new ProcessBuilder(javaCommand, "-cp", System.getProperty("java.class.path"),
+        PcmWorkerProcessFactory processFactory = PcmWorkerProcessFactory.systemRuntime();
+        java.util.List<String> arguments = java.util.List.of(
                 PcmOutputWorkerMain.class.getName(), Integer.toString(workerPort), Integer.toString(parentPort),
                 Long.toUnsignedString(token), Long.toString(ProcessHandle.current().pid()));
-        builder.redirectInput(ProcessBuilder.Redirect.PIPE);
-        builder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-        builder.redirectError(ProcessBuilder.Redirect.DISCARD);
         workerAddress = new InetSocketAddress(loopback, workerPort);
         lastWorkerAckNanos = System.nanoTime();
-        worker = builder.start();
+        worker = processFactory.start(arguments);
 
         long deadline = System.nanoTime() + START_TIMEOUT_NANOS;
         while (running.get() && worker.isAlive() && System.nanoTime() < deadline) {

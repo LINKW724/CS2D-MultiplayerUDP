@@ -27,6 +27,12 @@ import javax.sound.sampled.UnsupportedAudioFileException;
  * voice request and never creates a media/player thread.
  */
 final class PcmAudioMixer implements AutoCloseable {
+    enum PlaybackResult {
+        PLAYED,
+        QUEUED,
+        BACKEND_UNAVAILABLE,
+        DROPPED_OVERLOAD
+    }
     static final float SAMPLE_RATE = 48_000.0f;
     static final int CHANNELS = 2;
     static final int FRAMES_PER_BUFFER = 256;
@@ -239,12 +245,16 @@ final class PcmAudioMixer implements AutoCloseable {
         return new Sound(samples);
     }
 
-    boolean play(Sound sound, double volume) {
+    PlaybackResult play(Sound sound, double volume) {
         if (closed.get() || sound == null || sound.frameCount() == 0)
-            return false;
+            return PlaybackResult.BACKEND_UNAVAILABLE;
         float gain = (float) Math.max(0.0, Math.min(1.0, volume));
         if (gain <= 0.0f)
-            return true;
+            return PlaybackResult.PLAYED;
+        if (!running.get()) {
+            requestRestart();
+            return PlaybackResult.BACKEND_UNAVAILABLE;
+        }
         requestedVoices.increment();
         PlayRequest request = new PlayRequest(sound, gain, System.nanoTime());
         if (!requests.offer(request)) {
@@ -253,11 +263,9 @@ final class PcmAudioMixer implements AutoCloseable {
             if (requests.poll() != null)
                 virtualizedVoiceCount.increment();
             if (!requests.offer(request))
-                virtualizedVoiceCount.increment();
+                return PlaybackResult.DROPPED_OVERLOAD;
         }
-        if (!running.get())
-            requestRestart();
-        return true;
+        return PlaybackResult.QUEUED;
     }
 
     Snapshot snapshotAndReset() {

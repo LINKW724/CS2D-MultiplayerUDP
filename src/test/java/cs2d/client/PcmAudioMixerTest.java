@@ -142,6 +142,15 @@ class PcmAudioMixerTest {
     }
 
     @Test
+    void stoppedMixerReportsUnavailableSoCallerCanUseFallback() {
+        PcmAudioMixer mixer = new PcmAudioMixer();
+        PcmAudioMixer.Sound sound = new PcmAudioMixer.Sound(new short[] { 1, 1 });
+
+        assertEquals(PcmAudioMixer.PlaybackResult.BACKEND_UNAVAILABLE, mixer.play(sound, 1.0));
+        mixer.close();
+    }
+
+    @Test
     void decodesEveryBundledWavIntoTheSharedMixerFormat() throws Exception {
         URL soundsUrl = PcmAudioMixerTest.class.getResource("/sounds");
         assertTrue(soundsUrl != null && "file".equals(soundsUrl.getProtocol()));
