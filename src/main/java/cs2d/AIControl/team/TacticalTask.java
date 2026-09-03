@@ -22,7 +22,8 @@ public record TacticalTask(
         double arrivalRadius,
         Set<String> allowedSoundTargetIds,
         long expiresAt,
-        String operationId) {
+        String operationId,
+        CompletionPolicy completionPolicy) {
 
     public TacticalTask {
         if (taskId == null || taskId.isBlank()) {
@@ -37,6 +38,17 @@ public record TacticalTask(
         arrivalRadius = Math.max(0.0, arrivalRadius);
         allowedSoundTargetIds = allowedSoundTargetIds == null ? Set.of() : Set.copyOf(allowedSoundTargetIds);
         operationId = operationId == null || operationId.isBlank() ? null : operationId;
+        completionPolicy = completionPolicy == null ? defaultCompletionPolicy(taskType) : completionPolicy;
+    }
+
+    /** Compatibility constructor preserving the former canonical signature. */
+    public TacticalTask(String taskId, TaskType taskType, String routeId, Vec2 objectivePosition,
+            int minimumAgents, int maximumAgents, int priority, double risk,
+            EngagementRule engagementRule, double arrivalRadius, Set<String> allowedSoundTargetIds,
+            long expiresAt, String operationId) {
+        this(taskId, taskType, routeId, objectivePosition, minimumAgents, maximumAgents,
+                priority, risk, engagementRule, arrivalRadius, allowedSoundTargetIds, expiresAt,
+                operationId, defaultCompletionPolicy(taskType));
     }
 
     /** Compatibility constructor for independent tasks without an operation. */
@@ -45,7 +57,8 @@ public record TacticalTask(
             EngagementRule engagementRule, double arrivalRadius, Set<String> allowedSoundTargetIds,
             long expiresAt) {
         this(taskId, taskType, routeId, objectivePosition, minimumAgents, maximumAgents,
-                priority, risk, engagementRule, arrivalRadius, allowedSoundTargetIds, expiresAt, null);
+                priority, risk, engagementRule, arrivalRadius, allowedSoundTargetIds, expiresAt,
+                null, defaultCompletionPolicy(taskType));
     }
 
     public boolean isExpired(long now) {
@@ -56,5 +69,18 @@ public record TacticalTask(
         LOCAL_ONLY,
         ASSIGNED_CONTACTS,
         IGNORE_REMOTE_SOUNDS
+    }
+
+    /** Separates one-shot destinations from intents that must track a moving situation. */
+    public enum CompletionPolicy {
+        ARRIVAL,
+        CONTINUOUS
+    }
+
+    private static CompletionPolicy defaultCompletionPolicy(TaskType taskType) {
+        return switch (taskType == null ? TaskType.CONTROL_ROUTE : taskType) {
+            case ADVANCE, FLANK, ASSEMBLE -> CompletionPolicy.ARRIVAL;
+            case CONTROL_ROUTE, SUPPORT, REGROUP, RESPOND_TO_CONTACT, SUPPRESS -> CompletionPolicy.CONTINUOUS;
+        };
     }
 }

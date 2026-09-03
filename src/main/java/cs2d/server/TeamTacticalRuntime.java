@@ -4,6 +4,7 @@ import cs2d.AIControl.A.PathfindingModule;
 import cs2d.AIControl.route.PresetRouteCatalogRepository;
 import cs2d.AIControl.route.RouteCatalog;
 import cs2d.AIControl.route.RouteDescriptor;
+import cs2d.AIControl.team.LowPopulationMobilityFallback;
 import cs2d.AIControl.team.TacticalCoordinator;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalOrderProvider;
@@ -46,6 +47,7 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
     private final RouteCatalog routeCatalog;
     private final TacticalTaskBoard taskBoard = new TacticalTaskBoard();
     private final TacticalFormationSlotPolicy formationSlotPolicy = new TacticalFormationSlotPolicy();
+    private final LowPopulationMobilityFallback mobilityFallback = new LowPopulationMobilityFallback();
     private final TacticalPostureCommitmentBoard postureCommitmentBoard = new TacticalPostureCommitmentBoard();
     private final Map<String, SoundEvent> recentContacts = new LinkedHashMap<>();
     private volatile Map<String, TacticalOrder> orders = Map.of();
@@ -90,7 +92,9 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
             TacticalPlan proposed = coordinator.plan(snapshot);
             TacticalTaskBoard.ReconciledPlan reconciled = taskBoard.reconcile(
                     entry.getKey().name(), proposed, snapshot, now);
-            Map<String, TacticalOrder> slotted = formationSlotPolicy.assign(reconciled.activeOrders(), snapshot);
+            Map<String, TacticalOrder> mobile = mobilityFallback.apply(snapshot.agents(),
+                    reconciled.activeOrders(), now);
+            Map<String, TacticalOrder> slotted = formationSlotPolicy.assign(mobile, snapshot);
             Map<String, TacticalOrder> committed = postureCommitmentBoard.reconcile(
                     entry.getKey().name(), slotted, now);
             nextOrders.putAll(committed);

@@ -82,19 +82,39 @@ class TacticalTaskBoardTest {
     }
 
     @Test
-    void finiteMovementTaskCompletesWhenAllAssignedAgentsReachObjective() {
+    void continuousSupportAndRegroupTrackMovingObjectivesAfterArrival() {
         long now = 5_000L;
-        TacticalTask task = task("regroup", 1, 2, now + 1_000L);
-        TacticalPlan plan = new TacticalPlan(List.of(task), Map.of("a", order("a", "regroup", now)));
         AgentSnapshot arrived = new AgentSnapshot("a", new Vec2(105, 105), 100,
                 false, false, null, List.of());
         TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 1_600, 900,
                 List.of(arrived), List.of(), List.of());
 
-        TacticalTaskBoard.ReconciledPlan result = board.reconcile("CT", plan, snapshot, now);
+        for (TaskType type : List.of(TaskType.SUPPORT, TaskType.REGROUP)) {
+            TacticalTaskBoard localBoard = new TacticalTaskBoard();
+            String taskId = type.name().toLowerCase();
+            TacticalTask task = new TacticalTask(taskId, type, null,
+                    new Vec2(100, 100), 1, 2, 90, 0.0, EngagementRule.LOCAL_ONLY,
+                    100.0, Set.of(), now + 1_000L);
+            TacticalOrder initialOrder = new TacticalOrder("a", type, Role.SUPPORT,
+                    null, "b", new Vec2(100, 100), false, 100.0, Set.of(), 1_000.0,
+                    0.0, now + 1_000L, taskId);
 
-        assertTrue(result.activeOrders().isEmpty());
-        assertEquals(TaskStatus.COMPLETED, result.taskStates().get("regroup").status());
+            TacticalTaskBoard.ReconciledPlan result = localBoard.reconcile("CT",
+                    new TacticalPlan(List.of(task), Map.of("a", initialOrder)), snapshot, now);
+            assertEquals(Set.of("a"), result.activeOrders().keySet());
+            assertEquals(TaskStatus.ACTIVE, result.taskStates().get(taskId).status());
+
+            TacticalTask movedTask = new TacticalTask(taskId, type, null,
+                    new Vec2(500, 100), 1, 2, 90, 0.0, EngagementRule.LOCAL_ONLY,
+                    100.0, Set.of(), now + 2_000L);
+            TacticalOrder movedOrder = new TacticalOrder("a", type, Role.SUPPORT,
+                    null, "b", new Vec2(500, 100), false, 100.0, Set.of(), 1_000.0,
+                    0.0, now + 2_000L, taskId);
+            TacticalTaskBoard.ReconciledPlan refreshed = localBoard.reconcile("CT",
+                    new TacticalPlan(List.of(movedTask), Map.of("a", movedOrder)), snapshot, now + 1L);
+
+            assertEquals(new Vec2(500, 100), refreshed.activeOrders().get("a").movementTarget());
+        }
     }
 
     @Test

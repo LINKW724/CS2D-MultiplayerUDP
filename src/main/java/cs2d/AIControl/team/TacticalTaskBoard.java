@@ -65,7 +65,7 @@ public final class TacticalTaskBoard {
                     .collect(java.util.stream.Collectors.toUnmodifiableSet());
             boolean completedMovementHasNewAssignment = previous != null
                     && previous.status() == TaskStatus.COMPLETED
-                    && isFiniteMovementTask(task.taskType())
+                    && completesOnArrival(task)
                     && !previous.assignedAgentIds().equals(assignedAgentIds);
 
             TaskStatus status;
@@ -220,7 +220,7 @@ public final class TacticalTaskBoard {
     private static boolean hasReachedObjective(TacticalTask task, List<TacticalOrder> assigned,
             TeamTacticalSnapshot snapshot) {
         if (snapshot == null || task.objectivePosition() == null || task.arrivalRadius() <= 0.0
-                || !isFiniteMovementTask(task.taskType())) {
+                || !completesOnArrival(task)) {
             return false;
         }
         Map<String, TeamTacticalSnapshot.AgentSnapshot> agentsById = new HashMap<>();
@@ -236,12 +236,8 @@ public final class TacticalTaskBoard {
         });
     }
 
-    private static boolean isFiniteMovementTask(TacticalOrder.TaskType type) {
-        return type == TacticalOrder.TaskType.ASSEMBLE
-                || type == TacticalOrder.TaskType.ADVANCE
-                || type == TacticalOrder.TaskType.FLANK
-                || type == TacticalOrder.TaskType.SUPPORT
-                || type == TacticalOrder.TaskType.REGROUP;
+    private static boolean completesOnArrival(TacticalTask task) {
+        return task != null && task.completionPolicy() == TacticalTask.CompletionPolicy.ARRIVAL;
     }
 
     private static String stateKey(String teamId, String taskId) {
