@@ -8,6 +8,8 @@ import cs2d.AIControl.team.TacticalCoordinator;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalOrderProvider;
 import cs2d.AIControl.team.TacticalPlan;
+import cs2d.AIControl.team.TacticalFormationSlotPolicy;
+import cs2d.AIControl.team.TacticalPostureCommitmentBoard;
 import cs2d.AIControl.team.TacticalTaskBoard;
 import cs2d.AIControl.team.TeamTacticalSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.AgentSnapshot;
@@ -43,6 +45,8 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
     private final TacticalCoordinator coordinator;
     private final RouteCatalog routeCatalog;
     private final TacticalTaskBoard taskBoard = new TacticalTaskBoard();
+    private final TacticalFormationSlotPolicy formationSlotPolicy = new TacticalFormationSlotPolicy();
+    private final TacticalPostureCommitmentBoard postureCommitmentBoard = new TacticalPostureCommitmentBoard();
     private final Map<String, SoundEvent> recentContacts = new LinkedHashMap<>();
     private volatile Map<String, TacticalOrder> orders = Map.of();
     private long lastPlanTime;
@@ -86,7 +90,10 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
             TacticalPlan proposed = coordinator.plan(snapshot);
             TacticalTaskBoard.ReconciledPlan reconciled = taskBoard.reconcile(
                     entry.getKey().name(), proposed, snapshot, now);
-            nextOrders.putAll(reconciled.activeOrders());
+            Map<String, TacticalOrder> slotted = formationSlotPolicy.assign(reconciled.activeOrders(), snapshot);
+            Map<String, TacticalOrder> committed = postureCommitmentBoard.reconcile(
+                    entry.getKey().name(), slotted, now);
+            nextOrders.putAll(committed);
         }
         orders = Map.copyOf(nextOrders);
     }
@@ -105,6 +112,7 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
     void clear() {
         recentContacts.clear();
         taskBoard.clear();
+        postureCommitmentBoard.clear();
         orders = Map.of();
         lastPlanTime = 0L;
     }

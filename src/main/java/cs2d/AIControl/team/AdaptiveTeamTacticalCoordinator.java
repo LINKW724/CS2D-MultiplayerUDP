@@ -37,23 +37,31 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
     private static final double CONTACT_OBJECTIVE_GRID = 160.0;
     private final RouteAssignmentPolicy routeAssignmentPolicy;
     private final List<TacticalPlanRefiner> planRefiners;
+    private final TacticalPostureDoctrine postureDoctrine;
 
     public AdaptiveTeamTacticalCoordinator() {
-        this(new BalancedRouteAssignmentPolicy(), List.of(new ElasticManeuverRefiner()));
+        this(new BalancedRouteAssignmentPolicy(), List.of(new ElasticManeuverRefiner()),
+                new TdmPostureDoctrine());
     }
 
     /** Allows game modes or extensions to add/replace doctrines without changing this coordinator. */
     public AdaptiveTeamTacticalCoordinator(List<TacticalPlanRefiner> planRefiners) {
-        this(new BalancedRouteAssignmentPolicy(), planRefiners);
+        this(new BalancedRouteAssignmentPolicy(), planRefiners, new TdmPostureDoctrine());
     }
 
     /** Allows alternate route allocation and maneuver doctrines to be injected independently. */
     public AdaptiveTeamTacticalCoordinator(RouteAssignmentPolicy routeAssignmentPolicy,
             List<TacticalPlanRefiner> planRefiners) {
+        this(routeAssignmentPolicy, planRefiners, new TdmPostureDoctrine());
+    }
+
+    public AdaptiveTeamTacticalCoordinator(RouteAssignmentPolicy routeAssignmentPolicy,
+            List<TacticalPlanRefiner> planRefiners, TacticalPostureDoctrine postureDoctrine) {
         this.routeAssignmentPolicy = routeAssignmentPolicy == null
                 ? snapshot -> Map.of()
                 : routeAssignmentPolicy;
         this.planRefiners = planRefiners == null ? List.of() : List.copyOf(planRefiners);
+        this.postureDoctrine = postureDoctrine == null ? new TdmPostureDoctrine() : postureDoctrine;
     }
 
     @Override
@@ -114,7 +122,17 @@ public final class AdaptiveTeamTacticalCoordinator implements TacticalCoordinato
                 plan = refined == null ? plan : refined;
             }
         }
-        return plan;
+        return applyPostureDoctrine(plan);
+    }
+
+    private TacticalPlan applyPostureDoctrine(TacticalPlan plan) {
+        Map<String, TacticalOrder> orders = new LinkedHashMap<>();
+        plan.orders().values().stream()
+                .filter(java.util.Objects::nonNull)
+                .sorted(Comparator.comparing(TacticalOrder::agentId))
+                .forEach(order -> orders.put(order.agentId(),
+                        order.withPosture(postureDoctrine.choose(order), 0L)));
+        return new TacticalPlan(plan.tasks(), orders);
     }
 
     private void assignRouteAnchors(Map<String, RouteStats> routes, Map<String, DraftOrder> drafts) {

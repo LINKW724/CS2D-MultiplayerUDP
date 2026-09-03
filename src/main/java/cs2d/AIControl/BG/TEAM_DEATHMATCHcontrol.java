@@ -20,6 +20,7 @@ import cs2d.AIControl.movement.MovementProgressWatchdog;
 import cs2d.AIControl.movement.QuadtreeCoverGeometryProbe;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalIdlePolicy;
+import cs2d.AIControl.team.TacticalPostureExecutionPolicy;
 import cs2d.AIControl.team.TeamTacticalSnapshot.Vec2;
 import cs2d.playerAndAi.Player;
 
@@ -73,6 +74,8 @@ public class TEAM_DEATHMATCHcontrol {
     private final LocomotionFacingPolicy locomotionFacingPolicy = new LocomotionFacingPolicy();
     private final CombatPosturePolicy combatPosturePolicy = new CombatPosturePolicy();
     private final TacticalIdlePolicy tacticalIdlePolicy = new TacticalIdlePolicy();
+    private final TacticalPostureExecutionPolicy tacticalPostureExecutionPolicy =
+            new TacticalPostureExecutionPolicy();
     private Point2D.Double committedCoverPoint;
     private long coverCommitUntil;
     private long nextCoverResponseTime;
@@ -490,7 +493,15 @@ public class TEAM_DEATHMATCHcontrol {
         TacticalIdlePolicy.Decision idleDecision = tacticalIdlePolicy.decide(tacticalOrder, currentTime,
                 primaryTarget != null, pathfindingModule != null && pathfindingModule.isActive());
         boolean coverMovementActive = currentState == AIState.TAKING_COVER && committedCoverPoint != null;
-        if (!coverMovementActive && idleDecision.holdPosition()
+        boolean directSight = hasDirectSightToPrimaryTarget();
+        boolean targetWithinEffectiveRange = directSight && isPrimaryTargetWithinEffectiveRange();
+        boolean arrivedAtTacticalObjective = hasArrivedAtTacticalObjective(tacticalOrder, currentTime);
+        TacticalPostureExecutionPolicy.Decision postureDecision = tacticalPostureExecutionPolicy.decide(
+                tacticalOrder, currentTime, directSight, targetWithinEffectiveRange,
+                arrivedAtTacticalObjective);
+        boolean postureHold = postureDecision.holdPosition()
+                && !coverMovementActive && !unstuckMovementActive && !isGrenadeModuleMoving;
+        if (!coverMovementActive && (idleDecision.holdPosition() || postureHold)
                 && pathfindingModule != null && pathfindingModule.isActive()) {
             pathfindingModule.setTarget(null);
         }
@@ -500,6 +511,8 @@ public class TEAM_DEATHMATCHcontrol {
         boolean tacticalMovementApplied = unstuckMovementActive
                 || coverMovementActive
                 || idleDecision.holdPosition()
+                || postureHold
+                || postureDecision.allowCombatMovement()
                 || (!coverMovementActive && applyTacticalMovementIntent(tacticalOrder, currentTime));
         if (!isGrenadeModuleMoving && !isGrenadeModuleAiming && !tacticalMovementApplied) { // <-- 添加检查
             switch (currentState) {
@@ -604,15 +617,17 @@ public class TEAM_DEATHMATCHcontrol {
         List<String> finalKeys = new ArrayList<>();
         double finalAngle = owner.angle;
         boolean finalShooting = false;
-        boolean finalWalking = idleDecision.walkSilently();
+        boolean finalWalking = postureDecision.walkSilently() || idleDecision.walkSilently();
 
         // 所有思考模块只提交不可变意图；移动仲裁器是唯一按键决策者。
         List<MovementIntent> movementIntents = new ArrayList<>();
         if (unstuckMovementActive) {
             movementIntents.add(MovementIntent.exclusive("unstuck", 500, unstuckMovement.keys()));
-        } else if (currentState != AIState.TAKING_COVER
-                && attackInput != null && !attackInput.keys().isEmpty()) {
-            movementIntents.add(MovementIntent.exclusive("combat", 400, attackInput.keys()));
+        } else if (postureDecision.allowCombatMovement()
+                && directSight
+                && currentState != AIState.TAKING_COVER) {
+            movementIntents.add(MovementIntent.exclusive("combat", 400,
+                    attackInput == null ? List.of() : attackInput.keys()));
         } else if (isGrenadeModuleMoving && pathInput != null) {
             movementIntents.add(MovementIntent.exclusive("grenade", 300, pathInput.keys()));
         } else if (!isGrenadeModuleAiming && !isGrenadeModuleMoving && pathInput != null) {
@@ -656,6 +671,7 @@ public class TEAM_DEATHMATCHcontrol {
                 && !isGrenadeModuleAiming
                 && !isGrenadeModuleMoving
                 && currentState != AIState.IDLE
+                && !postureDecision.holdPosition()
                 && !owner.isReloading
                 && !gameState.shouldFreezeAi();
         MovementProgressWatchdog.Assessment progress = movementProgressWatchdog.observe(
@@ -802,7 +818,7 @@ public class TEAM_DEATHMATCHcontrol {
      */
     private boolean applyTacticalMovementIntent(TacticalOrder order, long currentTime) {
         if (order == null || !order.isActive(currentTime) || order.movementTarget() == null
-                || primaryTarget != null || pathfindingModule == null || owner.position == null) {
+                || pathfindingModule == null || owner.position == null) {
             return false;
         }
         if (order.taskType() == TacticalOrder.TaskType.RESPOND_TO_CONTACT
@@ -841,6 +857,42 @@ public class TEAM_DEATHMATCHcontrol {
             pathfindingModule.setTarget(targetPoint);
         }
         return true;
+    }
+
+    private boolean hasDirectSightToPrimaryTarget() {
+        if (primaryTarget == null || !primaryTarget.isAlive()) {
+            return false;
+        }
+        PerceptionModule.PerceptionInfo info = perceptionModule == null
+                ? null
+                : perceptionModule.getPerceptionInfo(primaryTarget.id);
+        return info != null && info.isCurrentlyVisible();
+    }
+
+    private boolean isPrimaryTargetWithinEffectiveRange() {
+        if (primaryTarget == null || primaryTarget.position == null || owner.position == null) {
+            return false;
+        }
+        Weapon weapon = owner.getCurrentWeapon();
+        if (weapon == null) {
+            return false;
+        }
+        double effectiveRange = switch (weapon.getWeaponType()) {
+            case SHOTGUN -> 400.0;
+            case SMG -> 650.0;
+            default -> Double.POSITIVE_INFINITY;
+        };
+        return owner.position.distanceSq(primaryTarget.position) <= effectiveRange * effectiveRange;
+    }
+
+    private boolean hasArrivedAtTacticalObjective(TacticalOrder order, long currentTime) {
+        if (order == null || !order.isActive(currentTime) || order.movementTarget() == null
+                || owner.position == null) {
+            return false;
+        }
+        Vec2 target = order.movementTarget();
+        double radius = Math.max(20.0, order.arrivalRadius());
+        return owner.position.distanceSq(target.x(), target.y()) <= radius * radius;
     }
 
     /**
