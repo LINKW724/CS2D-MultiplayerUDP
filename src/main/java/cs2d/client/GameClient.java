@@ -450,8 +450,9 @@ public class GameClient extends Application {
     private StackPane killsThisLifeContainer; // 一个容器，用来叠放 "Kills: X" 标签和特效
     private Label killsThisLifeLabel; // 显示 "Kills: X" 的标签
     private Pane killFlashEffect; // 击杀后的闪光特效层
-    // 使用一个集合来存储已经处理过的击杀信息ID，防止重复显示或计数
-    private final Set<String> processedKillFeedIds = new HashSet<>();
+    // 服务端会在连续快照里重发最近4条击杀；显示和统计共用同一个有界去重窗口。
+    private final BoundedEventDeduplicator<String> processedKillFeedIds =
+            new BoundedEventDeduplicator<>(EventDeduplicator.DEFAULT_CAPACITY);
 
     // --- 静态数据 (常量) ---
     // 定义一个静态 Map 存储按类别分的武器列表
@@ -5619,6 +5620,7 @@ public class GameClient extends Application {
                     int maximumEntries = GameSettings.clampKillFeedEntries(newVal.intValue());
                     gameSettings.setMaxKillFeedEntries(maximumEntries);
                     trimKillFeedToLimit(maximumEntries);
+                    saveSettings();
                 });
 
         HBox sliderBox = new HBox(10, killFeedSlider, killFeedValueLabel);
@@ -7438,12 +7440,12 @@ public class GameClient extends Application {
             if (uniqueId.isEmpty())
                 continue; // 如果ID无效，则跳过
 
-            // 检查这个ID是否已经显示在屏幕上
-            boolean alreadyOnScreen = killFeedVBox.getChildren().stream()
-                    .anyMatch(node -> uniqueId.equals(node.getProperties().get("uniqueId")));
+            // 只在第一次观察到事件时处理。不能拿“当前是否仍在屏幕上”判断，
+            // 否则上限0-3时被裁掉的旧事件会在下一份快照中反复复活。
+            if (!processedKillFeedIds.accept(uniqueId))
+                continue;
 
-            // 如果没有显示，就创建并添加它
-            if (!alreadyOnScreen && gameSettings.getMaxKillFeedEntries() > 0) {
+            if (gameSettings.getMaxKillFeedEntries() > 0) {
                 // [新增打印] 确认将要为一条新的击杀信息创建UI
                 // System.out.println("[DEBUG-CLIENT] 检测到新的击杀事件 (ID: " + uniqueId +
                 // ")，准备创建UI行。");
@@ -7463,9 +7465,7 @@ public class GameClient extends Application {
             // =================================================================
             // 本地统计数据实时同步逻辑 (核心修复)
             // =================================================================
-            if (!processedKillFeedIds.contains(uniqueId)) {
-                processedKillFeedIds.add(uniqueId);
-
+            {
                 String killerId = getString(entryJson, "killerId");
                 String killerName = getString(entryJson, "killerName");
                 String victimId = getString(entryJson, "victimId");
