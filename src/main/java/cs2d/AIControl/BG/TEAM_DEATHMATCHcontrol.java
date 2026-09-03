@@ -9,13 +9,14 @@ import cs2d.AIControl.A.AttackModule;
 import cs2d.AIControl.A.PathfindingModule; // 导入 A 包
 import cs2d.AIControl.B.PerceptionModule;
 import cs2d.AIControl.B.PerceptionType;
-import cs2d.AIControl.movement.LocalAvoidancePlanner;
+import cs2d.AIControl.movement.CombatPosturePolicy;
 import cs2d.AIControl.movement.CoverScanBudget;
 import cs2d.AIControl.movement.LocalCoverPlanner;
 import cs2d.AIControl.movement.LocomotionFacingPolicy;
 import cs2d.AIControl.movement.MovementArbiter;
 import cs2d.AIControl.movement.MovementDecision;
 import cs2d.AIControl.movement.MovementIntent;
+import cs2d.AIControl.movement.MovementProgressWatchdog;
 import cs2d.AIControl.movement.QuadtreeCoverGeometryProbe;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalIdlePolicy;
@@ -66,12 +67,12 @@ public class TEAM_DEATHMATCHcontrol {
     private Point2D.Double lastKnownPosition = null;
     private final SoundPursuitGate soundPursuitGate = new SoundPursuitGate();
     private final MovementArbiter movementArbiter = new MovementArbiter();
-    private final LocalAvoidancePlanner localAvoidancePlanner = new LocalAvoidancePlanner();
+    private final MovementProgressWatchdog movementProgressWatchdog = new MovementProgressWatchdog();
     private final LocalCoverPlanner localCoverPlanner = new LocalCoverPlanner();
     private final LocalCoverPlanner.GeometryProbe coverGeometry;
     private final LocomotionFacingPolicy locomotionFacingPolicy = new LocomotionFacingPolicy();
+    private final CombatPosturePolicy combatPosturePolicy = new CombatPosturePolicy();
     private final TacticalIdlePolicy tacticalIdlePolicy = new TacticalIdlePolicy();
-    private boolean corridorQueueHeld;
     private Point2D.Double committedCoverPoint;
     private long coverCommitUntil;
     private long nextCoverResponseTime;
@@ -84,24 +85,13 @@ public class TEAM_DEATHMATCHcontrol {
     private long targetAcquiredTime = 0;
     private int shotsFiredAtCurrentTarget = 0;
 
-    private long lastStuckCheckTime = 0;
-    private Point2D.Double lastPositionForStuckCheck;
-    private int stuckCount = 0;
-    private long unstuckUntil = 0;
-
-    private Point2D.Double unstuckTarget = null;
-
-    private static final long STUCK_CHECK_INTERVAL_MS = 1500;
-    private static final double MIN_MOVEMENT_FOR_STUCK = 3.0;
-    private static final long UNSTUCK_DURATION_MS = 800; // 避让 0.8 秒
-    /**
-     * AI 将尝试避开此半径内的队友 (约 1.5 倍玩家大小)
-     */
-    private static final double AVOIDANCE_RADIUS = Player.SIZE * 1.5;
-    /**
-     * 用于优化的半径平方
-     */
-    private static final double AVOIDANCE_RADIUS_SQ = AVOIDANCE_RADIUS * AVOIDANCE_RADIUS;
+    private long recoveryUntil;
+    private List<String> recoveryKeys = List.of();
+    private static final long RECOVERY_COMMIT_MS = 500;
+    private static final double RECOVERY_STEP = Player.SIZE * 1.45;
+    private static final double TEAMMATE_BLOCK_RADIUS_SQ = Math.pow(Player.SIZE * 1.8, 2.0);
+    private static final double LEGACY_MOVEMENT_SUBSTEPS_PER_SECOND = 120.0;
+    private static final double BASE_MOVEMENT_PER_SUBSTEP = 1.5;
 
     /** 团队死斗模式的 AI 武器池 (只包含长枪) */
     private static final List<Weapon> TDM_WEAPON_POOL = Arrays.asList(
@@ -182,9 +172,7 @@ public class TEAM_DEATHMATCHcontrol {
                 logger, this.rand);
         // --- 结束新增 ---
 
-        // --- 初始化卡死检测 ---
-        this.lastPositionForStuckCheck = (Point2D.Double) owner.position.clone();
-        this.lastStuckCheckTime = System.currentTimeMillis();
+        this.movementProgressWatchdog.reset(System.currentTimeMillis(), owner.position);
 
         this.logger = logger; // <--- 存储 logger
     }
@@ -298,6 +286,7 @@ public class TEAM_DEATHMATCHcontrol {
                 ? perceptionModule.getPerceptionInfo(this.primaryTarget.id)
                 : null;
         boolean isTargetVisible = targetInfo != null && targetInfo.isCurrentlyVisible();
+        updateReliableThreatMemory(currentTime, isTargetVisible);
 
         // 如果AI正在执行预设路径 但 突然看到了敌人
         if (isTargetVisible && pathfindingModule.isFollowingPresetPath()) {
@@ -312,9 +301,8 @@ public class TEAM_DEATHMATCHcontrol {
         // 3. 更新状态机 (会在这里触发扔雷请求)
         runTdmStateMachine(currentTime);
 
-        // 4. 只生成局部脱困提案，不直接返回或覆盖最终行动
-        AIInput unstuckMovement = corridorQueueHeld ? null : handleTeammateAvoidance(currentTime);
-        corridorQueueHeld = false;
+        // 4. 只有最终移动长期没有产生预期位移时，才执行短暂恢复动作。
+        AIInput unstuckMovement = currentRecoveryInput(currentTime);
 
         // 5. 统一仲裁所有移动提案，再产生唯一的最终行动
         return executeActions(worldView, currentTime, tacticalOrder, unstuckMovement);
@@ -629,24 +617,15 @@ public class TEAM_DEATHMATCHcontrol {
             movementIntents.add(MovementIntent.exclusive("grenade", 300, pathInput.keys()));
         } else if (!isGrenadeModuleAiming && !isGrenadeModuleMoving && pathInput != null) {
             movementIntents.add(MovementIntent.base("path", 100, pathInput.keys()));
-            movementIntents.add(localAvoidancePlanner.plan(currentTime, owner.id, pathInput.keys(),
-                    calculateProactiveAvoidanceObservation(pathInput.keys())));
         }
         MovementDecision movementDecision = movementArbiter.decide(movementIntents);
         finalKeys = new ArrayList<>(movementDecision.keys());
-        corridorQueueHeld = movementDecision.contributingSources().contains("corridor-queue");
-        if (corridorQueueHeld) {
-            stuckCount = 0;
-            lastStuckCheckTime = currentTime;
-            if (lastPositionForStuckCheck != null && owner.position != null) {
-                lastPositionForStuckCheck.setLocation(owner.position);
-            }
-        }
 
         // --- 决定瞄准角度和射击 ---
         if (unstuckMovementActive) {
             locomotionFacingPolicy.reset();
-            finalAngle = unstuckMovement.angle();
+            finalAngle = combatPosturePolicy.chooseFacing(currentTime, owner.position,
+                    finalKeys, unstuckMovement.angle());
             finalShooting = false;
         } else if (isGrenadeModuleAiming) {
             locomotionFacingPolicy.reset();
@@ -654,8 +633,7 @@ public class TEAM_DEATHMATCHcontrol {
             // finalAngle = grenadeModule.getAimAngle(); // 假设有这个方法，或者直接使用owner.angle?
             // 不，HOLD_AND_AIM 命令已经设置了
             finalShooting = false; // 扔雷时不射击
-        } else if (attackInput != null && (currentState == AIState.ATTACKING || currentState == AIState.HUNTING
-                || currentState == AIState.TAKING_COVER)) {
+        } else if (attackInput != null && (currentState == AIState.ATTACKING || attackInput.shooting())) {
             locomotionFacingPolicy.reset();
             // 优先级 2: 攻击瞄准 (来自 AttackModule)
             finalAngle = attackInput.angle();
@@ -663,13 +641,28 @@ public class TEAM_DEATHMATCHcontrol {
         } else if (pathInput != null && pathfindingModule.isActive() && !isGrenadeModuleAiming
                 && !isGrenadeModuleMoving) {
             // 优先级 3: 路径只决定移动；朝向策略允许短距离倒退警戒。
-            finalAngle = locomotionFacingPolicy.chooseFacing(currentTime, owner.angle, pathInput.angle(), finalKeys);
+            double travelFacing = locomotionFacingPolicy.chooseFacing(currentTime, owner.angle,
+                    pathInput.angle(), finalKeys);
+            finalAngle = combatPosturePolicy.chooseFacing(currentTime, owner.position, finalKeys, travelFacing);
             finalShooting = false;
         } else {
             locomotionFacingPolicy.reset();
-            // 优先级 4: 保持当前角度，不射击
-            finalAngle = owner.angle; // 保持当前角度
+            // 优先级 4: 短时间保持可靠交战方向，否则保持当前角度。
+            finalAngle = combatPosturePolicy.chooseFacing(currentTime, owner.position, finalKeys, owner.angle);
             finalShooting = false;
+        }
+
+        boolean monitorProgress = !unstuckMovementActive
+                && !isGrenadeModuleAiming
+                && !isGrenadeModuleMoving
+                && currentState != AIState.IDLE
+                && !owner.isReloading
+                && !gameState.shouldFreezeAi();
+        MovementProgressWatchdog.Assessment progress = movementProgressWatchdog.observe(
+                currentTime, owner.position, finalKeys,
+                expectedMovementSpeedPerSecond(finalWalking), monitorProgress);
+        if (progress.blocked()) {
+            beginMovementRecovery(currentTime, progress);
         }
 
         // 返回最终合并的 AIInput
@@ -1015,15 +1008,14 @@ public class TEAM_DEATHMATCHcontrol {
         this.primaryTarget = null;
         this.lastKnownPosition = null;
         this.soundPursuitGate.reset();
-        this.localAvoidancePlanner.reset();
         this.locomotionFacingPolicy.reset();
-        this.corridorQueueHeld = false;
+        this.combatPosturePolicy.reset();
+        this.movementProgressWatchdog.reset(System.currentTimeMillis(), owner.position);
         clearCoverCommitment();
         this.nextCoverResponseTime = 0;
         this.nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
-        this.unstuckUntil = 0;
-        this.unstuckTarget = null;
-        this.stuckCount = 0;
+        this.recoveryUntil = 0;
+        this.recoveryKeys = List.of();
 
         // 2. 重置状态机
         this.currentState = AIState.PATROLLING; // 重生后默认进入巡逻
@@ -1092,15 +1084,14 @@ public class TEAM_DEATHMATCHcontrol {
         primaryTarget = null;
         lastKnownPosition = null;
         soundPursuitGate.reset();
-        localAvoidancePlanner.reset();
         locomotionFacingPolicy.reset();
-        corridorQueueHeld = false;
+        combatPosturePolicy.reset();
+        movementProgressWatchdog.reset(System.currentTimeMillis(), owner.position);
         clearCoverCommitment();
         nextCoverResponseTime = 0;
         nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
-        unstuckUntil = 0;
-        unstuckTarget = null;
-        stuckCount = 0;
+        recoveryUntil = 0;
+        recoveryKeys = List.of();
         currentState = AIState.PATROLLING;
         if (pathfindingModule != null)
             pathfindingModule.reset();
@@ -1132,12 +1123,14 @@ public class TEAM_DEATHMATCHcontrol {
         }
 
         // --- VVVV 核心修改 VVVV ---
-        // 击杀发生后，清除所有目标和记忆。
+        // 击杀后清除选敌状态，但保留短暂的可靠威胁朝向，避免立刻背向交战区。
         this.primaryTarget = null;
         this.lastKnownPosition = null;
         this.soundPursuitGate.reset();
         this.locomotionFacingPolicy.reset();
-        this.corridorQueueHeld = false;
+        this.movementProgressWatchdog.reset(System.currentTimeMillis(), owner.position);
+        this.recoveryUntil = 0;
+        this.recoveryKeys = List.of();
         clearCoverCommitment();
         this.nextRangedCoverScanTime = System.currentTimeMillis() + rangedCoverScanPhaseMs;
 
@@ -1196,151 +1189,155 @@ public class TEAM_DEATHMATCHcontrol {
         // this.currentTdmWeapon.name()); // 调试
     }
 
-    /**
-     * 检查AI是否被队友卡住
-     * (因为撞墙已由 isWalkable() 提前阻止)
-     */
-    private boolean checkIfStuck(long currentTime) {
-        // 添加 owner 或 owner.position null 检查
-        if (owner == null || owner.position == null || pathfindingModule == null)
-            return false;
-
-        // 如果AI不应该移动，则不算卡住
-        if (currentState == AIState.IDLE || currentState == AIState.TAKING_COVER || owner.isReloading
-                || !pathfindingModule.isActive()) {
-            stuckCount = 0;
-            // 更新时间戳和位置，防止下次立即触发
-            lastStuckCheckTime = currentTime;
-            if (lastPositionForStuckCheck == null) { // 第一次初始化
-                lastPositionForStuckCheck = (Point2D.Double) owner.position.clone();
-            } else { // 正常更新
-                lastPositionForStuckCheck.setLocation(owner.position.x, owner.position.y);
-            }
-            return false;
-        }
-
-        // 检查是否到了检查时间
-        if (currentTime - lastStuckCheckTime > STUCK_CHECK_INTERVAL_MS) {
-            // 确保 lastPositionForStuckCheck 已初始化
-            if (lastPositionForStuckCheck == null) {
-                lastPositionForStuckCheck = (Point2D.Double) owner.position.clone();
-            }
-
-            // 关键：AI正在寻路(isActive)，但位置却没变
-            if (owner.position.distance(lastPositionForStuckCheck) < MIN_MOVEMENT_FOR_STUCK) {
-                stuckCount++;
-                if (stuckCount > 1) { // 连续1次(1.5秒)就触发
-                    return true; // 确认被队友卡住！
-                }
-            } else {
-                stuckCount = 0;
-            }
-
-            lastStuckCheckTime = currentTime;
-            lastPositionForStuckCheck.setLocation(owner.position.x, owner.position.y); // 更新位置
-        }
-        return false;
-    }
-
-    /**
-     * 执行主动避让队友的机动
-     */
-    private void performUnstuckManeuver(long currentTime) {
-        // 添加 gameState 或 owner null 检查
-        if (gameState == null || owner == null || owner.position == null || pathfindingModule == null)
+    private void updateReliableThreatMemory(long currentTime, boolean targetVisible) {
+        if (targetVisible && primaryTarget != null && primaryTarget.position != null) {
+            combatPosturePolicy.observeThreat(currentTime, primaryTarget.position,
+                    CombatPosturePolicy.ThreatEvidence.VISIBLE_ENEMY);
             return;
-
-        if (gameState.getIsAiFrozen())
-            return; // 添加冻结检查
-
-        if (logger != null) {
-            AiDiagnostics.trace("unstuck", logger,
-                    () -> "AI [" + owner.name + "] 被队友卡住! 执行侧向避让。");
         }
-
-        // 脱困只产生临时移动意图，不再修改或清空战略寻路目标。
-        // 这样侧移结束后会自然继续原路线，不会被“原任务”和“临时目标”来回拉扯。
-        this.unstuckUntil = currentTime + UNSTUCK_DURATION_MS;
-
-        // 计算一个随机的侧向目标点 (90度)
-        double currentAngle = Double.isNaN(owner.angle) ? 0.0 : owner.angle; // 处理 NaN
-        double dodgeAngle = currentAngle
-                + localAvoidancePlanner.chooseUnstuckSide(currentTime, owner.id) * Math.PI / 2;
-        double dodgeDist = 100.0;
-        // 确保计算出的点在地图内
-        int width = (gameState.width > 0) ? gameState.width : 1024;
-        int height = (gameState.height > 0) ? gameState.height : 1024;
-        double dodgeX = owner.position.x + Math.cos(dodgeAngle) * dodgeDist;
-        double dodgeY = owner.position.y + Math.sin(dodgeAngle) * dodgeDist;
-        dodgeX = Math.max(Player.SIZE, Math.min(width - Player.SIZE, dodgeX));
-        dodgeY = Math.max(Player.SIZE, Math.min(height - Player.SIZE, dodgeY));
-
-        this.unstuckTarget = new Point2D.Double(dodgeX, dodgeY);
-
-        // 重置计数器
-        stuckCount = 0;
-        lastStuckCheckTime = currentTime;
-        // 确保 lastPositionForStuckCheck 在下次检查前有效
-        if (lastPositionForStuckCheck == null) {
-            lastPositionForStuckCheck = (Point2D.Double) owner.position.clone();
-        } else {
-            lastPositionForStuckCheck.setLocation(owner.position.x, owner.position.y);
+        if (owner.lastDamageSourcePosition != null
+                && currentTime - owner.lastDamageSourcePositionTime <= CombatPosturePolicy.THREAT_MEMORY_MS) {
+            combatPosturePolicy.observeThreat(currentTime, owner.lastDamageSourcePosition,
+                    CombatPosturePolicy.ThreatEvidence.DAMAGE_SOURCE);
         }
     }
 
-    /**
-     * 检查并处理队友碰撞避让逻辑 (最高优先级)。
-     * 
-     * @param currentTime 当前时间戳
-     * @return 如果正在执行或刚触发了避让，则返回 AIInput；否则返回 null。
-     */
-    private AIInput handleTeammateAvoidance(long currentTime) {
-        // 添加 pathfindingModule null 检查
-        if (pathfindingModule == null)
-            return null;
-
-        // A. 检查是否正在执行避让
-        if (currentTime < unstuckUntil) {
-            if (unstuckTarget == null || owner.position.distanceSq(unstuckTarget) <= Player.SIZE * Player.SIZE) {
-                unstuckUntil = 0;
-                unstuckTarget = null;
-                return null;
+    private AIInput currentRecoveryInput(long currentTime) {
+        if (currentTime >= recoveryUntil) {
+            if (recoveryUntil > 0) {
+                recoveryUntil = 0;
+                recoveryKeys = List.of();
+                movementProgressWatchdog.reset(currentTime, owner.position);
             }
-            return createDirectMovementIntent(unstuckTarget);
-        }
-        else if (unstuckTarget != null) {
-            unstuckTarget = null;
             return null;
         }
-
-        // C. 检查是否 *刚刚* 被队友卡住了
-        if (checkIfStuck(currentTime)) {
-            performUnstuckManeuver(currentTime);
-            return unstuckTarget == null ? null : createDirectMovementIntent(unstuckTarget);
-        }
-
-        // D. 既没有在避让，也没有触发避让
-        return null; // 告诉主 update 逻辑继续正常执行
+        return new AIInput(recoveryKeys, angleForKeys(recoveryKeys, owner.angle), false, false, false);
     }
 
-    private AIInput createDirectMovementIntent(Point2D.Double target) {
-        if (target == null || owner == null || owner.position == null) {
+    private void beginMovementRecovery(long currentTime, MovementProgressWatchdog.Assessment progress) {
+        if (owner.position == null || pathfindingModule == null || currentTime < recoveryUntil) {
+            return;
+        }
+
+        double directionX = progress.intendedDirectionX();
+        double directionY = progress.intendedDirectionY();
+        Player blocker = findBlockingTeammate(directionX, directionY);
+        boolean blockerIsMoving = blocker != null && Math.hypot(blocker.vx, blocker.vy) > 0.15;
+        if (blockerIsMoving && compareStableId(owner.id, blocker.id) <= 0) {
+            // The same pair always grants the same bot right of way. It keeps its
+            // route; only the yielding bot performs a recovery movement.
+            movementProgressWatchdog.reset(currentTime, owner.position);
+            return;
+        }
+
+        recoveryKeys = chooseRecoveryKeys(directionX, directionY, blocker);
+        recoveryUntil = currentTime + RECOVERY_COMMIT_MS;
+        movementProgressWatchdog.reset(currentTime, owner.position);
+
+        if (blocker == null) {
+            pathfindingModule.requestRepath();
+        }
+        if (logger != null) {
+            String reason = blocker == null ? "path" : "teammate " + blocker.name;
+            AiDiagnostics.trace("unstuck", logger,
+                    () -> "AI [" + owner.name + "] movement made no progress; recovering from " + reason + ".");
+        }
+    }
+
+    private List<String> chooseRecoveryKeys(double directionX, double directionY, Player blocker) {
+        int stableSide = stableRecoverySide(owner.id, blocker == null ? null : blocker.id);
+        double firstX = stableSide * directionY;
+        double firstY = stableSide * -directionX;
+        double secondX = -firstX;
+        double secondY = -firstY;
+
+        if (isRecoveryPointWalkable(firstX, firstY)) {
+            return keysForDirection(firstX, firstY);
+        }
+        if (isRecoveryPointWalkable(secondX, secondY)) {
+            return keysForDirection(secondX, secondY);
+        }
+        if (isRecoveryPointWalkable(-directionX, -directionY)) {
+            return keysForDirection(-directionX, -directionY);
+        }
+        return List.of();
+    }
+
+    private boolean isRecoveryPointWalkable(double directionX, double directionY) {
+        if (Math.hypot(directionX, directionY) < 0.1) {
+            return false;
+        }
+        Point2D.Double candidate = new Point2D.Double(
+                owner.position.x + directionX * RECOVERY_STEP,
+                owner.position.y + directionY * RECOVERY_STEP);
+        return pathfindingModule.isWalkable(candidate);
+    }
+
+    private Player findBlockingTeammate(double directionX, double directionY) {
+        if (Math.hypot(directionX, directionY) < 0.1) {
             return null;
         }
-        double deltaX = target.x - owner.position.x;
-        double deltaY = target.y - owner.position.y;
+        Player nearest = null;
+        double nearestDistanceSq = Double.POSITIVE_INFINITY;
+        for (Player other : gameState.getPlayers()) {
+            if (other == null || other == owner || !other.isAlive() || other.team != owner.team
+                    || other.position == null) {
+                continue;
+            }
+            double relativeX = other.position.x - owner.position.x;
+            double relativeY = other.position.y - owner.position.y;
+            double distanceSq = relativeX * relativeX + relativeY * relativeY;
+            if (distanceSq >= TEAMMATE_BLOCK_RADIUS_SQ) {
+                continue;
+            }
+            double forward = relativeX * directionX + relativeY * directionY;
+            double lateral = Math.abs(relativeX * -directionY + relativeY * directionX);
+            if (forward > -Player.SIZE * 0.15 && lateral < Player.SIZE * 0.9
+                    && distanceSq < nearestDistanceSq) {
+                nearest = other;
+                nearestDistanceSq = distanceSq;
+            }
+        }
+        return nearest;
+    }
+
+    private double expectedMovementSpeedPerSecond(boolean walking) {
+        Weapon weapon = owner.getCurrentWeapon();
+        double movementPerSubstep = BASE_MOVEMENT_PER_SUBSTEP
+                * (weapon == null ? 1.0 : weapon.speedMultiplier);
+        if (walking) {
+            movementPerSubstep *= 0.5;
+        }
+        if (owner.isSlowed) {
+            movementPerSubstep *= 0.3;
+        }
+        return movementPerSubstep * LEGACY_MOVEMENT_SUBSTEPS_PER_SECOND;
+    }
+
+    private static int stableRecoverySide(String ownerId, String blockerId) {
+        String pair = String.valueOf(ownerId) + ':' + String.valueOf(blockerId);
+        return (pair.hashCode() & 1) == 0 ? -1 : 1;
+    }
+
+    private static List<String> keysForDirection(double x, double y) {
         List<String> keys = new ArrayList<>(2);
-        if (deltaY < -2.0) {
+        if (y < -0.25) {
             keys.add("W");
-        } else if (deltaY > 2.0) {
+        } else if (y > 0.25) {
             keys.add("S");
         }
-        if (deltaX < -2.0) {
+        if (x < -0.25) {
             keys.add("A");
-        } else if (deltaX > 2.0) {
+        } else if (x > 0.25) {
             keys.add("D");
         }
-        return new AIInput(keys, Math.atan2(deltaY, deltaX), false, false, false);
+        return keys;
+    }
+
+    private static double angleForKeys(List<String> keys, double fallback) {
+        double x = (keys.contains("D") ? 1.0 : 0.0) - (keys.contains("A") ? 1.0 : 0.0);
+        double y = (keys.contains("S") ? 1.0 : 0.0) - (keys.contains("W") ? 1.0 : 0.0);
+        return Math.hypot(x, y) > 0.0 ? Math.atan2(y, x) : fallback;
     }
 
     /**
@@ -1401,155 +1398,6 @@ public class TEAM_DEATHMATCHcontrol {
             // (int)rect.width + "," + (int)rect.height + "] 内找不到可行走的点！");
         }
         return null; // 明确返回 null 表示失败
-    }
-
-    /**
-     * 使用 GameState 的空间网格来计算主动的队友避让。
-     * 检查 AI 周围 3x3 的网格，如果发现近距离的队友，则计算一个“排斥”向量。
-     *
-     * @return 只包含环境事实的不可变观察；是否避让、往哪边避让由独立规划器决定。
-     */
-    private LocalAvoidancePlanner.Observation calculateProactiveAvoidanceObservation(List<String> baseKeys) {
-        // 1. 仅当 AI 正在寻路时才需要避让
-        if (pathfindingModule == null || !pathfindingModule.isActive() || gameState == null) {
-            return LocalAvoidancePlanner.Observation.clear();
-        }
-
-        // 2. 从 GameState 获取网格数据
-        List<Player>[][] grid = gameState.getSpatialGrid();
-        int cellSize = gameState.getGridCellSize();
-        int gridWidth = gameState.getGridWidth();
-        int gridHeight = gameState.getGridHeight();
-
-        // 3. 检查网格是否有效
-        if (grid == null || cellSize <= 0 || gridWidth == 0) {
-            return LocalAvoidancePlanner.Observation.clear();
-        }
-
-        // 4. 获取 AI 自己的位置和网格坐标
-        Point2D.Double myPos = owner.position;
-        double moveX = (baseKeys != null && baseKeys.contains("D") ? 1.0 : 0.0)
-                - (baseKeys != null && baseKeys.contains("A") ? 1.0 : 0.0);
-        double moveY = (baseKeys != null && baseKeys.contains("S") ? 1.0 : 0.0)
-                - (baseKeys != null && baseKeys.contains("W") ? 1.0 : 0.0);
-        double moveLength = Math.hypot(moveX, moveY);
-        if (moveLength < 0.1) {
-            return LocalAvoidancePlanner.Observation.clear();
-        }
-        moveX /= moveLength;
-        moveY /= moveLength;
-        int myGridX = (int) (myPos.x / cellSize);
-        int myGridY = (int) (myPos.y / cellSize);
-
-        Point2D.Double totalAvoidanceVector = new Point2D.Double(0, 0);
-        int neighborsFound = 0;
-        int yieldingNeighbors = 0;
-        boolean closeContact = false;
-
-        // 5. 遍历 AI 周围的 3x3 网格
-        for (int x = -1; x <= 1; x++) {
-            for (int y = -1; y <= 1; y++) {
-                int checkX = myGridX + x;
-                int checkY = myGridY + y;
-
-                // 确保检查的网格在边界内
-                if (checkX >= 0 && checkX < gridWidth && checkY >= 0 && checkY < gridHeight) {
-
-                    // 6. 遍历该网格中的所有玩家
-                    // 6. 遍历该网格中的所有玩家 (线程安全版)
-
-                    // 6.1. 获取原始列表的引用
-                    List<Player> playersInCell = grid[checkX][checkY];
-                    if (playersInCell == null) {
-                        continue;
-                    }
-
-                    // 6.2. 创建一个线程安全的“快照” (snapshot)
-                    List<Player> safeSnapshot;
-                    synchronized (playersInCell) { // <--- 使用与 GameState 相同的锁
-                        safeSnapshot = new ArrayList<>(playersInCell);
-                    }
-
-                    // 6.3. 遍历这个安全的快照，而不是原始列表
-                    for (Player other : safeSnapshot) {
-
-                        // 6.4 添加防御性检查，彻底解决 NPE
-                        if (other == null) {
-                            continue;
-                        }
-
-                        // 7. 过滤：不是自己、是队友、还活着 (现在 'other' 绝不为 null)
-                        if (other == owner || other.team != owner.team || !other.isAlive()) {
-                            continue;
-                        }
-
-                        double distSq = myPos.distanceSq(other.position);
-
-                        // 8. 检查是否在避让半径内 (AVOIDANCE_RADIUS_SQ = 36^2 = 1296)
-                        if (distSq < AVOIDANCE_RADIUS_SQ) {
-                            neighborsFound++;
-                            double relativeX = other.position.x - myPos.x;
-                            double relativeY = other.position.y - myPos.y;
-                            double forwardProjection = relativeX * moveX + relativeY * moveY;
-                            if (forwardProjection <= Player.SIZE * 0.12) {
-                                continue;
-                            }
-
-                            // 同向队列只有后方成员让路；迎面相遇时用稳定ID授予一方路权。
-                            double otherAlongMyRoute = other.vx * moveX + other.vy * moveY;
-                            boolean headOn = otherAlongMyRoute < -0.15;
-                            if (headOn && compareStableId(owner.id, other.id) <= 0) {
-                                continue;
-                            }
-                            yieldingNeighbors++;
-                            closeContact |= distSq < AVOIDANCE_RADIUS_SQ;
-                            double dist = Math.sqrt(distSq);
-                            double repulsionX, repulsionY;
-
-                            if (dist < 0.5) {
-                                // 如果完全重叠或极近，给一个基于 ID 的固定偏移推力，防止卡死或同频震荡
-                                double randomAngle = (owner.id.hashCode() % 100) * (Math.PI * 2 / 100.0);
-                                repulsionX = Math.cos(randomAngle);
-                                repulsionY = Math.sin(randomAngle);
-                                dist = 1.0;
-                            } else {
-                                repulsionX = myPos.x - other.position.x;
-                                repulsionY = myPos.y - other.position.y;
-                            }
-
-                            // 10. 施加权重：距离越近，"力" 越大
-                            double force = (AVOIDANCE_RADIUS - dist) / AVOIDANCE_RADIUS; // 线性衰减
-
-                            // 11. 累加总的排斥向量
-                            totalAvoidanceVector.x += (repulsionX / dist) * force;
-                            totalAvoidanceVector.y += (repulsionY / dist) * force;
-                        }
-                    }
-                }
-            }
-        }
-
-        double lateralStep = Player.SIZE * 1.45;
-        Point2D.Double negativeLateral;
-        Point2D.Double positiveLateral;
-        if (Math.abs(moveY) > Math.abs(moveX)) {
-            negativeLateral = new Point2D.Double(myPos.x - lateralStep, myPos.y); // A
-            positiveLateral = new Point2D.Double(myPos.x + lateralStep, myPos.y); // D
-        } else if (Math.abs(moveX) > Math.abs(moveY)) {
-            negativeLateral = new Point2D.Double(myPos.x, myPos.y - lateralStep); // W
-            positiveLateral = new Point2D.Double(myPos.x, myPos.y + lateralStep); // S
-        } else {
-            negativeLateral = new Point2D.Double(myPos.x + moveY * lateralStep,
-                    myPos.y - moveX * lateralStep);
-            positiveLateral = new Point2D.Double(myPos.x - moveY * lateralStep,
-                    myPos.y + moveX * lateralStep);
-        }
-        boolean negativeLateralClear = pathfindingModule.isWalkable(negativeLateral);
-        boolean positiveLateralClear = pathfindingModule.isWalkable(positiveLateral);
-
-        return new LocalAvoidancePlanner.Observation(totalAvoidanceVector.x, totalAvoidanceVector.y,
-                neighborsFound, yieldingNeighbors > 0, closeContact,
-                negativeLateralClear, positiveLateralClear);
     }
 
     private static int compareStableId(String left, String right) {

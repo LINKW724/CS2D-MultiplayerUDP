@@ -356,6 +356,18 @@ public class PathfindingModule {
         return this.targetPosition;
     }
 
+    /**
+     * Invalidates only the current local path. The authored route assignment and
+     * final tactical target remain intact and are recalculated on the next update.
+     */
+    public synchronized void requestRepath() {
+        if (this.targetPosition == null && !this.isFollowingPresetPath) {
+            return;
+        }
+        clearPath();
+        this.isActive = true;
+    }
+
     public synchronized String getAssignedPresetRouteId() {
         return assignedPresetRouteId;
     }
