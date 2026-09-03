@@ -20,7 +20,8 @@ public record TacticalOrder(
         long expiresAt,
         String taskId,
         Posture posture,
-        long postureCommitUntil) {
+        long postureCommitUntil,
+        LocomotionDirective locomotionDirective) {
 
     public TacticalOrder {
         allowedSoundTargetIds = allowedSoundTargetIds == null
@@ -33,6 +34,19 @@ public record TacticalOrder(
         taskId = taskId == null || taskId.isBlank() ? null : taskId;
         posture = posture == null ? Posture.STEALTH_ADVANCE : posture;
         postureCommitUntil = Math.max(0L, postureCommitUntil);
+        locomotionDirective = locomotionDirective == null
+                ? inferLocomotionDirective(taskType, routeId, movementTarget, preserveMapRoute)
+                : locomotionDirective;
+    }
+
+    /** Compatibility constructor preserving the former canonical signature. */
+    public TacticalOrder(String agentId, TaskType taskType, Role role, String routeId,
+            String supportTargetId, TeamTacticalSnapshot.Vec2 movementTarget, boolean preserveMapRoute,
+            double arrivalRadius, Set<String> allowedSoundTargetIds, double maxSoundResponseDistance,
+            double routeRisk, long expiresAt, String taskId, Posture posture, long postureCommitUntil) {
+        this(agentId, taskType, role, routeId, supportTargetId, movementTarget, preserveMapRoute,
+                arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance, routeRisk, expiresAt,
+                taskId, posture, postureCommitUntil, null);
     }
 
     /** Compatibility constructor used by existing coordinators and tests. */
@@ -42,7 +56,7 @@ public record TacticalOrder(
             double routeRisk, long expiresAt, String taskId) {
         this(agentId, taskType, role, routeId, supportTargetId, movementTarget, preserveMapRoute,
                 arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance, routeRisk, expiresAt,
-                taskId, defaultPosture(), 0L);
+                taskId, defaultPosture(), 0L, null);
     }
 
     /** Compatibility constructor for order-only coordinators. */
@@ -52,31 +66,32 @@ public record TacticalOrder(
             double routeRisk, long expiresAt) {
         this(agentId, taskType, role, routeId, supportTargetId, movementTarget, preserveMapRoute,
                 arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance, routeRisk, expiresAt,
-                null, defaultPosture(), 0L);
+                null, defaultPosture(), 0L, null);
     }
 
     public TacticalOrder withTaskId(String newTaskId) {
         return new TacticalOrder(agentId, taskType, role, routeId, supportTargetId, movementTarget,
                 preserveMapRoute, arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance,
-                routeRisk, expiresAt, newTaskId, posture, postureCommitUntil);
+                routeRisk, expiresAt, newTaskId, posture, postureCommitUntil, locomotionDirective);
     }
 
     public TacticalOrder withPosture(Posture newPosture, long commitUntil) {
         return new TacticalOrder(agentId, taskType, role, routeId, supportTargetId, movementTarget,
                 preserveMapRoute, arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance,
-                routeRisk, expiresAt, taskId, newPosture, commitUntil);
+                routeRisk, expiresAt, taskId, newPosture, commitUntil, locomotionDirective);
     }
 
     public TacticalOrder withMovementTarget(TeamTacticalSnapshot.Vec2 newMovementTarget) {
         return new TacticalOrder(agentId, taskType, role, routeId, supportTargetId, newMovementTarget,
                 preserveMapRoute, arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance,
-                routeRisk, expiresAt, taskId, posture, postureCommitUntil);
+                routeRisk, expiresAt, taskId, posture, postureCommitUntil,
+                inferLocomotionDirective(taskType, routeId, newMovementTarget, preserveMapRoute));
     }
 
     public TacticalOrder withExpiry(long newExpiresAt) {
         return new TacticalOrder(agentId, taskType, role, routeId, supportTargetId, movementTarget,
                 preserveMapRoute, arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance,
-                routeRisk, newExpiresAt, taskId, posture, postureCommitUntil);
+                routeRisk, newExpiresAt, taskId, posture, postureCommitUntil, locomotionDirective);
     }
 
     public boolean isActive(long now) {
@@ -116,6 +131,27 @@ public record TacticalOrder(
         RUSH,
         AMBUSH,
         ENGAGE
+    }
+
+    public enum LocomotionDirective {
+        FOLLOW_AUTHORED_ROUTE,
+        MOVE_TO_TARGET,
+        FREE_PATROL,
+        HOLD_POSITION
+    }
+
+    static LocomotionDirective inferLocomotionDirective(TaskType taskType, String routeId,
+            TeamTacticalSnapshot.Vec2 movementTarget, boolean preserveMapRoute) {
+        if (movementTarget != null) {
+            return preserveMapRoute && routeId != null && !routeId.isBlank()
+                    ? LocomotionDirective.FOLLOW_AUTHORED_ROUTE
+                    : LocomotionDirective.MOVE_TO_TARGET;
+        }
+        if (preserveMapRoute && routeId != null && !routeId.isBlank())
+            return LocomotionDirective.FOLLOW_AUTHORED_ROUTE;
+        return taskType == TaskType.CONTROL_ROUTE && (routeId == null || routeId.isBlank())
+                ? LocomotionDirective.FREE_PATROL
+                : LocomotionDirective.HOLD_POSITION;
     }
 
     private static Posture defaultPosture() {

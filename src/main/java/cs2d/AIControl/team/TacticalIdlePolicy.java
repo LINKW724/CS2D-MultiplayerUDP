@@ -17,7 +17,12 @@ public final class TacticalIdlePolicy {
 
         boolean activeOrder = order != null && order.isActive(now);
         boolean actionableOrder = activeOrder
-                && (order.movementTarget() != null || routeMovementInProgress);
+                && switch (order.locomotionDirective()) {
+                    case FOLLOW_AUTHORED_ROUTE -> order.movementTarget() != null || routeMovementInProgress;
+                    case MOVE_TO_TARGET -> order.movementTarget() != null;
+                    case FREE_PATROL -> true;
+                    case HOLD_POSITION -> false;
+                };
         return actionableOrder ? Decision.active() : Decision.ambush();
     }
 

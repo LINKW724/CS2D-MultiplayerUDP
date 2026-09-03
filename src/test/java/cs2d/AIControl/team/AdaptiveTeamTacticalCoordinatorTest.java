@@ -24,6 +24,18 @@ class AdaptiveTeamTacticalCoordinatorTest {
     private final AdaptiveTeamTacticalCoordinator coordinator = new AdaptiveTeamTacticalCoordinator();
 
     @Test
+    void mapWithoutAuthoredRoutesIssuesExplicitFreePatrolOrders() {
+        long now = 10_000L;
+        TeamTacticalSnapshot snapshot = new TeamTacticalSnapshot("CT", now, 2_000, 2_000,
+                List.of(), List.of(agent("bot-a", 100, 100, null, List.of())), List.of(), List.of());
+
+        TacticalOrder order = coordinator.coordinate(snapshot).get("bot-a");
+
+        assertEquals(TacticalOrder.LocomotionDirective.FREE_PATROL, order.locomotionDirective());
+        assertEquals(null, order.movementTarget());
+    }
+
+    @Test
     void bootstrapAssignsExplicitAuthoredRoutesAndEndpointsToWholeSpawnWave() {
         long now = 9_000L;
         AdaptiveTeamTacticalCoordinator bootstrapCoordinator = new AdaptiveTeamTacticalCoordinator(

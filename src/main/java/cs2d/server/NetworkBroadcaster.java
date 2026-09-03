@@ -21,7 +21,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.zip.GZIPOutputStream;
@@ -39,9 +38,9 @@ public class NetworkBroadcaster {
     private final Gson gson = new Gson();
     private final String sessionId;
     private final AtomicLong sequenceCounter = new AtomicLong();
-    private final AtomicReference<BroadcastJob> pendingBroadcast = new AtomicReference<>();
+    private final BroadcastAccumulator pendingBroadcast = new BroadcastAccumulator();
+    private final TransientEventJournal transientEventJournal = new TransientEventJournal();
     private final AtomicBoolean broadcastWorkerRunning = new AtomicBoolean(false);
-    private final LongAdder coalescedBroadcasts = new LongAdder();
     private final ExecutorService broadcastExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "Server-Network-Broadcaster");
         thread.setDaemon(true);
@@ -64,9 +63,6 @@ public class NetworkBroadcaster {
     private volatile double perfTimeChunkPreparation = 0.0;
     private volatile double perfTimeParallelSend = 0.0;
     private volatile double perfTimeSnapshotCapture = 0.0;
-
-    private record BroadcastJob(JsonObject state, List<InetSocketAddress> recipients, boolean forcedFull) {
-    }
 
     public NetworkBroadcaster(GameState gameState, Consumer<String> logger, String sessionId) {
         this.gameState = gameState;
@@ -99,9 +95,10 @@ public class NetworkBroadcaster {
             JsonObject state = forcedFull || currentSnapshot % FULL_UPDATE_EVERY_SNAPSHOTS == 0
                     ? gameState.getFullUpdateJson()
                     : gameState.getSmallUpdateJson();
+            transientEventJournal.captureAndReplay(state, System.currentTimeMillis());
             decorateState(state, serverTick);
             List<InetSocketAddress> recipients = List.copyOf(addressToPlayerId.keySet());
-            enqueueLatest(new BroadcastJob(state, recipients, forcedFull));
+            enqueueLatest(new BroadcastAccumulator.Job(state, recipients, forcedFull));
         } catch (RuntimeException e) {
             logger.accept("[Broadcaster] 捕获世界快照失败: " + e);
         } finally {
@@ -109,13 +106,8 @@ public class NetworkBroadcaster {
         }
     }
 
-    private void enqueueLatest(BroadcastJob job) {
-        BroadcastJob existing = pendingBroadcast.get();
-        if (shouldPreservePendingForcedFull(existing != null && existing.forcedFull(), job.forcedFull()))
-            return;
-        BroadcastJob replaced = pendingBroadcast.getAndSet(job);
-        if (replaced != null)
-            coalescedBroadcasts.increment();
+    private void enqueueLatest(BroadcastAccumulator.Job job) {
+        pendingBroadcast.offer(job);
         ensureBroadcastWorkerRunning();
     }
 
@@ -135,17 +127,17 @@ public class NetworkBroadcaster {
 
     private void drainLatestBroadcasts() {
         try {
-            BroadcastJob job;
-            while ((job = pendingBroadcast.getAndSet(null)) != null)
+            BroadcastAccumulator.Job job;
+            while ((job = pendingBroadcast.poll()) != null)
                 serializeAndSend(job);
         } finally {
             broadcastWorkerRunning.set(false);
-            if (pendingBroadcast.get() != null)
+            if (pendingBroadcast.hasPending())
                 ensureBroadcastWorkerRunning();
         }
     }
 
-    private void serializeAndSend(BroadcastJob job) {
+    private void serializeAndSend(BroadcastAccumulator.Job job) {
         long cycleStartedAt = System.nanoTime();
         try {
             long stepStartedAt = cycleStartedAt;
@@ -278,7 +270,7 @@ public class NetworkBroadcaster {
     }
 
     public void shutdown() {
-        pendingBroadcast.set(null);
+        pendingBroadcast.clear();
         broadcastExecutor.shutdownNow();
     }
 
@@ -287,5 +279,5 @@ public class NetworkBroadcaster {
     public double getPerfTimeChunkPreparation() { return perfTimeChunkPreparation; }
     public double getPerfTimeParallelSend() { return perfTimeParallelSend; }
     public double getPerfTimeSnapshotCapture() { return perfTimeSnapshotCapture; }
-    public long getAndResetCoalescedBroadcasts() { return coalescedBroadcasts.sumThenReset(); }
+    public long getAndResetCoalescedBroadcasts() { return pendingBroadcast.coalescedThenReset(); }
 }

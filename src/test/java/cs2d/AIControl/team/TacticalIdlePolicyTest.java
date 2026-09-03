@@ -34,6 +34,15 @@ class TacticalIdlePolicyTest {
         assertEquals(Decision.active(), policy.decide(null, 1_000L, true, false));
     }
 
+    @Test
+    void unroutedControlOrderExplicitlyEnablesFreePatrol() {
+        TacticalOrder unrouted = new TacticalOrder("bot", TaskType.CONTROL_ROUTE, Role.FREE,
+                null, null, null, false, 100.0, Set.of(), 0.0, 0.0, 2_000L, "patrol");
+
+        assertEquals(TacticalOrder.LocomotionDirective.FREE_PATROL, unrouted.locomotionDirective());
+        assertEquals(Decision.active(), policy.decide(unrouted, 1_000L, false, false));
+    }
+
     private static TacticalOrder order(Vec2 target, long expiresAt) {
         return new TacticalOrder("bot", TaskType.ADVANCE, Role.ENTRY, "route", null,
                 target, true, 100.0, Set.of(), 0.0, 0.0, expiresAt, "task");

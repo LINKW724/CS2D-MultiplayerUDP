@@ -18,6 +18,8 @@ import cs2d.AIControl.movement.MovementDecision;
 import cs2d.AIControl.movement.MovementIntent;
 import cs2d.AIControl.movement.MovementProgressWatchdog;
 import cs2d.AIControl.movement.QuadtreeCoverGeometryProbe;
+import cs2d.AIControl.movement.PatrolTargetProvider;
+import cs2d.AIControl.movement.WalkablePatrolTargetProvider;
 import cs2d.AIControl.team.TacticalOrder;
 import cs2d.AIControl.team.TacticalIdlePolicy;
 import cs2d.AIControl.team.TacticalPostureExecutionPolicy;
@@ -74,6 +76,7 @@ public class TEAM_DEATHMATCHcontrol {
     private final LocomotionFacingPolicy locomotionFacingPolicy = new LocomotionFacingPolicy();
     private final CombatPosturePolicy combatPosturePolicy = new CombatPosturePolicy();
     private final TacticalIdlePolicy tacticalIdlePolicy = new TacticalIdlePolicy();
+    private final PatrolTargetProvider patrolTargetProvider;
     private final TacticalPostureExecutionPolicy tacticalPostureExecutionPolicy =
             new TacticalPostureExecutionPolicy();
     private Point2D.Double committedCoverPoint;
@@ -166,6 +169,7 @@ public class TEAM_DEATHMATCHcontrol {
         // --- 新增：初始化 GrenadeModule ---
         // 确保 rand 已经初始化
         this.rand = new Random(); // 如果之前没有初始化，在这里初始化
+        this.patrolTargetProvider = new WalkablePatrolTargetProvider(owner.id);
         // 假设 owner.getPathfindingModule().pathfinder 可以获取到 Pathfinder 实例
         if (owner.getPathfindingModule() == null || owner.getPathfindingModule().pathfinder == null) {
             throw new IllegalStateException(
@@ -580,7 +584,11 @@ public class TEAM_DEATHMATCHcontrol {
                     break;
                 case PATROLLING:
                     if (!pathfindingModule.isActive() && (currentTime - lastPathRecalculationTime > 3000)) {
-                        pathfindingModule.setTarget(findPatrolPoint()); // 这个点保证是可走的
+                        int width = gameState != null && gameState.width > 0 ? gameState.width : 1024;
+                        int height = gameState != null && gameState.height > 0 ? gameState.height : 1024;
+                        PatrolTargetProvider.PatrolContext patrolContext = new PatrolTargetProvider.PatrolContext(
+                                owner.id, owner.position, width, height, pathfindingModule::isWalkable);
+                        patrolTargetProvider.nextTarget(patrolContext).ifPresent(pathfindingModule::setTarget);
                         lastPathRecalculationTime = currentTime;
                     }
                     break;
@@ -893,35 +901,6 @@ public class TEAM_DEATHMATCHcontrol {
         Vec2 target = order.movementTarget();
         double radius = Math.max(20.0, order.arrivalRadius());
         return owner.position.distanceSq(target.x(), target.y()) <= radius * radius;
-    }
-
-    /**
-     * 寻找一个随机的巡逻点。
-     */
-    private Point2D.Double findPatrolPoint() {
-        // 添加 gameState null 检查
-        int width = (gameState != null && gameState.width > 0) ? gameState.width : 1024;
-        int height = (gameState != null && gameState.height > 0) ? gameState.height : 1024;
-
-        // 如果寻路模块不可用，直接返回随机点
-        if (pathfindingModule == null || pathfindingModule.pathfinder == null) {
-            return new Point2D.Double(rand.nextInt(width), rand.nextInt(height));
-        }
-
-        int attempts = 0;
-        final int MAX_ATTEMPTS = 10;
-        while (attempts < MAX_ATTEMPTS) {
-            Point2D.Double candidate = new Point2D.Double(
-                    rand.nextInt(width),
-                    rand.nextInt(height));
-            // pathfindingModule.isWalkable 现在是 public
-            if (pathfindingModule.isWalkable(candidate)) {
-                return candidate;
-            }
-            attempts++;
-        }
-        // 多次尝试失败，返回随机点
-        return new Point2D.Double(rand.nextInt(width), rand.nextInt(height));
     }
 
     /**
