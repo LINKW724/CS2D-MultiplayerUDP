@@ -73,6 +73,12 @@ public record TacticalOrder(
                 routeRisk, expiresAt, taskId, posture, postureCommitUntil);
     }
 
+    public TacticalOrder withExpiry(long newExpiresAt) {
+        return new TacticalOrder(agentId, taskType, role, routeId, supportTargetId, movementTarget,
+                preserveMapRoute, arrivalRadius, allowedSoundTargetIds, maxSoundResponseDistance,
+                routeRisk, newExpiresAt, taskId, posture, postureCommitUntil);
+    }
+
     public boolean isActive(long now) {
         return expiresAt <= 0 || now <= expiresAt;
     }

@@ -2,6 +2,7 @@ package cs2d.AIControl.team;
 
 import cs2d.AIControl.team.TacticalOrder.Role;
 import cs2d.AIControl.team.TacticalOrder.TaskType;
+import cs2d.AIControl.team.TacticalOrder.Posture;
 import cs2d.AIControl.team.TacticalTask.EngagementRule;
 import cs2d.AIControl.team.TeamTacticalSnapshot.AgentSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.RouteSnapshot;
@@ -122,7 +123,7 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
             TacticalOrder base = orders.get(agent.id());
             Role role = i == 0 ? Role.ENTRY : Role.SUPPORT;
             orders.put(agent.id(), reassign(base, TaskType.ADVANCE, role, route.routeId(),
-                    target, true, 180.0, taskId, expiresAt));
+                    target, true, 180.0, taskId, expiresAt, Posture.RUSH));
         }
         return mergePlan(basePlan, orders, List.of(task));
     }
@@ -223,9 +224,17 @@ public final class ElasticManeuverRefiner implements TacticalPlanRefiner {
     private static TacticalOrder reassign(TacticalOrder base, TaskType taskType, Role role,
             String routeId, Vec2 target, boolean preserveMapRoute, double arrivalRadius,
             String taskId, long expiresAt) {
+        return reassign(base, taskType, role, routeId, target, preserveMapRoute,
+                arrivalRadius, taskId, expiresAt, Posture.STEALTH_ADVANCE);
+    }
+
+    private static TacticalOrder reassign(TacticalOrder base, TaskType taskType, Role role,
+            String routeId, Vec2 target, boolean preserveMapRoute, double arrivalRadius,
+            String taskId, long expiresAt, Posture posture) {
         double routeRisk = base == null ? 0.0 : base.routeRisk();
         return new TacticalOrder(base == null ? null : base.agentId(), taskType, role, routeId, null,
-                target, preserveMapRoute, arrivalRadius, Set.of(), 0.0, routeRisk, expiresAt, taskId);
+                target, preserveMapRoute, arrivalRadius, Set.of(), 0.0, routeRisk, expiresAt, taskId,
+                posture, 0L);
     }
 
     private static boolean isManeuverEligible(TacticalOrder order) {

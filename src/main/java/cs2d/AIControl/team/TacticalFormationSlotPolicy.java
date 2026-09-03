@@ -14,6 +14,7 @@ import java.util.Map;
 public final class TacticalFormationSlotPolicy {
 
     private static final double SLOT_SPACING = 46.0;
+    private final Map<SlotKey, Integer> stableSlots = new HashMap<>();
 
     public Map<String, TacticalOrder> assign(Map<String, TacticalOrder> orders,
             TeamTacticalSnapshot snapshot) {
@@ -28,6 +29,7 @@ public final class TacticalFormationSlotPolicy {
             }
         }
 
+        String teamId = snapshot.teamId() == null ? "" : snapshot.teamId();
         Map<String, List<TacticalOrder>> groups = new LinkedHashMap<>();
         for (TacticalOrder order : orders.values()) {
             if (order == null || order.agentId() == null) {
@@ -38,21 +40,53 @@ public final class TacticalFormationSlotPolicy {
         }
 
         Map<String, TacticalOrder> result = new LinkedHashMap<>();
-        for (List<TacticalOrder> group : groups.values()) {
+        java.util.Set<SlotKey> activeSlotKeys = new java.util.HashSet<>();
+        for (Map.Entry<String, List<TacticalOrder>> entry : groups.entrySet()) {
+            String groupId = entry.getKey();
+            List<TacticalOrder> group = entry.getValue();
             group.sort(Comparator.comparing(TacticalOrder::agentId));
             TacticalOrder representative = group.get(0);
             RouteSnapshot route = routes.get(representative.routeId());
             boolean routeSlots = group.size() > 1 && representative.preserveMapRoute()
                     && representative.movementTarget() != null && route != null;
-            for (int i = 0; i < group.size(); i++) {
-                TacticalOrder order = group.get(i);
+            java.util.Set<Integer> usedSlots = new java.util.HashSet<>();
+            if (routeSlots) {
+                for (TacticalOrder order : group) {
+                    SlotKey key = new SlotKey(teamId, groupId, order.agentId());
+                    Integer existing = stableSlots.get(key);
+                    if (existing != null) {
+                        usedSlots.add(existing);
+                    }
+                }
+            }
+            for (TacticalOrder order : group) {
+                int slotIndex = 0;
+                SlotKey key = new SlotKey(teamId, groupId, order.agentId());
+                if (routeSlots) {
+                    Integer existing = stableSlots.get(key);
+                    if (existing == null) {
+                        while (usedSlots.contains(slotIndex)) {
+                            slotIndex++;
+                        }
+                        stableSlots.put(key, slotIndex);
+                        usedSlots.add(slotIndex);
+                    } else {
+                        slotIndex = existing;
+                    }
+                    activeSlotKeys.add(key);
+                }
                 Vec2 slot = routeSlots
-                        ? pointBehind(route.keyPoints(), order.movementTarget(), i * SLOT_SPACING)
+                        ? pointBehind(route.keyPoints(), order.movementTarget(), slotIndex * SLOT_SPACING)
                         : order.movementTarget();
                 result.put(order.agentId(), order.withMovementTarget(slot));
             }
         }
+        stableSlots.keySet().removeIf(key -> key.teamId().equals(teamId) && !activeSlotKeys.contains(key));
         return Map.copyOf(result);
+    }
+
+    public void clear() {
+        stableSlots.clear();
     }
 
     private static Vec2 pointBehind(List<Vec2> points, Vec2 target, double offset) {
@@ -106,5 +140,8 @@ public final class TacticalFormationSlotPolicy {
 
     private static double square(double value) {
         return value * value;
+    }
+
+    private record SlotKey(String teamId, String groupId, String agentId) {
     }
 }

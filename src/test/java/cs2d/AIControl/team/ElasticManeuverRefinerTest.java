@@ -1,6 +1,7 @@
 package cs2d.AIControl.team;
 
 import cs2d.AIControl.team.TacticalOrder.TaskType;
+import cs2d.AIControl.team.TacticalOrder.Posture;
 import cs2d.AIControl.team.TeamTacticalSnapshot.AgentSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.ContactSnapshot;
 import cs2d.AIControl.team.TeamTacticalSnapshot.ContactType;
@@ -149,6 +150,9 @@ class ElasticManeuverRefinerTest {
         assertEquals(5, wave.maximumAgents());
         assertEquals(3, refined.orders().values().stream()
                 .filter(order -> wave.taskId().equals(order.taskId())).count());
+        assertTrue(refined.orders().values().stream()
+                .filter(order -> wave.taskId().equals(order.taskId()))
+                .allMatch(order -> order.posture() == Posture.RUSH));
     }
 
     private static TeamTacticalSnapshot snapshot(long now, List<RouteSnapshot> routes,

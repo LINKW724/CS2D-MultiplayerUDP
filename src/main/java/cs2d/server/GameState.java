@@ -1179,6 +1179,7 @@ public class GameState {
                         p.keysDown.addAll(latestInput.keys());
                         p.angle = latestInput.angle();
                         p.isShooting = latestInput.shooting();
+                        p.isWalking = latestInput.walking();
                         // 在这里处理来自AI的交互请求
                         boolean isRequestingInteraction = latestInput.isRequestingInteraction();
                         // 如果AI想要交互，而服务器当前认为它没有在交互
@@ -1200,6 +1201,7 @@ public class GameState {
                 if (p.isAI && !p.isControlledByPlayer()) {
                     p.keysDown.clear();
                     p.isShooting = false;
+                    p.isWalking = false;
                     p.ax = 0;
                     p.ay = 0;
                     p.vx = 0;

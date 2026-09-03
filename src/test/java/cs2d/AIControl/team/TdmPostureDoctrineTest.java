@@ -15,17 +15,26 @@ class TdmPostureDoctrineTest {
     private final TdmPostureDoctrine doctrine = new TdmPostureDoctrine();
 
     @Test
-    void onlyEntryAdvanceRushes() {
-        assertEquals(Posture.RUSH, doctrine.choose(order(TaskType.ADVANCE, Role.ENTRY)));
+    void onlyExplicitAdvanceRushes() {
+        assertEquals(Posture.STEALTH_ADVANCE,
+                doctrine.choose(order(TaskType.ADVANCE, Role.ENTRY, Posture.STEALTH_ADVANCE)));
+        assertEquals(Posture.RUSH,
+                doctrine.choose(order(TaskType.ADVANCE, Role.ENTRY, Posture.RUSH)));
         assertEquals(Posture.STEALTH_ADVANCE, doctrine.choose(order(TaskType.ADVANCE, Role.SUPPORT)));
         assertEquals(Posture.STEALTH_ADVANCE,
                 doctrine.choose(order(TaskType.RESPOND_TO_CONTACT, Role.SUPPORT)));
+        assertEquals(Posture.STEALTH_ADVANCE,
+                doctrine.choose(order(TaskType.RESPOND_TO_CONTACT, Role.SUPPORT, Posture.RUSH)));
         assertEquals(Posture.STEALTH_ADVANCE, doctrine.choose(order(TaskType.FLANK, Role.FLANKER)));
     }
 
     private static TacticalOrder order(TaskType taskType, Role role) {
+        return order(taskType, role, Posture.STEALTH_ADVANCE);
+    }
+
+    private static TacticalOrder order(TaskType taskType, Role role, Posture posture) {
         return new TacticalOrder("bot", taskType, role, "route-a", null,
                 new Vec2(500, 0), true, 100.0, Set.of(), 0.0, 0.0,
-                2_000L, "task");
+                2_000L, "task", posture, 0L);
     }
 }

@@ -7,9 +7,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Keeps a commander's posture decision stable while still allowing the plan to
- * refresh objectives at a lower level. This class owns no movement or combat
- * implementation details.
+ * Keeps the complete commander intent stable for a short execution window.
+ * Replanning may refresh the order lifetime, but cannot flip route, objective,
+ * formation slot or posture until the current commitment expires. This class
+ * owns no movement or combat implementation details.
  */
 public final class TacticalPostureCommitmentBoard {
 
@@ -29,21 +30,25 @@ public final class TacticalPostureCommitmentBoard {
                 .forEach(order -> {
                     String key = teamKey + ':' + order.agentId();
                     Commitment previous = commitments.get(key);
-                    Posture proposedPosture = order.posture();
-                    Posture acceptedPosture = proposedPosture;
+                    TacticalOrder acceptedOrder;
                     long commitUntil;
 
-                    if (previous != null && now < previous.commitUntil()
-                            && proposedPosture != Posture.ENGAGE
-                            && !isSafetyDowngrade(previous.posture(), proposedPosture)) {
-                        acceptedPosture = previous.posture();
+                    if (previous != null && now < previous.commitUntil()) {
                         commitUntil = previous.commitUntil();
+                        Posture acceptedPosture = isSafetyDowngrade(
+                                previous.order().posture(), order.posture())
+                                ? order.posture()
+                                : previous.order().posture();
+                        acceptedOrder = previous.order()
+                                .withExpiry(order.expiresAt())
+                                .withPosture(acceptedPosture, commitUntil);
                     } else {
                         commitUntil = now + commitmentDuration(order);
+                        acceptedOrder = order.withPosture(order.posture(), commitUntil);
                     }
 
-                    commitments.put(key, new Commitment(acceptedPosture, commitUntil));
-                    result.put(order.agentId(), order.withPosture(acceptedPosture, commitUntil));
+                    commitments.put(key, new Commitment(acceptedOrder, commitUntil));
+                    result.put(order.agentId(), acceptedOrder);
                 });
 
         commitments.keySet().removeIf(key -> key.startsWith(teamKey + ':')
@@ -75,6 +80,6 @@ public final class TacticalPostureCommitmentBoard {
         };
     }
 
-    private record Commitment(Posture posture, long commitUntil) {
+    private record Commitment(TacticalOrder order, long commitUntil) {
     }
 }

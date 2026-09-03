@@ -39,6 +39,27 @@ class TacticalFormationSlotPolicyTest {
         assertNotEquals(slotted.get("a").movementTarget(), slotted.get("b").movementTarget());
     }
 
+    @Test
+    void survivingAgentsKeepTheirSlotsWhenAnEarlierAgentLeaves() {
+        TacticalFormationSlotPolicy policy = new TacticalFormationSlotPolicy();
+        long now = 1_000L;
+        RouteSnapshot route = new RouteSnapshot("route-a", "TDM_CT_T",
+                List.of(new Vec2(0, 0), new Vec2(500, 0), new Vec2(1_000, 0)),
+                1_000.0, 4, List.of());
+        TeamTacticalSnapshot firstSnapshot = new TeamTacticalSnapshot("CT", now, 1_600, 900,
+                List.of(route), List.of(agent("a"), agent("b"), agent("c")), List.of(), List.of());
+        Map<String, TacticalOrder> first = policy.assign(Map.of(
+                "a", order("a", now), "b", order("b", now), "c", order("c", now)), firstSnapshot);
+
+        TeamTacticalSnapshot secondSnapshot = new TeamTacticalSnapshot("CT", now + 250L, 1_600, 900,
+                List.of(route), List.of(agent("b"), agent("c")), List.of(), List.of());
+        Map<String, TacticalOrder> second = policy.assign(Map.of(
+                "b", order("b", now + 250L), "c", order("c", now + 250L)), secondSnapshot);
+
+        assertEquals(first.get("b").movementTarget(), second.get("b").movementTarget());
+        assertEquals(first.get("c").movementTarget(), second.get("c").movementTarget());
+    }
+
     private static TacticalOrder order(String id, long now) {
         return new TacticalOrder(id, TaskType.ADVANCE, Role.ENTRY, "route-a", null,
                 new Vec2(1_000, 0), true, 180.0, Set.of(), 0.0, 0.0,

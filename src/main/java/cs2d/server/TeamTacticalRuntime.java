@@ -112,6 +112,7 @@ final class TeamTacticalRuntime implements TacticalOrderProvider {
     void clear() {
         recentContacts.clear();
         taskBoard.clear();
+        formationSlotPolicy.clear();
         postureCommitmentBoard.clear();
         orders = Map.of();
         lastPlanTime = 0L;
