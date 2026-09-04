@@ -30,6 +30,7 @@ public class GameSettings {
     private static final DoubleProperty aimLineOpacity = new SimpleDoubleProperty(0.7);
     private static final IntegerProperty maxKillFeedEntries = new SimpleIntegerProperty(5);
     private static final DoubleProperty fogDarkness = new SimpleDoubleProperty(DEFAULT_FOG_DARKNESS);
+    private static final DamageNumberModePolicy damageNumberModePolicy = new DamageNumberModePolicy();
 
     private static final BooleanProperty mouseWheelZoomEnabled = new SimpleBooleanProperty(true); // 新增：鼠标滚轮缩放开关
     private static final DoubleProperty followZoomFactor = new SimpleDoubleProperty(1.0);
@@ -141,6 +142,18 @@ public class GameSettings {
         return Math.max(MIN_FOG_DARKNESS, Math.min(MAX_FOG_DARKNESS, darkness));
     }
 
+    public boolean isDamageNumbersEnabledFor(String gameMode) {
+        return damageNumberModePolicy.isEnabledFor(gameMode);
+    }
+
+    public BooleanProperty damageNumbersEnabledProperty(String gameMode) {
+        return damageNumberModePolicy.enabledProperty(gameMode);
+    }
+
+    public void setDamageNumbersEnabled(String gameMode, boolean enabled) {
+        damageNumberModePolicy.setEnabled(gameMode, enabled);
+    }
+
     public static double getFollowZoomFactor() {
         return followZoomFactor.get();
     }
@@ -173,6 +186,7 @@ public class GameSettings {
         json.addProperty("followZoomFactor", getFollowZoomFactor());
         json.addProperty("maxKillFeedEntries", maxKillFeedEntries.get());
         json.addProperty("fogDarkness", fogDarkness.get());
+        json.add("damageNumbers", damageNumberModePolicy.toJson());
         return json;
     }
 
@@ -221,6 +235,9 @@ public class GameSettings {
             }
             if (json.has("fogDarkness")) {
                 setFogDarkness(json.get("fogDarkness").getAsDouble());
+            }
+            if (json.has("damageNumbers") && json.get("damageNumbers").isJsonObject()) {
+                damageNumberModePolicy.fromJson(json.getAsJsonObject("damageNumbers"));
             }
         } catch (Exception e) {
             System.err.println("从JSON文件加载设置时出错: " + e.getMessage() + "。将使用默认值。");

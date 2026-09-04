@@ -26,6 +26,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GameClientProtocolTest {
     @Test
+    void damageFeedbackAcceptsLocalPlayerAndControlledBotOnly() {
+        assertTrue(GameClient.matchesLocalCombatAttacker("player-1", "player-1", null));
+        assertTrue(GameClient.matchesLocalCombatAttacker("bot-7", "player-1", "bot-7"));
+        assertFalse(GameClient.matchesLocalCombatAttacker("bot-8", "player-1", "bot-7"));
+        assertFalse(GameClient.matchesLocalCombatAttacker("", "player-1", "bot-7"));
+    }
+
+    @Test
     void smokePuffsArePublishedAsOneCompleteSnapshot() {
         JsonArray first = new JsonArray();
         JsonObject puffA = new JsonObject();

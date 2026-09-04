@@ -1,6 +1,8 @@
 package cs2d.client;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -59,6 +61,29 @@ class GameSettingsTest {
             assertEquals(0.42, GameSettings.toJson().get("fogDarkness").getAsDouble(), 0.000_001);
         } finally {
             settings.setFogDarkness(original);
+        }
+    }
+
+    @Test
+    void persistsDamageNumberModesAsAnExtensibleNestedSetting() {
+        GameSettings settings = new GameSettings();
+        JsonObject original = GameSettings.toJson().getAsJsonObject("damageNumbers").deepCopy();
+        try {
+            settings.setDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, false);
+            settings.setDamageNumbersEnabled("TEAM_DEATHMATCH", true);
+
+            JsonObject saved = GameSettings.toJson();
+            assertFalse(settings.isDamageNumbersEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
+            assertTrue(saved.getAsJsonObject("damageNumbers")
+                    .getAsJsonArray("enabledModes").contains(new com.google.gson.JsonPrimitive("TEAM_DEATHMATCH")));
+
+            settings.setDamageNumbersEnabled("TEAM_DEATHMATCH", false);
+            settings.fromJson(saved);
+            assertTrue(settings.isDamageNumbersEnabledFor("TEAM_DEATHMATCH"));
+        } finally {
+            JsonObject restore = new JsonObject();
+            restore.add("damageNumbers", original);
+            settings.fromJson(restore);
         }
     }
 }

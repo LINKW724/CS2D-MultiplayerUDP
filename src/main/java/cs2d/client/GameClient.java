@@ -637,6 +637,7 @@ public class GameClient extends Application {
     // --- 游戏设置 ---
     // 存储游戏设置的对象
     private final GameSettings gameSettings = new GameSettings();
+    private final DamageNumberSystem damageNumberSystem = new DamageNumberSystem();
     /** 记录上次收到服务器消息的纳秒时间戳，用于看门狗检测 */
     private volatile long lastServerMessageTime = System.nanoTime();
 
@@ -1044,6 +1045,7 @@ public class GameClient extends Application {
             fireEmitters.clear();
             processedKillFeedIds.clear();
             currentDamageLogEntries.clear();
+            damageNumberSystem.clear();
             keysDown.clear();
 
             // 停止并清理循环音效
@@ -1124,6 +1126,7 @@ public class GameClient extends Application {
             this.socket.close();
         }
         this.mapData = null;
+        this.damageNumberSystem.clear();
         this.serverSessionId = null;
         this.initializedMapSignature = null;
         this.obstacleCacheTiles.clear();
@@ -1390,6 +1393,7 @@ public class GameClient extends Application {
             fireEmitters.clear();
             processedKillFeedIds.clear();
             currentDamageLogEntries.clear();
+            damageNumberSystem.clear();
 
             myPlayerId = null; // 关键：必须重置
             me = null;
@@ -1480,6 +1484,7 @@ public class GameClient extends Application {
                     System.err.println("[CLIENT DEBUG] ERROR: Handling 'map_data' but received null JSON!");
                 }
                 this.mapData = json; // 更新本地地图数据
+                damageNumberSystem.clear();
                 cancelStaticDataRequests();
                 initializeQuadtree();
                 initializedMapSignature = incomingMapSignature;
@@ -1704,6 +1709,7 @@ public class GameClient extends Application {
 
                     if (payload != null && "damage_event".equals(getString(payload, "type"))) {
                         currentDamageLogEntries.add(payload);
+                        handleDamageNumberPayload(payload);
 
                         // [核心新增] 本地同步更新伤害和命中统计
                         if (me != null && me.data != null) {
@@ -1784,6 +1790,53 @@ public class GameClient extends Application {
             return true;
         }
         return transientEventDeduplicator.accept(event.get("eventId").getAsLong());
+    }
+
+    private void handleDamageNumberPayload(JsonObject payload) {
+        String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
+        int damage = getInt(payload, "dmg");
+        if (damage <= 0 || !gameSettings.isDamageNumbersEnabledFor(mode)
+                || !isLocalCombatAttacker(getString(payload, "atk"))) {
+            return;
+        }
+
+        Point2D hitPosition = resolveDamageNumberPosition(payload);
+        if (hitPosition == null) {
+            return;
+        }
+        damageNumberSystem.add(new DamageNumberEvent(
+                getString(payload, "vic"), damage, getBool(payload, "hs"),
+                hitPosition.getX(), hitPosition.getY(), getLong(payload, "ts")));
+    }
+
+    private boolean isLocalCombatAttacker(String attackerId) {
+        String controlledBotId = me != null && me.data != null
+                && "CONTROLLING_BOT".equals(getString(me.data, "spectatorMode"))
+                        ? getString(me.data, "spectatorTargetId")
+                        : null;
+        return matchesLocalCombatAttacker(attackerId, myPlayerId, controlledBotId);
+    }
+
+    static boolean matchesLocalCombatAttacker(String attackerId, String localPlayerId, String controlledBotId) {
+        return attackerId != null && !attackerId.isBlank()
+                && (attackerId.equals(localPlayerId) || attackerId.equals(controlledBotId));
+    }
+
+    private Point2D resolveDamageNumberPosition(JsonObject payload) {
+        if (payload.has("hitX") && payload.has("hitY")) {
+            double hitX = getDouble(payload, "hitX");
+            double hitY = getDouble(payload, "hitY");
+            if (Double.isFinite(hitX) && Double.isFinite(hitY)) {
+                return new Point2D(hitX, hitY);
+            }
+        }
+
+        String victimId = getString(payload, "vic");
+        cs2d.client.GameClient.ClientPlayer victim = clientPlayers.get(victimId);
+        if (victim == null) {
+            victim = clientZombies.get(victimId);
+        }
+        return victim == null ? null : new Point2D(victim.renderX, victim.renderY);
     }
 
     private String assembleChunkMessage(JsonObject json) {
@@ -2794,6 +2847,14 @@ public class GameClient extends Application {
         if (hudGc != null)
             gc = hudGc;
         try {
+            String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
+            if (gameSettings.isDamageNumbersEnabledFor(mode)) {
+                damageNumberSystem.advance(deltaTime);
+                damageNumberSystem.draw(gc, camera::worldToScreen, CANVAS_WIDTH, CANVAS_HEIGHT);
+            } else {
+                damageNumberSystem.clear();
+            }
+
             gc.save();
             drawCrosshairAndAimLine(); // 绘制准星
             if (me != null && getBool(me.data, "isAlive") && "follow".equals(cameraMode)) {
@@ -5667,6 +5728,27 @@ public class GameClient extends Application {
 
         fogDarknessBox.getChildren().addAll(fogDarknessLabel, fogDarknessSlider, fogDarknessValueLabel);
 
+        // --- 可按模式扩展的战斗反馈设置 ---
+        VBox combatFeedbackBox = new VBox(8);
+        Label combatFeedbackLabel = new Label("Combat Feedback");
+        combatFeedbackLabel.setFont(hudFont);
+        combatFeedbackLabel.setTextFill(PRIMARY_BLUE);
+
+        CheckBox zombieDamageNumbersCheck = new CheckBox("Zombie Mode Damage Numbers");
+        zombieDamageNumbersCheck.setFont(hudFont);
+        zombieDamageNumbersCheck.setTextFill(TEXT_LIGHT);
+        zombieDamageNumbersCheck.setTooltip(new Tooltip(
+                "Show white damage numbers and red headshot numbers for your attacks in Zombie Mode."));
+        zombieDamageNumbersCheck.selectedProperty().bindBidirectional(
+                gameSettings.damageNumbersEnabledProperty(DamageNumberModePolicy.ZOMBIE_MODE));
+        zombieDamageNumbersCheck.selectedProperty().addListener((obs, oldVal, enabled) -> {
+            if (!enabled) {
+                damageNumberSystem.clear();
+            }
+            saveSettings();
+        });
+        combatFeedbackBox.getChildren().addAll(combatFeedbackLabel, zombieDamageNumbersCheck);
+
         // --- 鼠标滚轮缩放开关 ---
         CheckBox mouseWheelZoomCheck = new CheckBox("Mouse Wheel Zoom");
         mouseWheelZoomCheck.setFont(hudFont);
@@ -5728,6 +5810,7 @@ public class GameClient extends Application {
                 opacityBox,
                 killFeedBox,
                 fogDarknessBox,
+                combatFeedbackBox,
                 zoomBox,
                 disconnectButton,
                 closeButton);
