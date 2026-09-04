@@ -162,7 +162,7 @@ public class GameState {
     private final List<SoundEvent> aiSoundEventsBuffer = Collections.synchronizedList(new ArrayList<>());
 
     // --- 专门用于伤害日志damageLogEvents的列表 ---
-    private record TargetedDamageEvent(String recipientId, JsonObject payload) {
+    private record TargetedDamageEvent(String recipientId, String feedbackTeam, JsonObject payload) {
     }
 
     private final List<TargetedDamageEvent> privateDamageEvents = new CopyOnWriteArrayList<>();
@@ -3027,14 +3027,17 @@ public class GameState {
             if (shooter != null) {
                 String shooterRecipientId = getEventRecipientId(shooter);
                 if (shooterRecipientId != null) {
-                    privateDamageEvents.add(new TargetedDamageEvent(shooterRecipientId, payload));
+                    privateDamageEvents.add(new TargetedDamageEvent(
+                            shooterRecipientId,
+                            damageFeedbackTeam(gameMode, shooter.team, target.team),
+                            payload));
                 }
             }
             String targetRecipientId = getEventRecipientId(target);
             // 避免自己打自己时重复发送
             if (targetRecipientId != null
                     && (shooter == null || !targetRecipientId.equals(getEventRecipientId(shooter)))) {
-                privateDamageEvents.add(new TargetedDamageEvent(targetRecipientId, payload));
+                privateDamageEvents.add(new TargetedDamageEvent(targetRecipientId, null, payload));
             }
 
             long slowDuration = DamageMovementPolicy.slowDurationMillis(gameMode,
@@ -3171,6 +3174,14 @@ public class GameState {
             return player.controlledByPlayerId; // 返回控制者的ID
         }
         return player.id; // 否则返回自己的ID
+    }
+
+    static String damageFeedbackTeam(GameMode mode, Player.Team attackerTeam, Player.Team victimTeam) {
+        if (mode != GameMode.ZOMBIE_MODE || attackerTeam == null || victimTeam != Player.Team.ZOMBIE
+                || attackerTeam == Player.Team.ZOMBIE) {
+            return null;
+        }
+        return attackerTeam.name();
     }
 
     /**
@@ -5027,6 +5038,9 @@ public class GameState {
             privateDamageEvents.forEach(msg -> { // <--- 使用你的列表名
                 JsonObject pm = new JsonObject();
                 pm.addProperty("to", msg.recipientId()); // 添加接收者 ID
+                if (msg.feedbackTeam() != null) {
+                    pm.addProperty("feedbackTeam", msg.feedbackTeam());
+                }
                 pm.add("payload", msg.payload()); // 添加伤害日志
                 privateMsgArray.add(pm);
             });
