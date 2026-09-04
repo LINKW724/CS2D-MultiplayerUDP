@@ -142,28 +142,24 @@ public class GameSettings {
         return Math.max(MIN_FOG_DARKNESS, Math.min(MAX_FOG_DARKNESS, darkness));
     }
 
-    public boolean isDamageNumbersEnabledFor(String gameMode) {
-        return damageNumberModePolicy.isEnabledFor(gameMode);
+    public DamageNumberVisibility getDamageNumberVisibilityFor(String gameMode) {
+        return damageNumberModePolicy.getVisibilityFor(gameMode);
     }
 
-    public BooleanProperty damageNumbersEnabledProperty(String gameMode) {
-        return damageNumberModePolicy.enabledProperty(gameMode);
+    public ObjectProperty<DamageNumberVisibility> damageNumberVisibilityProperty(String gameMode) {
+        return damageNumberModePolicy.visibilityProperty(gameMode);
     }
 
-    public void setDamageNumbersEnabled(String gameMode, boolean enabled) {
-        damageNumberModePolicy.setEnabled(gameMode, enabled);
+    public void setDamageNumberVisibility(String gameMode, DamageNumberVisibility visibility) {
+        damageNumberModePolicy.setVisibility(gameMode, visibility);
     }
 
-    public boolean isTeammateDamageNumbersEnabledFor(String gameMode) {
-        return damageNumberModePolicy.isTeammateDamageEnabledFor(gameMode);
+    public boolean showsOwnDamageNumbers(String gameMode) {
+        return damageNumberModePolicy.showsOwnDamage(gameMode);
     }
 
-    public BooleanProperty teammateDamageNumbersEnabledProperty(String gameMode) {
-        return damageNumberModePolicy.teammateDamageEnabledProperty(gameMode);
-    }
-
-    public void setTeammateDamageNumbersEnabled(String gameMode, boolean enabled) {
-        damageNumberModePolicy.setTeammateDamageEnabled(gameMode, enabled);
+    public boolean showsTeammateDamageNumbers(String gameMode) {
+        return damageNumberModePolicy.showsTeammateDamage(gameMode);
     }
 
     public static double getFollowZoomFactor() {

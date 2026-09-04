@@ -65,27 +65,25 @@ class GameSettingsTest {
     }
 
     @Test
-    void persistsDamageNumberModesAsAnExtensibleNestedSetting() {
+    void persistsDamageNumberVisibilityAsAnExtensibleNestedSetting() {
         GameSettings settings = new GameSettings();
         JsonObject original = GameSettings.toJson().getAsJsonObject("damageNumbers").deepCopy();
         try {
-            settings.setDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, false);
-            settings.setDamageNumbersEnabled("TEAM_DEATHMATCH", true);
-            settings.setTeammateDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, true);
+            settings.setDamageNumberVisibility(DamageNumberModePolicy.ZOMBIE_MODE,
+                    DamageNumberVisibility.TEAMMATES);
+            settings.setDamageNumberVisibility("TEAM_DEATHMATCH", DamageNumberVisibility.ALL);
 
             JsonObject saved = GameSettings.toJson();
-            assertFalse(settings.isDamageNumbersEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
-            assertTrue(saved.getAsJsonObject("damageNumbers")
-                    .getAsJsonArray("enabledModes").contains(new com.google.gson.JsonPrimitive("TEAM_DEATHMATCH")));
-            assertTrue(saved.getAsJsonObject("damageNumbers")
-                    .getAsJsonArray("teammateDamageModes")
-                    .contains(new com.google.gson.JsonPrimitive(DamageNumberModePolicy.ZOMBIE_MODE)));
+            JsonObject modes = saved.getAsJsonObject("damageNumbers").getAsJsonObject("visibilityByMode");
+            assertEquals("TEAMMATES", modes.get(DamageNumberModePolicy.ZOMBIE_MODE).getAsString());
+            assertEquals("ALL", modes.get("TEAM_DEATHMATCH").getAsString());
 
-            settings.setDamageNumbersEnabled("TEAM_DEATHMATCH", false);
-            settings.setTeammateDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, false);
+            settings.setDamageNumberVisibility(DamageNumberModePolicy.ZOMBIE_MODE, DamageNumberVisibility.OFF);
+            settings.setDamageNumberVisibility("TEAM_DEATHMATCH", DamageNumberVisibility.OFF);
             settings.fromJson(saved);
-            assertTrue(settings.isDamageNumbersEnabledFor("TEAM_DEATHMATCH"));
-            assertTrue(settings.isTeammateDamageNumbersEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
+            assertEquals(DamageNumberVisibility.TEAMMATES,
+                    settings.getDamageNumberVisibilityFor(DamageNumberModePolicy.ZOMBIE_MODE));
+            assertEquals(DamageNumberVisibility.ALL, settings.getDamageNumberVisibilityFor("TEAM_DEATHMATCH"));
         } finally {
             JsonObject restore = new JsonObject();
             restore.add("damageNumbers", original);

@@ -1,5 +1,6 @@
 package cs2d.client;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -10,33 +11,63 @@ import com.google.gson.JsonObject;
 
 class DamageNumberModePolicyTest {
     @Test
-    void defaultsToZombieModeOnlyAndRoundTripsFutureModes() {
+    void defaultsToOwnDamageAndRoundTripsEveryScope() {
         DamageNumberModePolicy policy = new DamageNumberModePolicy();
-        assertTrue(policy.isEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
-        assertFalse(policy.isEnabledFor("TEAM_DEATHMATCH"));
-        assertFalse(policy.isTeammateDamageEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
+        assertEquals(DamageNumberVisibility.OWN, policy.getVisibilityFor(DamageNumberModePolicy.ZOMBIE_MODE));
+        assertEquals(DamageNumberVisibility.OFF, policy.getVisibilityFor("TEAM_DEATHMATCH"));
 
-        policy.setEnabled("TEAM_DEATHMATCH", true);
-        policy.setTeammateDamageEnabled(DamageNumberModePolicy.ZOMBIE_MODE, true);
-        policy.setTeammateDamageEnabled("TEAM_DEATHMATCH", true);
+        policy.setVisibility(DamageNumberModePolicy.ZOMBIE_MODE, DamageNumberVisibility.TEAMMATES);
+        policy.setVisibility("TEAM_DEATHMATCH", DamageNumberVisibility.ALL);
         DamageNumberModePolicy restored = new DamageNumberModePolicy();
         restored.fromJson(policy.toJson());
 
-        assertTrue(restored.isEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
-        assertTrue(restored.isEnabledFor("TEAM_DEATHMATCH"));
-        assertTrue(restored.isTeammateDamageEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
-        assertTrue(restored.isTeammateDamageEnabledFor("TEAM_DEATHMATCH"));
+        assertEquals(DamageNumberVisibility.TEAMMATES,
+                restored.getVisibilityFor(DamageNumberModePolicy.ZOMBIE_MODE));
+        assertEquals(DamageNumberVisibility.ALL, restored.getVisibilityFor("TEAM_DEATHMATCH"));
+        assertFalse(restored.showsOwnDamage(DamageNumberModePolicy.ZOMBIE_MODE));
+        assertTrue(restored.showsTeammateDamage(DamageNumberModePolicy.ZOMBIE_MODE));
+        assertTrue(restored.showsOwnDamage("TEAM_DEATHMATCH"));
+        assertTrue(restored.showsTeammateDamage("TEAM_DEATHMATCH"));
     }
 
     @Test
-    void explicitEmptyModeListDisablesAllModes() {
-        DamageNumberModePolicy policy = new DamageNumberModePolicy();
-        policy.setTeammateDamageEnabled(DamageNumberModePolicy.ZOMBIE_MODE, true);
+    void migratesLegacyOwnAndIncludeTeammateSettings() {
+        JsonObject ownLegacy = legacySettings(false);
+        DamageNumberModePolicy own = new DamageNumberModePolicy();
+        own.fromJson(ownLegacy);
+        assertEquals(DamageNumberVisibility.OWN, own.getVisibilityFor(DamageNumberModePolicy.ZOMBIE_MODE));
+
+        JsonObject allLegacy = legacySettings(true);
+        DamageNumberModePolicy all = new DamageNumberModePolicy();
+        all.fromJson(allLegacy);
+        assertEquals(DamageNumberVisibility.ALL, all.getVisibilityFor(DamageNumberModePolicy.ZOMBIE_MODE));
+
+        JsonObject disabledLegacy = new JsonObject();
+        disabledLegacy.add("enabledModes", new JsonArray());
+        DamageNumberModePolicy disabled = new DamageNumberModePolicy();
+        disabled.fromJson(disabledLegacy);
+        assertEquals(DamageNumberVisibility.OFF,
+                disabled.getVisibilityFor(DamageNumberModePolicy.ZOMBIE_MODE));
+    }
+
+    @Test
+    void clampsSliderLevelsToFourDefinedScopes() {
+        assertEquals(DamageNumberVisibility.OFF, DamageNumberVisibility.fromLevel(-4));
+        assertEquals(DamageNumberVisibility.OWN, DamageNumberVisibility.fromLevel(1.2));
+        assertEquals(DamageNumberVisibility.TEAMMATES, DamageNumberVisibility.fromLevel(1.8));
+        assertEquals(DamageNumberVisibility.ALL, DamageNumberVisibility.fromLevel(99));
+    }
+
+    private static JsonObject legacySettings(boolean includeTeammates) {
+        JsonArray enabled = new JsonArray();
+        enabled.add(DamageNumberModePolicy.ZOMBIE_MODE);
         JsonObject json = new JsonObject();
-        json.add("enabledModes", new JsonArray());
-        policy.fromJson(json);
-        assertFalse(policy.isEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
-        // Older settings files do not contain teammateDamageModes and must default to off.
-        assertFalse(policy.isTeammateDamageEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
+        json.add("enabledModes", enabled);
+        if (includeTeammates) {
+            JsonArray teammates = new JsonArray();
+            teammates.add(DamageNumberModePolicy.ZOMBIE_MODE);
+            json.add("teammateDamageModes", teammates);
+        }
+        return json;
     }
 }

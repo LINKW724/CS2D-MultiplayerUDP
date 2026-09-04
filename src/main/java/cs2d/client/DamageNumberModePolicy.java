@@ -3,100 +3,115 @@ package cs2d.client;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import javafx.beans.property.BooleanProperty;
-import javafx.beans.property.SimpleBooleanProperty;
+import javafx.beans.property.ObjectProperty;
+import javafx.beans.property.SimpleObjectProperty;
 
-/** Per-mode feature policy for damage-number feedback. */
+/** Per-mode source-visibility policy for damage-number feedback. */
 public final class DamageNumberModePolicy {
     public static final String ZOMBIE_MODE = GameMode.ZOMBIE_MODE.name();
 
-    private final Map<String, BooleanProperty> enabledByMode = new LinkedHashMap<>();
-    private final Map<String, BooleanProperty> teammateDamageByMode = new LinkedHashMap<>();
+    private final Map<String, ObjectProperty<DamageNumberVisibility>> visibilityByMode = new LinkedHashMap<>();
 
     public DamageNumberModePolicy() {
-        enabledByMode.put(ZOMBIE_MODE, new SimpleBooleanProperty(true));
-        teammateDamageByMode.put(ZOMBIE_MODE, new SimpleBooleanProperty(false));
+        visibilityByMode.put(ZOMBIE_MODE, new SimpleObjectProperty<>(DamageNumberVisibility.OWN));
     }
 
-    public boolean isEnabledFor(String gameMode) {
-        BooleanProperty property = enabledByMode.get(normalizeMode(gameMode));
-        return property != null && property.get();
+    public DamageNumberVisibility getVisibilityFor(String gameMode) {
+        ObjectProperty<DamageNumberVisibility> property = visibilityByMode.get(normalizeMode(gameMode));
+        return property == null || property.get() == null ? DamageNumberVisibility.OFF : property.get();
     }
 
-    public BooleanProperty enabledProperty(String gameMode) {
+    public ObjectProperty<DamageNumberVisibility> visibilityProperty(String gameMode) {
         String normalizedMode = requireMode(gameMode);
-        return enabledByMode.computeIfAbsent(normalizedMode, ignored -> new SimpleBooleanProperty(false));
+        return visibilityByMode.computeIfAbsent(normalizedMode,
+                ignored -> new SimpleObjectProperty<>(DamageNumberVisibility.OFF));
     }
 
-    public void setEnabled(String gameMode, boolean enabled) {
-        enabledProperty(gameMode).set(enabled);
+    public void setVisibility(String gameMode, DamageNumberVisibility visibility) {
+        visibilityProperty(gameMode).set(visibility == null ? DamageNumberVisibility.OFF : visibility);
     }
 
-    public boolean isTeammateDamageEnabledFor(String gameMode) {
-        BooleanProperty property = teammateDamageByMode.get(normalizeMode(gameMode));
-        return property != null && property.get();
+    public boolean showsOwnDamage(String gameMode) {
+        return getVisibilityFor(gameMode).showsOwnDamage();
     }
 
-    public BooleanProperty teammateDamageEnabledProperty(String gameMode) {
-        String normalizedMode = requireMode(gameMode);
-        return teammateDamageByMode.computeIfAbsent(normalizedMode, ignored -> new SimpleBooleanProperty(false));
-    }
-
-    public void setTeammateDamageEnabled(String gameMode, boolean enabled) {
-        teammateDamageEnabledProperty(gameMode).set(enabled);
+    public boolean showsTeammateDamage(String gameMode) {
+        return getVisibilityFor(gameMode).showsTeammateDamage();
     }
 
     public JsonObject toJson() {
-        JsonArray enabledModes = new JsonArray();
-        enabledByMode.forEach((mode, enabled) -> {
-            if (enabled.get()) {
-                enabledModes.add(mode);
-            }
-        });
-        JsonArray teammateDamageModes = new JsonArray();
-        teammateDamageByMode.forEach((mode, enabled) -> {
-            if (enabled.get()) {
-                teammateDamageModes.add(mode);
-            }
-        });
+        JsonObject modes = new JsonObject();
+        visibilityByMode.forEach((mode, visibility) -> modes.addProperty(mode,
+                (visibility.get() == null ? DamageNumberVisibility.OFF : visibility.get()).name()));
         JsonObject json = new JsonObject();
-        json.add("enabledModes", enabledModes);
-        json.add("teammateDamageModes", teammateDamageModes);
+        json.add("visibilityByMode", modes);
         return json;
     }
 
     public void fromJson(JsonObject json) {
-        if (json == null || !json.has("enabledModes") || !json.get("enabledModes").isJsonArray()) {
+        if (json == null) {
             return;
         }
+        if (json.has("visibilityByMode") && json.get("visibilityByMode").isJsonObject()) {
+            loadVisibilityMap(json.getAsJsonObject("visibilityByMode"));
+            return;
+        }
+        loadLegacyModeLists(json);
+    }
 
-        enabledByMode.values().forEach(property -> property.set(false));
-        for (JsonElement element : json.getAsJsonArray("enabledModes")) {
-            if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+    private void loadVisibilityMap(JsonObject modes) {
+        visibilityByMode.values().forEach(property -> property.set(DamageNumberVisibility.OFF));
+        for (Map.Entry<String, JsonElement> entry : modes.entrySet()) {
+            if (entry.getValue() == null || !entry.getValue().isJsonPrimitive()
+                    || !entry.getValue().getAsJsonPrimitive().isString()) {
                 continue;
             }
-            String mode = normalizeMode(element.getAsString());
-            if (!mode.isEmpty()) {
-                enabledProperty(mode).set(true);
+            String mode = normalizeMode(entry.getKey());
+            if (mode.isEmpty()) {
+                continue;
+            }
+            try {
+                setVisibility(mode, DamageNumberVisibility.valueOf(entry.getValue().getAsString()));
+            } catch (IllegalArgumentException ignored) {
+                setVisibility(mode, DamageNumberVisibility.OFF);
             }
         }
+    }
 
-        teammateDamageByMode.values().forEach(property -> property.set(false));
-        if (json.has("teammateDamageModes") && json.get("teammateDamageModes").isJsonArray()) {
-            for (JsonElement element : json.getAsJsonArray("teammateDamageModes")) {
-                if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
-                    continue;
-                }
-                String mode = normalizeMode(element.getAsString());
-                if (!mode.isEmpty()) {
-                    teammateDamageEnabledProperty(mode).set(true);
-                }
+    private void loadLegacyModeLists(JsonObject json) {
+        if (!json.has("enabledModes") || !json.get("enabledModes").isJsonArray()) {
+            return;
+        }
+        visibilityByMode.values().forEach(property -> property.set(DamageNumberVisibility.OFF));
+        for (JsonElement element : json.getAsJsonArray("enabledModes")) {
+            String mode = modeFromElement(element);
+            if (!mode.isEmpty()) {
+                setVisibility(mode, legacyContains(json, "teammateDamageModes", mode)
+                        ? DamageNumberVisibility.ALL
+                        : DamageNumberVisibility.OWN);
             }
         }
+    }
+
+    private static boolean legacyContains(JsonObject json, String member, String expectedMode) {
+        if (!json.has(member) || !json.get(member).isJsonArray()) {
+            return false;
+        }
+        for (JsonElement element : json.getAsJsonArray(member)) {
+            if (expectedMode.equals(modeFromElement(element))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String modeFromElement(JsonElement element) {
+        return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString()
+                ? normalizeMode(element.getAsString())
+                : "";
     }
 
     private static String requireMode(String gameMode) {

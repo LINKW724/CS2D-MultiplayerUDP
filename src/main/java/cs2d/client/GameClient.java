@@ -48,6 +48,7 @@ import javafx.scene.text.*;
 import javafx.stage.Stage;
 // 导入 JavaFX 工具类，如动画时长
 import javafx.util.Duration;
+import javafx.util.StringConverter;
 
 // 导入 Java 的 IO (输入/输出) 类，用于文件读写
 import java.io.*;
@@ -1802,8 +1803,11 @@ public class GameClient extends Application {
         String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
         int damage = getInt(payload, "dmg");
         String attackerId = getString(payload, "atk");
-        if (damage <= 0 || !gameSettings.isDamageNumbersEnabledFor(mode)
-                || (!teammateFeedback && !isLocalCombatAttacker(attackerId))) {
+        boolean localAttack = isLocalCombatAttacker(attackerId);
+        boolean sourceHidden = teammateFeedback
+                ? !gameSettings.showsTeammateDamageNumbers(mode)
+                : !localAttack || !gameSettings.showsOwnDamageNumbers(mode);
+        if (damage <= 0 || sourceHidden) {
             return;
         }
 
@@ -1820,8 +1824,7 @@ public class GameClient extends Application {
         String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
         String feedbackTeam = getString(message, "feedbackTeam");
         String localTeam = localCombatTeam();
-        return gameSettings.isDamageNumbersEnabledFor(mode)
-                && gameSettings.isTeammateDamageNumbersEnabledFor(mode)
+        return gameSettings.showsTeammateDamageNumbers(mode)
                 && feedbackTeam != null && !feedbackTeam.isBlank()
                 && feedbackTeam.equals(localTeam)
                 && !isLocalCombatAttacker(getString(payload, "atk"));
@@ -2883,7 +2886,7 @@ public class GameClient extends Application {
             gc = hudGc;
         try {
             String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
-            if (gameSettings.isDamageNumbersEnabledFor(mode)) {
+            if (gameSettings.getDamageNumberVisibilityFor(mode) != DamageNumberVisibility.OFF) {
                 damageNumberSystem.advance(deltaTime);
                 damageNumberSystem.draw(gc, camera::worldToScreen, CANVAS_WIDTH, CANVAS_HEIGHT);
             } else {
@@ -5769,36 +5772,66 @@ public class GameClient extends Application {
         combatFeedbackLabel.setFont(hudFont);
         combatFeedbackLabel.setTextFill(PRIMARY_BLUE);
 
-        CheckBox zombieDamageNumbersCheck = new CheckBox("Zombie Mode Damage Numbers");
-        zombieDamageNumbersCheck.setFont(hudFont);
-        zombieDamageNumbersCheck.setTextFill(TEXT_LIGHT);
-        zombieDamageNumbersCheck.setTooltip(new Tooltip(
-                "Show white damage numbers and red headshot numbers for your attacks in Zombie Mode."));
-        zombieDamageNumbersCheck.selectedProperty().bindBidirectional(
-                gameSettings.damageNumbersEnabledProperty(DamageNumberModePolicy.ZOMBIE_MODE));
-        zombieDamageNumbersCheck.selectedProperty().addListener((obs, oldVal, enabled) -> {
-            if (!enabled) {
+        Label zombieDamageScopeLabel = new Label("Zombie Damage Number Scope:");
+        zombieDamageScopeLabel.setFont(smallHudFont);
+        zombieDamageScopeLabel.setTextFill(TEXT_LIGHT);
+
+        DamageNumberVisibility initialVisibility = gameSettings.getDamageNumberVisibilityFor(
+                DamageNumberModePolicy.ZOMBIE_MODE);
+        Slider zombieDamageScopeSlider = new Slider(
+                DamageNumberVisibility.OFF.level(), DamageNumberVisibility.ALL.level(), initialVisibility.level());
+        zombieDamageScopeSlider.setMajorTickUnit(1);
+        zombieDamageScopeSlider.setMinorTickCount(0);
+        zombieDamageScopeSlider.setBlockIncrement(1);
+        zombieDamageScopeSlider.setSnapToTicks(true);
+        zombieDamageScopeSlider.setShowTickLabels(true);
+        zombieDamageScopeSlider.setShowTickMarks(true);
+        zombieDamageScopeSlider.setPrefWidth(360);
+        zombieDamageScopeSlider.setLabelFormatter(new StringConverter<>() {
+            @Override
+            public String toString(Double value) {
+                return DamageNumberVisibility.fromLevel(value).tickLabel();
+            }
+
+            @Override
+            public Double fromString(String value) {
+                for (DamageNumberVisibility visibility : DamageNumberVisibility.values()) {
+                    if (visibility.tickLabel().equals(value)) {
+                        return (double) visibility.level();
+                    }
+                }
+                return (double) DamageNumberVisibility.OFF.level();
+            }
+        });
+        zombieDamageScopeSlider.setTooltip(new Tooltip(
+                "Choose Off, your damage, teammate damage, or both. Headshots remain red."));
+
+        Label zombieDamageScopeValue = new Label("Current: " + initialVisibility.description());
+        zombieDamageScopeValue.setFont(smallHudFont);
+        zombieDamageScopeValue.setTextFill(TEXT_LIGHT);
+
+        zombieDamageScopeSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
+            DamageNumberVisibility visibility = DamageNumberVisibility.fromLevel(newVal.doubleValue());
+            DamageNumberVisibility previous = gameSettings.getDamageNumberVisibilityFor(
+                    DamageNumberModePolicy.ZOMBIE_MODE);
+            zombieDamageScopeValue.setText("Current: " + visibility.description());
+            if (visibility != previous) {
+                gameSettings.setDamageNumberVisibility(DamageNumberModePolicy.ZOMBIE_MODE, visibility);
                 damageNumberSystem.clear();
             }
-            saveSettings();
-        });
-
-        CheckBox teammateDamageNumbersCheck = new CheckBox("Include Teammate Damage");
-        teammateDamageNumbersCheck.setFont(hudFont);
-        teammateDamageNumbersCheck.setTextFill(TEXT_LIGHT);
-        teammateDamageNumbersCheck.setTooltip(new Tooltip(
-                "Also show damage dealt to zombies by teammates."));
-        teammateDamageNumbersCheck.selectedProperty().bindBidirectional(
-                gameSettings.teammateDamageNumbersEnabledProperty(DamageNumberModePolicy.ZOMBIE_MODE));
-        teammateDamageNumbersCheck.disableProperty().bind(zombieDamageNumbersCheck.selectedProperty().not());
-        teammateDamageNumbersCheck.selectedProperty().addListener((obs, oldVal, enabled) -> {
-            if (!enabled) {
-                damageNumberSystem.clearTeammateDamage();
+            if (!zombieDamageScopeSlider.isValueChanging()) {
+                saveSettings();
             }
-            saveSettings();
+        });
+        zombieDamageScopeSlider.valueChangingProperty().addListener((obs, wasChanging, isChanging) -> {
+            if (!isChanging) {
+                zombieDamageScopeSlider.setValue(DamageNumberVisibility.fromLevel(
+                        zombieDamageScopeSlider.getValue()).level());
+                saveSettings();
+            }
         });
         combatFeedbackBox.getChildren().addAll(
-                combatFeedbackLabel, zombieDamageNumbersCheck, teammateDamageNumbersCheck);
+                combatFeedbackLabel, zombieDamageScopeLabel, zombieDamageScopeSlider, zombieDamageScopeValue);
 
         // --- 鼠标滚轮缩放开关 ---
         CheckBox mouseWheelZoomCheck = new CheckBox("Mouse Wheel Zoom");
