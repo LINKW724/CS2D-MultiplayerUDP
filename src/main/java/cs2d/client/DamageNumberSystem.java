@@ -87,6 +87,10 @@ public final class DamageNumberSystem {
         laneCursor = 0L;
     }
 
+    public void clearTeammateDamage() {
+        activeNumbers.removeIf(number -> number.teammateDamage);
+    }
+
     int size() {
         return activeNumbers.size();
     }
@@ -94,7 +98,7 @@ public final class DamageNumberSystem {
     List<Snapshot> snapshots() {
         List<Snapshot> snapshots = new ArrayList<>(activeNumbers.size());
         activeNumbers.forEach(number -> snapshots.add(new Snapshot(
-                number.damage, number.headshot, number.worldX, number.worldY,
+                number.damage, number.headshot, number.teammateDamage, number.worldX, number.worldY,
                 number.ageSeconds, number.laneOffset)));
         return snapshots;
     }
@@ -111,6 +115,7 @@ public final class DamageNumberSystem {
                 break;
             }
             if (number.headshot == event.headshot()
+                    && number.attackerId.equals(event.attackerId())
                     && number.targetId.equals(event.targetId())
                     && Math.abs(number.serverTimestamp - event.serverTimestamp()) <= MERGE_WINDOW_MILLIS) {
                 number.damage += event.damage();
@@ -134,13 +139,15 @@ public final class DamageNumberSystem {
         Point2D project(double worldX, double worldY);
     }
 
-    record Snapshot(int damage, boolean headshot, double worldX, double worldY,
+    record Snapshot(int damage, boolean headshot, boolean teammateDamage, double worldX, double worldY,
                     double ageSeconds, double laneOffset) {
     }
 
     private static final class ActiveDamageNumber {
+        private final String attackerId;
         private final String targetId;
         private final boolean headshot;
+        private final boolean teammateDamage;
         private final double laneOffset;
         private int damage;
         private String text;
@@ -150,10 +157,12 @@ public final class DamageNumberSystem {
         private double ageSeconds;
 
         private ActiveDamageNumber(DamageNumberEvent event, double laneOffset) {
+            this.attackerId = event.attackerId();
             this.targetId = event.targetId();
             this.damage = event.damage();
             this.text = Integer.toString(event.damage());
             this.headshot = event.headshot();
+            this.teammateDamage = event.teammateDamage();
             this.worldX = event.worldX();
             this.worldY = event.worldY();
             this.serverTimestamp = event.serverTimestamp();

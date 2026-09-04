@@ -154,6 +154,18 @@ public class GameSettings {
         damageNumberModePolicy.setEnabled(gameMode, enabled);
     }
 
+    public boolean isTeammateDamageNumbersEnabledFor(String gameMode) {
+        return damageNumberModePolicy.isTeammateDamageEnabledFor(gameMode);
+    }
+
+    public BooleanProperty teammateDamageNumbersEnabledProperty(String gameMode) {
+        return damageNumberModePolicy.teammateDamageEnabledProperty(gameMode);
+    }
+
+    public void setTeammateDamageNumbersEnabled(String gameMode, boolean enabled) {
+        damageNumberModePolicy.setTeammateDamageEnabled(gameMode, enabled);
+    }
+
     public static double getFollowZoomFactor() {
         return followZoomFactor.get();
     }

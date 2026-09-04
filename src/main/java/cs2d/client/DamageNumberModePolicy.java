@@ -15,9 +15,11 @@ public final class DamageNumberModePolicy {
     public static final String ZOMBIE_MODE = GameMode.ZOMBIE_MODE.name();
 
     private final Map<String, BooleanProperty> enabledByMode = new LinkedHashMap<>();
+    private final Map<String, BooleanProperty> teammateDamageByMode = new LinkedHashMap<>();
 
     public DamageNumberModePolicy() {
         enabledByMode.put(ZOMBIE_MODE, new SimpleBooleanProperty(true));
+        teammateDamageByMode.put(ZOMBIE_MODE, new SimpleBooleanProperty(false));
     }
 
     public boolean isEnabledFor(String gameMode) {
@@ -26,15 +28,26 @@ public final class DamageNumberModePolicy {
     }
 
     public BooleanProperty enabledProperty(String gameMode) {
-        String normalizedMode = normalizeMode(gameMode);
-        if (normalizedMode.isEmpty()) {
-            throw new IllegalArgumentException("game mode must not be blank");
-        }
+        String normalizedMode = requireMode(gameMode);
         return enabledByMode.computeIfAbsent(normalizedMode, ignored -> new SimpleBooleanProperty(false));
     }
 
     public void setEnabled(String gameMode, boolean enabled) {
         enabledProperty(gameMode).set(enabled);
+    }
+
+    public boolean isTeammateDamageEnabledFor(String gameMode) {
+        BooleanProperty property = teammateDamageByMode.get(normalizeMode(gameMode));
+        return property != null && property.get();
+    }
+
+    public BooleanProperty teammateDamageEnabledProperty(String gameMode) {
+        String normalizedMode = requireMode(gameMode);
+        return teammateDamageByMode.computeIfAbsent(normalizedMode, ignored -> new SimpleBooleanProperty(false));
+    }
+
+    public void setTeammateDamageEnabled(String gameMode, boolean enabled) {
+        teammateDamageEnabledProperty(gameMode).set(enabled);
     }
 
     public JsonObject toJson() {
@@ -44,8 +57,15 @@ public final class DamageNumberModePolicy {
                 enabledModes.add(mode);
             }
         });
+        JsonArray teammateDamageModes = new JsonArray();
+        teammateDamageByMode.forEach((mode, enabled) -> {
+            if (enabled.get()) {
+                teammateDamageModes.add(mode);
+            }
+        });
         JsonObject json = new JsonObject();
         json.add("enabledModes", enabledModes);
+        json.add("teammateDamageModes", teammateDamageModes);
         return json;
     }
 
@@ -64,6 +84,27 @@ public final class DamageNumberModePolicy {
                 enabledProperty(mode).set(true);
             }
         }
+
+        teammateDamageByMode.values().forEach(property -> property.set(false));
+        if (json.has("teammateDamageModes") && json.get("teammateDamageModes").isJsonArray()) {
+            for (JsonElement element : json.getAsJsonArray("teammateDamageModes")) {
+                if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isString()) {
+                    continue;
+                }
+                String mode = normalizeMode(element.getAsString());
+                if (!mode.isEmpty()) {
+                    teammateDamageEnabledProperty(mode).set(true);
+                }
+            }
+        }
+    }
+
+    private static String requireMode(String gameMode) {
+        String normalizedMode = normalizeMode(gameMode);
+        if (normalizedMode.isEmpty()) {
+            throw new IllegalArgumentException("game mode must not be blank");
+        }
+        return normalizedMode;
     }
 
     private static String normalizeMode(String gameMode) {

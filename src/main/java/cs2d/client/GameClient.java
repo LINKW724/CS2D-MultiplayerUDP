@@ -1704,23 +1704,29 @@ public class GameClient extends Application {
                 JsonObject msg = msgElement.getAsJsonObject();
                 if (!shouldProcessTransientEvent(msg))
                     return;
-                if (myPlayerId != null && myPlayerId.equals(getString(msg, "to"))) {
-                    JsonObject payload = msg.getAsJsonObject("payload");
+                JsonObject payload = msg.getAsJsonObject("payload");
+                if (payload == null || !"damage_event".equals(getString(payload, "type"))) {
+                    return;
+                }
+                boolean directRecipient = myPlayerId != null && myPlayerId.equals(getString(msg, "to"));
+                boolean teammateFeedback = isEligibleTeammateDamageFeedback(msg, payload);
+                if (!directRecipient && !teammateFeedback) {
+                    return;
+                }
 
-                    if (payload != null && "damage_event".equals(getString(payload, "type"))) {
-                        currentDamageLogEntries.add(payload);
-                        handleDamageNumberPayload(payload);
+                handleDamageNumberPayload(payload, teammateFeedback);
+                if (directRecipient) {
+                    currentDamageLogEntries.add(payload);
 
-                        // [核心新增] 本地同步更新伤害和命中统计
-                        if (me != null && me.data != null) {
-                            int dmg = getInt(payload, "dmg");
-                            if (dmg > 0) {
-                                me.mutateData(snapshot -> {
-                                    snapshot.addProperty("damageDealt", getInt(snapshot, "damageDealt") + dmg);
-                                    snapshot.addProperty("totalShotsHit", getInt(snapshot, "totalShotsHit") + 1);
-                                });
-                                updateLocalScore(me); // 实时更新分数
-                            }
+                    // [核心新增] 本地同步更新伤害和命中统计
+                    if (me != null && me.data != null) {
+                        int dmg = getInt(payload, "dmg");
+                        if (dmg > 0) {
+                            me.mutateData(snapshot -> {
+                                snapshot.addProperty("damageDealt", getInt(snapshot, "damageDealt") + dmg);
+                                snapshot.addProperty("totalShotsHit", getInt(snapshot, "totalShotsHit") + 1);
+                            });
+                            updateLocalScore(me); // 实时更新分数
                         }
                     }
                 }
@@ -1792,11 +1798,12 @@ public class GameClient extends Application {
         return transientEventDeduplicator.accept(event.get("eventId").getAsLong());
     }
 
-    private void handleDamageNumberPayload(JsonObject payload) {
+    private void handleDamageNumberPayload(JsonObject payload, boolean teammateFeedback) {
         String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
         int damage = getInt(payload, "dmg");
+        String attackerId = getString(payload, "atk");
         if (damage <= 0 || !gameSettings.isDamageNumbersEnabledFor(mode)
-                || !isLocalCombatAttacker(getString(payload, "atk"))) {
+                || (!teammateFeedback && !isLocalCombatAttacker(attackerId))) {
             return;
         }
 
@@ -1805,8 +1812,36 @@ public class GameClient extends Application {
             return;
         }
         damageNumberSystem.add(new DamageNumberEvent(
-                getString(payload, "vic"), damage, getBool(payload, "hs"),
+                attackerId, getString(payload, "vic"), damage, getBool(payload, "hs"), teammateFeedback,
                 hitPosition.getX(), hitPosition.getY(), getLong(payload, "ts")));
+    }
+
+    private boolean isEligibleTeammateDamageFeedback(JsonObject message, JsonObject payload) {
+        String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
+        String feedbackTeam = getString(message, "feedbackTeam");
+        String localTeam = localCombatTeam();
+        return gameSettings.isDamageNumbersEnabledFor(mode)
+                && gameSettings.isTeammateDamageNumbersEnabledFor(mode)
+                && feedbackTeam != null && !feedbackTeam.isBlank()
+                && feedbackTeam.equals(localTeam)
+                && !isLocalCombatAttacker(getString(payload, "atk"));
+    }
+
+    private String localCombatTeam() {
+        if (me == null || me.data == null) {
+            return "";
+        }
+        if ("CONTROLLING_BOT".equals(getString(me.data, "spectatorMode"))) {
+            String controlledBotId = getString(me.data, "spectatorTargetId");
+            ClientPlayer controlled = clientPlayers.get(controlledBotId);
+            if (controlled == null) {
+                controlled = clientZombies.get(controlledBotId);
+            }
+            if (controlled != null && controlled.data != null) {
+                return getString(controlled.data, "team");
+            }
+        }
+        return getString(me.data, "team");
     }
 
     private boolean isLocalCombatAttacker(String attackerId) {
@@ -5747,7 +5782,23 @@ public class GameClient extends Application {
             }
             saveSettings();
         });
-        combatFeedbackBox.getChildren().addAll(combatFeedbackLabel, zombieDamageNumbersCheck);
+
+        CheckBox teammateDamageNumbersCheck = new CheckBox("Include Teammate Damage");
+        teammateDamageNumbersCheck.setFont(hudFont);
+        teammateDamageNumbersCheck.setTextFill(TEXT_LIGHT);
+        teammateDamageNumbersCheck.setTooltip(new Tooltip(
+                "Also show damage dealt to zombies by teammates."));
+        teammateDamageNumbersCheck.selectedProperty().bindBidirectional(
+                gameSettings.teammateDamageNumbersEnabledProperty(DamageNumberModePolicy.ZOMBIE_MODE));
+        teammateDamageNumbersCheck.disableProperty().bind(zombieDamageNumbersCheck.selectedProperty().not());
+        teammateDamageNumbersCheck.selectedProperty().addListener((obs, oldVal, enabled) -> {
+            if (!enabled) {
+                damageNumberSystem.clearTeammateDamage();
+            }
+            saveSettings();
+        });
+        combatFeedbackBox.getChildren().addAll(
+                combatFeedbackLabel, zombieDamageNumbersCheck, teammateDamageNumbersCheck);
 
         // --- 鼠标滚轮缩放开关 ---
         CheckBox mouseWheelZoomCheck = new CheckBox("Mouse Wheel Zoom");

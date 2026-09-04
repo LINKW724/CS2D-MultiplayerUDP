@@ -71,15 +71,21 @@ class GameSettingsTest {
         try {
             settings.setDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, false);
             settings.setDamageNumbersEnabled("TEAM_DEATHMATCH", true);
+            settings.setTeammateDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, true);
 
             JsonObject saved = GameSettings.toJson();
             assertFalse(settings.isDamageNumbersEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
             assertTrue(saved.getAsJsonObject("damageNumbers")
                     .getAsJsonArray("enabledModes").contains(new com.google.gson.JsonPrimitive("TEAM_DEATHMATCH")));
+            assertTrue(saved.getAsJsonObject("damageNumbers")
+                    .getAsJsonArray("teammateDamageModes")
+                    .contains(new com.google.gson.JsonPrimitive(DamageNumberModePolicy.ZOMBIE_MODE)));
 
             settings.setDamageNumbersEnabled("TEAM_DEATHMATCH", false);
+            settings.setTeammateDamageNumbersEnabled(DamageNumberModePolicy.ZOMBIE_MODE, false);
             settings.fromJson(saved);
             assertTrue(settings.isDamageNumbersEnabledFor("TEAM_DEATHMATCH"));
+            assertTrue(settings.isTeammateDamageNumbersEnabledFor(DamageNumberModePolicy.ZOMBIE_MODE));
         } finally {
             JsonObject restore = new JsonObject();
             restore.add("damageNumbers", original);
