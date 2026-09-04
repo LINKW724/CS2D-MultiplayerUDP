@@ -86,13 +86,10 @@ public class ZOMBIEcontrol {
         Weapon weapon = owner.getCurrentWeapon();
         if (owner.team == Player.Team.CT && weapon != null
                 && weapon.getWeaponType() == Weapon.WeaponType.LMG) {
-            List<Player> clearTargets = visible.stream().filter(target ->
-                    ZombieHostilityPolicy.clearShot(owner, target, gameState.getAllCharacters())).toList();
-            List<Player> candidates = clearTargets.isEmpty() ? visible : clearTargets;
-            crowdFireDecision = crowdFire.select(Vec.of(owner.position), candidates.stream()
+            crowdFireDecision = crowdFire.select(Vec.of(owner.position), visible.stream()
                     .map(target -> new ZombieCrowdFirePlanner.Target(target.id,
                             Vec.of(target.position), target.health)).toList(), now);
-            primaryTarget = candidates.stream().filter(target ->
+            primaryTarget = visible.stream().filter(target ->
                     target.id.equals(crowdFireDecision.targetId())).findFirst().orElse(null);
         } else {
             crowdFire.reset();
@@ -123,8 +120,6 @@ public class ZOMBIEcontrol {
                 || hazards.stream().anyMatch(hazard -> hazard.contains(origin, Player.SIZE));
         if (emergency && !wasEmergency) nextPositionAt = 0;
         wasEmergency = emergency;
-        boolean blockedFire = primaryTarget != null
-                && !ZombieHostilityPolicy.clearShot(owner, primaryTarget, gameState.getAllCharacters());
         if (owner.currentAmmo <= 0 && owner.reserveAmmo > 0 && !owner.isReloading)
             owner.startReload();
 
@@ -139,11 +134,11 @@ public class ZOMBIEcontrol {
         if (desired == null) desired = origin;
         if (now >= nextPositionAt || movementGoal == null) {
             Vec local = desired;
-            if (emergency || blockedFire || positions.requiresLocalDetour(origin, desired,
+            if (emergency || positions.requiresLocalDetour(origin, desired,
                     threats, hazards, now, this::walkable)
                     || teammates.stream().anyMatch(p -> p.distance(origin) < 50)) {
                 local = positions.choose(origin, desired, threats, teammates, hazards, now, this::walkable,
-                        blockedFire && !emergency ? Vec.of(primaryTarget.position) : null);
+                        null);
             }
             movementGoal = local;
             nextPositionAt = now + (emergency ? 250 : 500);
@@ -153,7 +148,7 @@ public class ZOMBIEcontrol {
         AIInput attack = attackModule.update(primaryTarget, lastKnownPosition, now,
                 AttackExecutionPolicy.ZOMBIE_SURVIVOR, crowdFireDecision.engagementId());
         boolean shoot = attack.shooting()
-                && ZombieHostilityPolicy.clearShot(owner, primaryTarget, gameState.getAllCharacters());
+                && ZombieHostilityPolicy.bulletFireAllowed(owner, primaryTarget);
         double angle = primaryTarget != null ? attack.angle()
                 : movement.keys().isEmpty()
                         ? order != null && order.active(now)

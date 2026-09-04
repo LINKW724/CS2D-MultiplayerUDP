@@ -2422,7 +2422,7 @@ public class GameState {
             p.isShooting = false;
             p.isRequestingUnderhandThrow = false;
             p.position = getSpawnPoint(p.team);
-            p.isInvincible = true;
+            p.isInvincible = SpawnProtectionPolicy.enabled(gameMode);
 
             if (p.primaryWeapon != null) {
                 p.primary_currentAmmo = p.primaryWeapon.magazineSize;
@@ -5837,7 +5837,7 @@ public class GameState {
 
         // 手动处理重生，而不是调用 player.respawn()
         player.position = getZombieSpawnPoint(); // 获取一个适合僵尸的重生点
-        player.isInvincible = true; // 给予短暂的无敌保护
+        player.isInvincible = SpawnProtectionPolicy.enabled(gameMode);
         player.respawnTime = System.currentTimeMillis();
         player.isReloading = false;
 
@@ -6031,23 +6031,27 @@ public class GameState {
 
         // [!! 核心修复 1 !!] 检查玩家的 *意图* (keysDown) 而不是 *状态* (isMoving)
         if (p.isInvincible) {
-            long protectionDuration = (gameMode == GameMode.DEATHMATCH) ? DEATHMATCH_SPAWN_PROTECTION_MS
-                    : SPAWN_PROTECTION_MS;
-
-            // 检查1: 是否超时
-            if (System.currentTimeMillis() - p.respawnTime > protectionDuration) {
+            if (!SpawnProtectionPolicy.enabled(gameMode)) {
                 p.isInvincible = false;
+            } else {
+                long protectionDuration = (gameMode == GameMode.DEATHMATCH) ? DEATHMATCH_SPAWN_PROTECTION_MS
+                        : SPAWN_PROTECTION_MS;
 
-                // 检查2: (仅死斗模式)
-            } else if (gameMode == GameMode.DEATHMATCH) {
-                // 检查玩家是否按下了移动键 (W, A, S, D)
-                boolean hasMoveInput = p.keysDown.contains("W") || p.keysDown.contains("A") || p.keysDown.contains("S")
-                        || p.keysDown.contains("D");
-
-                // 只有当玩家 *主动* 按键移动或射击时，才解除无敌
-                if (hasMoveInput || p.isShooting) {
+                // 检查1: 是否超时
+                if (System.currentTimeMillis() - p.respawnTime > protectionDuration) {
                     p.isInvincible = false;
-                    logger.accept("玩家 " + p.name + " 因移动或开火，无敌状态已移除。");
+
+                    // 检查2: (仅死斗模式)
+                } else if (gameMode == GameMode.DEATHMATCH) {
+                    // 检查玩家是否按下了移动键 (W, A, S, D)
+                    boolean hasMoveInput = p.keysDown.contains("W") || p.keysDown.contains("A")
+                            || p.keysDown.contains("S") || p.keysDown.contains("D");
+
+                    // 只有当玩家 *主动* 按键移动或射击时，才解除无敌
+                    if (hasMoveInput || p.isShooting) {
+                        p.isInvincible = false;
+                        logger.accept("玩家 " + p.name + " 因移动或开火，无敌状态已移除。");
+                    }
                 }
             }
         }

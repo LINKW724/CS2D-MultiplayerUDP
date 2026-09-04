@@ -319,8 +319,8 @@ public class AIService implements Runnable {
                             if (attackInput != null) {
                                 shouldShoot = attackInput.shooting();
                                 if (currentMode == GameMode.ZOMBIE_MODE)
-                                    shouldShoot &= cs2d.AIControl.zombie.ZombieHostilityPolicy.clearShot(
-                                            ai, closestEnemy, gameState.getAllCharacters());
+                                    shouldShoot &= cs2d.AIControl.zombie.ZombieHostilityPolicy
+                                            .bulletFireAllowed(ai, closestEnemy);
                             }
                         }
 

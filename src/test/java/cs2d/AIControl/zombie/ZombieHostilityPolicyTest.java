@@ -4,7 +4,6 @@ import cs2d.playerAndAi.Player;
 import cs2d.server.GameMode;
 import org.junit.jupiter.api.Test;
 import java.awt.geom.Point2D;
-import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ZombieHostilityPolicyTest {
@@ -25,13 +24,13 @@ class ZombieHostilityPolicyTest {
         z.health = 0;
         assertFalse(ZombieHostilityPolicy.canTarget(ct, z));
     }
-    @Test void finalFireGateRejectsFriendlyObstructionAndZombieGunfire() {
+    @Test void bulletFireIgnoresTeammateGeometryButRejectsZombieGunfire() {
         Player ct = player("ct", Player.Team.CT, 100, 100);
         Player ally = player("ally", Player.Team.CT, 200, 100);
         Player z = player("z", Player.Team.ZOMBIE, 400, 100);
-        assertFalse(ZombieHostilityPolicy.clearShot(ct, z, List.of(ct, ally, z)));
-        ally.position.y = 200;
-        assertTrue(ZombieHostilityPolicy.clearShot(ct, z, List.of(ct, ally, z)));
-        assertFalse(ZombieHostilityPolicy.clearShot(z, ct, List.of(ct, z)));
+        assertFalse(ZombieHostilityPolicy.bulletFireAllowed(ct, ally));
+        // The gate accepts only shooter and target, so an intervening teammate cannot block bullets.
+        assertTrue(ZombieHostilityPolicy.bulletFireAllowed(ct, z));
+        assertFalse(ZombieHostilityPolicy.bulletFireAllowed(z, ct));
     }
 }

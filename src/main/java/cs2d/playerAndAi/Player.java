@@ -550,7 +550,7 @@ public class Player {
       public void respawn(Point2D.Double spawnPoint, GameMode gameMode) {
             this.health = 100;
             this.position = spawnPoint;
-            this.isInvincible = true;
+            this.isInvincible = SpawnProtectionPolicy.enabled(gameMode);
             this.respawnTime = System.currentTimeMillis();
             this.isReloading = false;
             this.vx = 0;

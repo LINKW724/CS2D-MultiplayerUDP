@@ -6,6 +6,8 @@ import org.junit.jupiter.api.Test;
 import java.awt.geom.Point2D;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlayerRespawnTest {
 
@@ -39,5 +41,26 @@ class PlayerRespawnTest {
         assertEquals(Weapon.USPS.magazineSize * 4, player.reserveAmmo);
         assertEquals(Weapon.USPS.magazineSize, player.secondary_currentAmmo);
         assertEquals(Weapon.USPS.magazineSize * 4, player.secondary_reserveAmmo);
+    }
+
+    @Test
+    void zombieModeRespawnHasNoInvincibilityWhileOtherModesKeepProtection() {
+        Player player = new Player(
+                "player-1",
+                "Tester",
+                new Point2D.Double(0, 0),
+                Player.Team.CT,
+                false,
+                GameMode.ZOMBIE_MODE,
+                null,
+                null,
+                ignored -> {
+                });
+
+        player.respawn(new Point2D.Double(100, 200), GameMode.ZOMBIE_MODE);
+        assertFalse(player.isInvincible);
+
+        player.respawn(new Point2D.Double(200, 300), GameMode.TEAM_DEATHMATCH);
+        assertTrue(player.isInvincible);
     }
 }
