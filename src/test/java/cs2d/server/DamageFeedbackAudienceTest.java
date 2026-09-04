@@ -9,16 +9,18 @@ import cs2d.playerAndAi.Player;
 
 class DamageFeedbackAudienceTest {
     @Test
-    void sharesOnlySurvivorDamageAgainstZombiesInZombieMode() {
+    void sharesEveryAttributedZombieModeDamageWithTheAttackerTeam() {
         assertEquals("CT", GameState.damageFeedbackTeam(
                 GameMode.ZOMBIE_MODE, Player.Team.CT, Player.Team.ZOMBIE));
         assertEquals("T", GameState.damageFeedbackTeam(
                 GameMode.ZOMBIE_MODE, Player.Team.T, Player.Team.ZOMBIE));
 
-        assertNull(GameState.damageFeedbackTeam(
+        assertEquals("ZOMBIE", GameState.damageFeedbackTeam(
                 GameMode.ZOMBIE_MODE, Player.Team.ZOMBIE, Player.Team.CT));
-        assertNull(GameState.damageFeedbackTeam(
+        assertEquals("CT", GameState.damageFeedbackTeam(
                 GameMode.ZOMBIE_MODE, Player.Team.CT, Player.Team.CT));
+        assertNull(GameState.damageFeedbackTeam(
+                GameMode.ZOMBIE_MODE, null, Player.Team.CT));
         assertNull(GameState.damageFeedbackTeam(
                 GameMode.TEAM_DEATHMATCH, Player.Team.CT, Player.Team.ZOMBIE));
     }

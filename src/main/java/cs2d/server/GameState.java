@@ -9,6 +9,7 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 
 import cs2d.AIControl.A.PathfindingModule;
+import cs2d.playerAndAi.CombatFeedbackKind;
 import cs2d.playerAndAi.Player;
 
 import cs2d.playerAndAi.Waypoint;
@@ -3005,7 +3006,8 @@ public class GameState {
                     isKill,
                     isHeadshot,
                     target.position.x,
-                    target.position.y);
+                    target.position.y,
+                    CombatFeedbackKind.fromWeaponName(weaponName));
 
             // 4. 添加到服务器端日志
             if (shooter != null) {
@@ -3177,8 +3179,7 @@ public class GameState {
     }
 
     static String damageFeedbackTeam(GameMode mode, Player.Team attackerTeam, Player.Team victimTeam) {
-        if (mode != GameMode.ZOMBIE_MODE || attackerTeam == null || victimTeam != Player.Team.ZOMBIE
-                || attackerTeam == Player.Team.ZOMBIE) {
+        if (mode != GameMode.ZOMBIE_MODE || attackerTeam == null) {
             return null;
         }
         return attackerTeam.name();

@@ -12,7 +12,8 @@ class DamageLogEntryTest {
     @Test
     void serializesAuthoritativeDamageFeedbackFields() {
         Player.DamageLogEntry entry = new Player.DamageLogEntry(
-                "attacker-1", "zombie-4", 37, 1234L, false, true, 1250.5, 830.0);
+                "attacker-1", "zombie-4", 37, 1234L, false, true, 1250.5, 830.0,
+                CombatFeedbackKind.NORMAL);
 
         JsonObject json = entry.toJson();
 
@@ -25,5 +26,6 @@ class DamageLogEntryTest {
         assertTrue(json.get("hs").getAsBoolean());
         assertEquals(1250.5, json.get("hitX").getAsDouble());
         assertEquals(830.0, json.get("hitY").getAsDouble());
+        assertEquals("NORMAL", json.get("feedbackKind").getAsString());
     }
 }
