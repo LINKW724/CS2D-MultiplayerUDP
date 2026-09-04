@@ -264,7 +264,8 @@ public class Player {
 
       public final List<DamageLogEntry> damageLog = new CopyOnWriteArrayList<>();
 
-      public record DamageLogEntry(String attackerId, String victimId, int damage, long timestamp, boolean isKill) {
+      public record DamageLogEntry(String attackerId, String victimId, int damage, long timestamp, boolean isKill,
+                  boolean isHeadshot, double hitX, double hitY) {
             public JsonObject toJson() {
                   JsonObject obj = new JsonObject();
                   obj.addProperty("atk", attackerId);
@@ -272,6 +273,9 @@ public class Player {
                   obj.addProperty("dmg", damage);
                   obj.addProperty("ts", timestamp);
                   obj.addProperty("kill", isKill);
+                  obj.addProperty("hs", isHeadshot);
+                  obj.addProperty("hitX", hitX);
+                  obj.addProperty("hitY", hitY);
                   obj.addProperty("type", "damage_event");
                   return obj;
             }

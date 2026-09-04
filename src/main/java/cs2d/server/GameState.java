@@ -3002,7 +3002,10 @@ public class GameState {
                     target.id,
                     actualDamageDealt, // <--- 使用实际扣血量
                     System.currentTimeMillis(),
-                    isKill);
+                    isKill,
+                    isHeadshot,
+                    target.position.x,
+                    target.position.y);
 
             // 4. 添加到服务器端日志
             if (shooter != null) {
