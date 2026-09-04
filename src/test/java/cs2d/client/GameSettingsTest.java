@@ -24,4 +24,41 @@ class GameSettingsTest {
             settings.setMaxKillFeedEntries(original);
         }
     }
+
+    @Test
+    void clampsFogDarknessAndFallsBackForNonFiniteValues() {
+        GameSettings settings = new GameSettings();
+        double original = settings.getFogDarkness();
+        try {
+            settings.setFogDarkness(-0.2);
+            assertEquals(GameSettings.MIN_FOG_DARKNESS, settings.getFogDarkness());
+
+            settings.setFogDarkness(1.2);
+            assertEquals(GameSettings.MAX_FOG_DARKNESS, settings.getFogDarkness());
+
+            settings.setFogDarkness(Double.NaN);
+            assertEquals(GameSettings.DEFAULT_FOG_DARKNESS, settings.getFogDarkness());
+        } finally {
+            settings.setFogDarkness(original);
+        }
+    }
+
+    @Test
+    void persistsFogDarknessAndKeepsBackwardCompatibleDefault() {
+        GameSettings settings = new GameSettings();
+        double original = settings.getFogDarkness();
+        try {
+            settings.setFogDarkness(GameSettings.DEFAULT_FOG_DARKNESS);
+            settings.fromJson(new JsonObject());
+            assertEquals(GameSettings.DEFAULT_FOG_DARKNESS, settings.getFogDarkness());
+
+            JsonObject json = new JsonObject();
+            json.addProperty("fogDarkness", 0.42);
+            settings.fromJson(json);
+            assertEquals(0.42, settings.getFogDarkness(), 0.000_001);
+            assertEquals(0.42, GameSettings.toJson().get("fogDarkness").getAsDouble(), 0.000_001);
+        } finally {
+            settings.setFogDarkness(original);
+        }
+    }
 }

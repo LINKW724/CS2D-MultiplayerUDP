@@ -17,6 +17,9 @@ import javafx.scene.paint.Color;
 public class GameSettings {
     public static final int MIN_KILL_FEED_ENTRIES = 0;
     public static final int MAX_KILL_FEED_ENTRIES = 10;
+    public static final double MIN_FOG_DARKNESS = 0.0;
+    public static final double MAX_FOG_DARKNESS = 1.0;
+    public static final double DEFAULT_FOG_DARKNESS = 0.7;
     private static final BooleanProperty followRecoil = new SimpleBooleanProperty(true);
     private static final BooleanProperty showAimLine = new SimpleBooleanProperty(false);
     private static final BooleanProperty wallPenetrationPrediction = new SimpleBooleanProperty(false); // 新增：穿墙伤害预测开关
@@ -26,6 +29,7 @@ public class GameSettings {
     private static final ObjectProperty<Color> wallPenColorNone = new SimpleObjectProperty<>(Color.RED);   // 0% 伤害时的颜色
     private static final DoubleProperty aimLineOpacity = new SimpleDoubleProperty(0.7);
     private static final IntegerProperty maxKillFeedEntries = new SimpleIntegerProperty(5);
+    private static final DoubleProperty fogDarkness = new SimpleDoubleProperty(DEFAULT_FOG_DARKNESS);
 
     private static final BooleanProperty mouseWheelZoomEnabled = new SimpleBooleanProperty(true); // 新增：鼠标滚轮缩放开关
     private static final DoubleProperty followZoomFactor = new SimpleDoubleProperty(1.0);
@@ -118,6 +122,25 @@ public class GameSettings {
         return Math.max(MIN_KILL_FEED_ENTRIES, Math.min(MAX_KILL_FEED_ENTRIES, entries));
     }
 
+    public double getFogDarkness() {
+        return fogDarkness.get();
+    }
+
+    public DoubleProperty fogDarknessProperty() {
+        return fogDarkness;
+    }
+
+    public void setFogDarkness(double darkness) {
+        fogDarkness.set(clampFogDarkness(darkness));
+    }
+
+    static double clampFogDarkness(double darkness) {
+        if (!Double.isFinite(darkness)) {
+            return DEFAULT_FOG_DARKNESS;
+        }
+        return Math.max(MIN_FOG_DARKNESS, Math.min(MAX_FOG_DARKNESS, darkness));
+    }
+
     public static double getFollowZoomFactor() {
         return followZoomFactor.get();
     }
@@ -149,6 +172,7 @@ public class GameSettings {
         json.addProperty("wallPenColorNone", wallPenColorNone.get().toString()); // 新增
         json.addProperty("followZoomFactor", getFollowZoomFactor());
         json.addProperty("maxKillFeedEntries", maxKillFeedEntries.get());
+        json.addProperty("fogDarkness", fogDarkness.get());
         return json;
     }
 
@@ -194,6 +218,9 @@ public class GameSettings {
             }
             if (json.has("followZoomFactor")) {
                 setFollowZoomFactor(json.get("followZoomFactor").getAsDouble());
+            }
+            if (json.has("fogDarkness")) {
+                setFogDarkness(json.get("fogDarkness").getAsDouble());
             }
         } catch (Exception e) {
             System.err.println("从JSON文件加载设置时出错: " + e.getMessage() + "。将使用默认值。");

@@ -200,6 +200,8 @@ public class GameClient extends Application {
     private final AtomicLong fogMaskGeneration = new AtomicLong();
     private List<Point2D> submittedFogGeometry = List.of();
     private Color submittedFogColor;
+    private double cachedFogDarkness = Double.NaN;
+    private Color cachedFogColor;
     private Canvas hudCanvas;
     private GraphicsContext hudGc;
     private List<Point2D> rasterizedFogGeometry = List.of();
@@ -486,8 +488,9 @@ public class GameClient extends Application {
     private static final int INPUT_SEND_RATE = 60;
     private static final int TARGET_RENDER_RATE = sanitizeRenderRate(
             Integer.getInteger("cs2d.renderHz", 165));
-    private static final Color FOLLOW_FOG_COLOR = Color.rgb(26, 32, 44, 0.85);
-    private static final Color GLOBAL_FOG_COLOR = Color.rgb(26, 32, 44, 0.5);
+    private static final int FOG_RED = 26;
+    private static final int FOG_GREEN = 32;
+    private static final int FOG_BLUE = 44;
     static final int FOV_RAY_COUNT = 106 * 16;
     private static final double FOV_RADIANS = Math.toRadians(106.0);
     private static final double FOV_ANGLE_STEP = FOV_RADIANS / (FOV_RAY_COUNT - 1);
@@ -5627,6 +5630,43 @@ public class GameClient extends Application {
         sliderBox.setAlignment(Pos.CENTER_LEFT);
         killFeedBox.getChildren().addAll(killFeedLabel, sliderBox);
 
+        // --- 三种相机视角共用的迷雾暗度 ---
+        VBox fogDarknessBox = new VBox(5);
+        Label fogDarknessLabel = new Label("Fog Darkness:");
+        fogDarknessLabel.setFont(smallHudFont);
+        fogDarknessLabel.setTextFill(TEXT_LIGHT);
+
+        Slider fogDarknessSlider = new Slider(
+                GameSettings.MIN_FOG_DARKNESS * 100.0,
+                GameSettings.MAX_FOG_DARKNESS * 100.0,
+                gameSettings.getFogDarkness() * 100.0);
+        fogDarknessSlider.setMajorTickUnit(25);
+        fogDarknessSlider.setMinorTickCount(4);
+        fogDarknessSlider.setBlockIncrement(5);
+        fogDarknessSlider.setShowTickLabels(true);
+        fogDarknessSlider.setShowTickMarks(true);
+        fogDarknessSlider.setTooltip(new Tooltip("Applies equally to Follow, Full, and Free camera views."));
+
+        Label fogDarknessValueLabel = new Label();
+        fogDarknessValueLabel.setFont(smallHudFont);
+        fogDarknessValueLabel.setTextFill(TEXT_LIGHT);
+        fogDarknessValueLabel.setText(String.format("Current: %.0f%%", fogDarknessSlider.getValue()));
+
+        fogDarknessSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
+            gameSettings.setFogDarkness(newVal.doubleValue() / 100.0);
+            fogDarknessValueLabel.setText(String.format("Current: %.0f%%", newVal.doubleValue()));
+            if (!fogDarknessSlider.isValueChanging()) {
+                saveSettings();
+            }
+        });
+        fogDarknessSlider.valueChangingProperty().addListener((obs, wasChanging, isChanging) -> {
+            if (!isChanging) {
+                saveSettings();
+            }
+        });
+
+        fogDarknessBox.getChildren().addAll(fogDarknessLabel, fogDarknessSlider, fogDarknessValueLabel);
+
         // --- 鼠标滚轮缩放开关 ---
         CheckBox mouseWheelZoomCheck = new CheckBox("Mouse Wheel Zoom");
         mouseWheelZoomCheck.setFont(hudFont);
@@ -5687,6 +5727,7 @@ public class GameClient extends Application {
                 colorBox,
                 opacityBox,
                 killFeedBox,
+                fogDarknessBox,
                 zoomBox,
                 disconnectButton,
                 closeButton);
@@ -8904,7 +8945,12 @@ public class GameClient extends Application {
     }
 
     private Color currentFogColor() {
-        return "follow".equals(cameraMode) ? FOLLOW_FOG_COLOR : GLOBAL_FOG_COLOR;
+        double fogDarkness = gameSettings.getFogDarkness();
+        if (cachedFogColor == null || Double.compare(cachedFogDarkness, fogDarkness) != 0) {
+            cachedFogDarkness = fogDarkness;
+            cachedFogColor = Color.rgb(FOG_RED, FOG_GREEN, FOG_BLUE, fogDarkness);
+        }
+        return cachedFogColor;
     }
 
     private int calculateLocalScoreForSorting(JsonObject p) {
