@@ -1824,10 +1824,17 @@ public class GameClient extends Application {
         String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
         String feedbackTeam = getString(message, "feedbackTeam");
         String localTeam = localCombatTeam();
-        return gameSettings.showsTeammateDamageNumbers(mode)
-                && feedbackTeam != null && !feedbackTeam.isBlank()
-                && feedbackTeam.equals(localTeam)
-                && !isLocalCombatAttacker(getString(payload, "atk"));
+        return DamageFeedbackAudiencePolicy.acceptsTeamEvent(
+                gameSettings.getDamageNumberVisibilityFor(mode),
+                mode,
+                isDetachedSpectator(),
+                feedbackTeam,
+                localTeam,
+                isLocalCombatAttacker(getString(payload, "atk")));
+    }
+
+    private boolean isDetachedSpectator() {
+        return clientState == ClientState.PLAYING && myPlayerId == null && me == null;
     }
 
     private String localCombatTeam() {
