@@ -1262,6 +1262,7 @@ public class GameState {
         }
 
         // 解决所有碰撞和穿透（人-人，人-墙），并修正最终位置
+        allCharacters.forEach(p -> p.isCollidingWithTeammate = false);
         allCharacters.stream()
                 .filter(Player::isAlive)
                 .forEach(this::resolveCollisionsAndSliding);
@@ -4877,7 +4878,7 @@ public class GameState {
             // 死斗模式不发送团队分数
         } else if (gameMode == GameMode.ZOMBIE_MODE) { // 僵尸模式信息。
             state.addProperty("wave", currentWave);
-            state.addProperty("zombiesLeft", zombies.size() + zombiesToSpawn);
+            state.addProperty("zombiesLeft", getRemainingZombieCount());
             if (waitingForNextWave && zombies.isEmpty()) {
                 state.addProperty("nextWaveIn",
                         Math.max(0, (nextWaveStartTime - System.currentTimeMillis()) / 1000 + 1));
@@ -6277,17 +6278,18 @@ public class GameState {
                             if (!other.isAlive())
                                 continue; // [额外检查] 只和活体碰撞
 
-                            double distSq = player.position.distanceSq(other.position);
+                            PlayerPairSeparation.Correction correction = PlayerPairSeparation.calculate(
+                                    player.id, player.position, other.id, other.position,
+                                    totalRadius, min_separation);
 
-                            if (distSq < totalRadius * totalRadius && distSq > 0) {
-                                double dist = Math.sqrt(distSq);
-                                double penetrationDepth = totalRadius - dist;
-
-                                // 各自推开距离 = (穿透深度 + 安全边距) / 2
-                                double overlap = (penetrationDepth + min_separation) / 2.0;
-
-                                double nx = (player.position.x - other.position.x) / dist;
-                                double ny = (player.position.y - other.position.y) / dist;
+                            if (correction != null) {
+                                double overlap = correction.pushPerPlayer();
+                                double nx = correction.nx();
+                                double ny = correction.ny();
+                                if (player.team == other.team) {
+                                    player.isCollidingWithTeammate = true;
+                                    other.isCollidingWithTeammate = true;
+                                }
 
                                 // 位置修正：推开玩家
                                 player.position.x += nx * overlap;
@@ -6489,6 +6491,13 @@ public class GameState {
         List<Player> all = new ArrayList<>(players);
         all.addAll(zombies);
         return all;
+    }
+
+    /** Authoritative wave remainder used by both UI serialization and survivor cleanup strategy. */
+    public int getRemainingZombieCount() {
+        long alive = getAllCharacters().stream()
+                .filter(p -> p != null && p.isAlive() && p.team == Player.Team.ZOMBIE).count();
+        return (int) Math.min(Integer.MAX_VALUE, alive + Math.max(0, zombiesToSpawn));
     }
 
     /**

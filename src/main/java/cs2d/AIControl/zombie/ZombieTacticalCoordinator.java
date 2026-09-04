@@ -7,6 +7,8 @@ import java.util.function.Predicate;
 
 /** Survivor commander: retain defenders, clear only local weak threats, and tether sorties to home. */
 public final class ZombieTacticalCoordinator {
+    public static final int CLEANUP_REMAINDER_THRESHOLD = 3;
+    private static final int CLEANUP_AGENTS_PER_TARGET = 2;
     private final ZombieThreatEvaluator threats = new ZombieThreatEvaluator();
     private final ZombiePositionPlanner positions = new ZombiePositionPlanner();
 
@@ -37,12 +39,15 @@ public final class ZombieTacticalCoordinator {
                 }).thenComparingDouble(a -> -a.strength()).thenComparing(Unit::id))
                 .limit(limit).toList();
         Set<String> clearing = candidates.stream().map(Unit::id).collect(java.util.stream.Collectors.toSet());
+        Map<String, Contact> cleanupAssignments = assignCleanup(snapshot, agents);
         Map<String, ZombieTacticalOrder> result = new LinkedHashMap<>();
         for (Unit agent : agents) {
             Vec home = homes.get(agent.id());
             ZombieThreatEvaluator.Assessment assessment = threats.assess(agent.position(), snapshot);
             Contact nearest = assessment.threats().stream()
                     .min(Comparator.comparingDouble(c -> c.position().distance(agent.position()))).orElse(null);
+            Contact cleanupTarget = cleanupAssignments.get(agent.id());
+            String targetId = nearest == null ? null : nearest.id();
             List<Vec> threatPoints = assessment.threats().stream().map(Contact::position).toList();
             List<Vec> teammates = snapshot.allies().stream().filter(a -> !a.id().equals(agent.id()))
                     .map(Unit::position).toList();
@@ -52,6 +57,11 @@ public final class ZombieTacticalCoordinator {
                 task = Task.REPOSITION;
                 destination = positions.choose(agent.position(), home, threatPoints, teammates,
                         snapshot.hazards(), snapshot.now(), walkable, null);
+            } else if (cleanupTarget != null) {
+                task = Task.HUNT_REMAINDER;
+                targetId = cleanupTarget.id();
+                destination = positions.choose(agent.position(), cleanupTarget.position(), List.of(), teammates,
+                        snapshot.hazards(), snapshot.now(), walkable, cleanupTarget.position());
             } else if (clearing.contains(agent.id()) && nearest != null
                     && nearest.position().distance(home) <= 650) {
                 task = Task.CLEAR_THREAT;
@@ -72,9 +82,27 @@ public final class ZombieTacticalCoordinator {
                     .anyMatch(a -> a.reloading() && a.position().distance(agent.position()) < 450)) {
                 task = Task.COVER_RELOAD; // Hold own lane, never run into the reloading teammate.
             }
-            result.put(agent.id(), board.assign(agent.id(), task, nearest == null ? null : nearest.id(),
+            result.put(agent.id(), board.assign(agent.id(), task, targetId,
                     destination, home, snapshot.now()));
         }
         return Map.copyOf(result);
+    }
+
+    private static Map<String, Contact> assignCleanup(ZombieTacticalSnapshot snapshot, List<Unit> agents) {
+        if (snapshot.remainingZombies() <= 0
+                || snapshot.remainingZombies() > CLEANUP_REMAINDER_THRESHOLD
+                || snapshot.cleanupLeads().isEmpty()) return Map.of();
+        Set<String> available = agents.stream().filter(Unit::ready).map(Unit::id)
+                .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+        Map<String, Contact> assignments = new HashMap<>();
+        for (Contact lead : snapshot.cleanupLeads().stream().sorted(Comparator.comparing(Contact::id)).toList()) {
+            agents.stream().filter(Unit::ready).filter(agent -> available.contains(agent.id()))
+                    .sorted(Comparator.comparingDouble(agent -> agent.position().distance(lead.position())))
+                    .limit(CLEANUP_AGENTS_PER_TARGET).forEach(agent -> {
+                        assignments.put(agent.id(), lead);
+                        available.remove(agent.id());
+                    });
+        }
+        return assignments;
     }
 }

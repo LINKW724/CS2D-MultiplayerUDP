@@ -21,6 +21,10 @@ class ZombieTacticalCoordinatorTest {
         return commander.plan(new ZombieTacticalSnapshot(now, allies, contacts), board,
                 p -> p.x() > 0 && p.y() > 0 && p.x() < 2000 && p.y() < 2000);
     }
+    private Map<String, ZombieTacticalOrder> cleanupPlan(long now, int remaining, List<Contact> leads) {
+        return commander.plan(new ZombieTacticalSnapshot(now, squad(), List.of(), List.of(), remaining, leads),
+                board, p -> p.x() > 0 && p.y() > 0 && p.x() < 2000 && p.y() < 2000);
+    }
     @Test void noEnemiesMeansGuardAndNoInventedTargets() {
         var result = plan(1000, squad(), List.of());
         assertEquals(6, result.size());
@@ -85,5 +89,21 @@ class ZombieTacticalCoordinatorTest {
         var result = plan(1000, squad(), List.of(new Contact("z", new Vec(600, 500), 100, 1000)));
         assertEquals(Task.REPOSITION, result.get("a").task());
         assertTrue(result.get("a").destination().distance(new Vec(600, 500)) >= 100);
+    }
+
+    @Test void lastFewZombiesAssignLimitedCleanupPairs() {
+        List<Contact> leads = List.of(new Contact("z1", new Vec(1500, 500), 100, 1000),
+                new Contact("z2", new Vec(1500, 900), 100, 1000));
+        var result = cleanupPlan(1000, 2, leads);
+        assertEquals(4, result.values().stream().filter(o -> o.task() == Task.HUNT_REMAINDER).count());
+        assertEquals(2, result.values().stream().filter(o -> o.task() == Task.GUARD_AREA).count());
+        assertTrue(result.values().stream().filter(o -> o.task() == Task.HUNT_REMAINDER)
+                .allMatch(o -> o.targetId().equals("z1") || o.targetId().equals("z2")));
+    }
+
+    @Test void normalWaveSizeDoesNotRevealCleanupLocations() {
+        var result = cleanupPlan(1000, 4,
+                List.of(new Contact("z", new Vec(1500, 500), 100, 1000)));
+        assertTrue(result.values().stream().noneMatch(o -> o.task() == Task.HUNT_REMAINDER));
     }
 }

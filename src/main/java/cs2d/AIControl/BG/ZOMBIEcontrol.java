@@ -33,6 +33,7 @@ public class ZOMBIEcontrol {
     private final Random rand = new Random();
     private final ZombiePositionPlanner positions = new ZombiePositionPlanner();
     private final ZombieGrenadeSafetyPolicy grenadeSafety = new ZombieGrenadeSafetyPolicy();
+    private final ZombiePursuitPlanner pursuit = new ZombiePursuitPlanner();
     private Player primaryTarget;
     private Point2D.Double lastKnownPosition;
     private long nextPositionAt;
@@ -43,6 +44,10 @@ public class ZOMBIEcontrol {
     private long grenadeDeadline;
     private Item grenadeItem;
     private boolean wasEmergency;
+    private Vec lastZombieProgressPosition;
+    private long lastZombieProgressAt;
+    private Vec zombieDetourTarget;
+    private long zombieDetourUntil;
 
     public ZOMBIEcontrol(Player owner, GameState gameState, AIDifficulty difficulty,
             PerceptionModule perceptionModule, AttackModule attackModule,
@@ -282,7 +287,27 @@ public class ZOMBIEcontrol {
             }
             return new AIInput(List.of(), angle, false, false, false);
         }
-        moveTo(Vec.of(primaryTarget.position));
+        Vec origin = Vec.of(owner.position);
+        List<ZombiePursuitPlanner.Neighbor> pack = gameState.getAllCharacters().stream()
+                .filter(p -> p != null && p.isAlive() && p.team == Player.Team.ZOMBIE && p.position != null)
+                .map(p -> new ZombiePursuitPlanner.Neighbor(p.id, Vec.of(p.position))).toList();
+        if (lastZombieProgressPosition == null || origin.distance(lastZombieProgressPosition) >= 14) {
+            lastZombieProgressPosition = origin;
+            lastZombieProgressAt = now;
+            zombieDetourTarget = null;
+        }
+        boolean congested = owner.isCollidingWithTeammate
+                || pack.stream().anyMatch(p -> !p.id().equals(owner.id) && p.position().distance(origin) < 28);
+        if ((congested || now - lastZombieProgressAt >= 1_000) && now >= zombieDetourUntil) {
+            zombieDetourTarget = pursuit.detour(owner.id, origin, Vec.of(primaryTarget.position), pack,
+                    this::walkable);
+            zombieDetourUntil = now + 750;
+            lastZombieProgressAt = now;
+        }
+        Vec destination = zombieDetourTarget != null && now < zombieDetourUntil
+                ? zombieDetourTarget
+                : pursuit.engagementPoint(owner.id, Vec.of(primaryTarget.position), pack, this::walkable);
+        moveTo(destination);
         AIInput movement = pathfindingModule.update(world);
         return new AIInput(movement.keys(), movement.angle(), false, false, false);
     }
@@ -299,6 +324,10 @@ public class ZOMBIEcontrol {
         grenadeBusy = false;
         grenadeItem = null;
         wasEmergency = false;
+        lastZombieProgressPosition = null;
+        lastZombieProgressAt = 0;
+        zombieDetourTarget = null;
+        zombieDetourUntil = 0;
         if (pathfindingModule != null) pathfindingModule.reset();
         if (attackModule != null) attackModule.reset();
         if (grenadeModule != null) grenadeModule.cancelPendingWork();

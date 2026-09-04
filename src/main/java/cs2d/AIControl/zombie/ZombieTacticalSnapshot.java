@@ -6,14 +6,21 @@ import java.util.List;
 
 /** Immutable input: allied status is authoritative; enemy positions come only from fresh intel. */
 public record ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> contacts,
-                                     List<ZombieAreaHazard> hazards) {
+                                     List<ZombieAreaHazard> hazards, int remainingZombies,
+                                     List<Contact> cleanupLeads) {
     public ZombieTacticalSnapshot {
         allies = List.copyOf(allies);
         contacts = List.copyOf(contacts);
         hazards = List.copyOf(hazards);
+        remainingZombies = Math.max(0, remainingZombies);
+        cleanupLeads = List.copyOf(cleanupLeads);
     }
     public ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> contacts) {
-        this(now, allies, contacts, List.of());
+        this(now, allies, contacts, List.of(), 0, List.of());
+    }
+    public ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> contacts,
+            List<ZombieAreaHazard> hazards) {
+        this(now, allies, contacts, hazards, 0, List.of());
     }
     public record Vec(double x, double y) {
         public double distance(Vec other) { return Math.hypot(x - other.x, y - other.y); }
