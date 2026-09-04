@@ -33,11 +33,19 @@ public record ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> 
         public static Vec of(Point2D.Double p) { return new Vec(p.x, p.y); }
     }
     public record Unit(String id, Player.Team team, Vec position, int health, int ammo,
-                       boolean reloading, boolean independentAi, double firepower) {
+                       boolean reloading, boolean independentAi, double firepower, long lastShotAt) {
+        public Unit(String id, Player.Team team, Vec position, int health, int ammo,
+                boolean reloading, boolean independentAi, double firepower) {
+            this(id, team, position, health, ammo, reloading, independentAi, firepower, 0);
+        }
         public boolean ready() { return health >= 40 && ammo > 0 && !reloading && firepower > 0; }
         public double strength() {
             return ready() ? firepower * Math.min(1.0, ammo / 8.0) * Math.min(1.0, health / 80.0) : 0.0;
         }
     }
-    public record Contact(String id, Vec position, int health, long observedAt) {}
+    public record Contact(String id, Vec position, int health, long observedAt, String observerId) {
+        public Contact(String id, Vec position, int health, long observedAt) {
+            this(id, position, health, observedAt, null);
+        }
+    }
 }

@@ -6,7 +6,8 @@ import cs2d.AIControl.zombie.ZombieTacticalSnapshot.Vec;
 public record ZombieTacticalOrder(String agentId, long generation, Task task, String targetId,
                                   Vec destination, Vec guardPoint, Vec watchPoint,
                                   long startedAt, long expiresAt) {
-    public enum Task { GUARD_AREA, FORTIFY_LANE, REINFORCE_LANE, MOBILE_RESERVE,
+    public enum Task { GUARD_AREA, HOLD_FRONT, SUPPORT_FRONT,
+        FORTIFY_LANE, REINFORCE_LANE, MOBILE_RESERVE,
         CLEAR_THREAT, HUNT_REMAINDER, COVER_RELOAD, REPOSITION, RETURN_TO_GUARD }
     public boolean active(long now) { return now <= expiresAt; }
     public double watchAngle() { return Math.floorMod(agentId.hashCode(), 12) * Math.PI / 6; }

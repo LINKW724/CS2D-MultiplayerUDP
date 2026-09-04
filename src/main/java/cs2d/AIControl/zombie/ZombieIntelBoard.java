@@ -17,7 +17,7 @@ public final class ZombieIntelBoard {
         Observation previous = team.get(enemy.id());
         if (previous == null || previous.contact().observedAt() <= now) {
             team.put(enemy.id(), new Observation(observer.id(),
-                    new Contact(enemy.id(), enemy.position(), enemy.health(), now)));
+                    new Contact(enemy.id(), enemy.position(), enemy.health(), now, observer.id())));
         }
     }
 

@@ -122,4 +122,17 @@ class ZombieTacticalCoordinatorTest {
                 .filter(o -> o.task() == Task.REINFORCE_LANE || o.task() == Task.MOBILE_RESERVE)
                 .allMatch(o -> watch.equals(o.watchPoint())));
     }
+
+    @Test void activeFrontKeepsShooterAndPullsIdleAgentsOutOfBlindGuardAreas() {
+        List<Contact> fight = new ArrayList<>();
+        for (int i = 0; i < 6; i++)
+            fight.add(new Contact("z" + i, new Vec(1_150 + i * 20, 560 + i * 8),
+                    500, 1_000, "a"));
+        var result = commander.plan(new ZombieTacticalSnapshot(1_000, squad(), fight), board,
+                p -> p.x() > 0 && p.y() > 0 && p.x() < 2_000 && p.y() < 2_000);
+        assertEquals(Task.HOLD_FRONT, result.get("a").task());
+        assertEquals(3, result.values().stream().filter(o -> o.task() == Task.SUPPORT_FRONT).count());
+        assertTrue(result.values().stream().filter(o -> o.task() == Task.SUPPORT_FRONT)
+                .allMatch(o -> o.watchPoint() != null && o.targetId().startsWith("front:")));
+    }
 }

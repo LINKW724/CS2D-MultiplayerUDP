@@ -5,13 +5,15 @@ import cs2d.AIControl.zombie.ZombieTacticalOrder.Task;
 import java.util.*;
 import java.util.function.Predicate;
 
-/** Survivor commander: retain defenders, clear only local weak threats, and tether sorties to home. */
+/** Survivor commander: reinforce active fronts, stage predicted lanes, and retain local safety overrides. */
 public final class ZombieTacticalCoordinator {
     public static final int CLEANUP_REMAINDER_THRESHOLD = 3;
     private static final int CLEANUP_AGENTS_PER_TARGET = 2;
     private final ZombieThreatEvaluator threats = new ZombieThreatEvaluator();
     private final ZombiePositionPlanner positions = new ZombiePositionPlanner();
     private final ZombieDefenseAllocator defenseAllocator = new ZombieDefenseAllocator();
+    private final ZombieCombatFrontPlanner frontPlanner = new ZombieCombatFrontPlanner();
+    private final ZombieFrontSupportAllocator frontAllocator = new ZombieFrontSupportAllocator();
 
     public Map<String, ZombieTacticalOrder> plan(ZombieTacticalSnapshot snapshot,
             ZombieTacticalTaskBoard board, Predicate<Vec> walkable) {
@@ -41,6 +43,9 @@ public final class ZombieTacticalCoordinator {
                 .limit(limit).toList();
         Set<String> clearing = candidates.stream().map(Unit::id).collect(java.util.stream.Collectors.toSet());
         Map<String, Contact> cleanupAssignments = assignCleanup(snapshot, agents);
+        List<ZombieCombatFront> combatFronts = frontPlanner.detect(snapshot, walkable);
+        Map<String, ZombieFrontSupportAllocator.Assignment> frontAssignments =
+                frontAllocator.allocate(agents, combatFronts);
         Map<String, ZombieDefenseAllocator.Assignment> defenseAssignments =
                 defenseAllocator.allocate(agents, snapshot.attackLanes());
         Map<String, ZombieTacticalOrder> result = new LinkedHashMap<>();
@@ -71,6 +76,13 @@ public final class ZombieTacticalCoordinator {
                     .anyMatch(a -> a.reloading() && a.position().distance(agent.position()) < 450)) {
                 task = Task.COVER_RELOAD; // Immediate local support takes precedence over distant deployment.
                 watchPoint = nearest.position();
+            } else if (frontAssignments.containsKey(agent.id())) {
+                ZombieFrontSupportAllocator.Assignment assignment = frontAssignments.get(agent.id());
+                task = assignment.role() == ZombieFrontSupportAllocator.Role.HOLD
+                        ? Task.HOLD_FRONT : Task.SUPPORT_FRONT;
+                targetId = assignment.frontId();
+                destination = assignment.destination();
+                watchPoint = assignment.watchPoint();
             } else if (defenseAssignments.containsKey(agent.id())) {
                 ZombieDefenseAllocator.Assignment assignment = defenseAssignments.get(agent.id());
                 task = switch (assignment.role()) {

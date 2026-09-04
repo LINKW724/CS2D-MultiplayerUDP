@@ -57,4 +57,11 @@ class ZombiePositionPlannerTest {
         assertTrue(planner.safeSegment(new Vec(100, 100), new Vec(300, 100), List.of(),
                 List.of(fire), 1_000, p -> true));
     }
+
+    @Test void distantGoalAcrossWallDelegatesDetourToAStar() {
+        assertFalse(planner.requiresLocalDetour(new Vec(100, 100), new Vec(700, 100), List.of(),
+                List.of(), 1_000, p -> p.x() < 180 || p.x() > 220));
+        assertTrue(planner.requiresLocalDetour(new Vec(100, 100), new Vec(300, 100), List.of(),
+                List.of(), 1_000, p -> p.x() < 180 || p.x() > 220));
+    }
 }

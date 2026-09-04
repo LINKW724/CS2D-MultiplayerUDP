@@ -67,6 +67,16 @@ public final class ZombiePositionPlanner {
         return true;
     }
 
+    /** Far strategic goals use A* around walls; only nearby movement requires a clear direct segment. */
+    public boolean requiresLocalDetour(Vec origin, Vec destination, List<Vec> threats,
+            List<ZombieAreaHazard> hazards, long now, Predicate<Vec> walkable) {
+        if (origin == null || destination == null || !walkable.test(destination)) return true;
+        if (hazards.stream().anyMatch(h -> h != null && h.active(now)
+                && h.contains(destination, 24))) return true;
+        return origin.distance(destination) <= 320
+                && !safeSegment(origin, destination, threats, hazards, now, walkable);
+    }
+
     private double score(Vec origin, Vec candidate, Vec desired, List<Vec> threats,
                          List<Vec> teammates, List<ZombieAreaHazard> hazards, long now,
                          Predicate<Vec> walkable, Vec firingTarget) {

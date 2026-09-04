@@ -139,8 +139,8 @@ public class ZOMBIEcontrol {
         if (desired == null) desired = origin;
         if (now >= nextPositionAt || movementGoal == null) {
             Vec local = desired;
-            if (emergency || blockedFire || !positions.safeSegment(origin, desired, threats,
-                    hazards, now, this::walkable)
+            if (emergency || blockedFire || positions.requiresLocalDetour(origin, desired,
+                    threats, hazards, now, this::walkable)
                     || teammates.stream().anyMatch(p -> p.distance(origin) < 50)) {
                 local = positions.choose(origin, desired, threats, teammates, hazards, now, this::walkable,
                         blockedFire && !emergency ? Vec.of(primaryTarget.position) : null);

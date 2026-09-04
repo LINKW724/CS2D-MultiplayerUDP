@@ -50,4 +50,12 @@ class ZombieIntelBoardTest {
         board.report(ct, zombie, 1000);
         assertEquals(2000, board.contacts(Team.CT, Map.of("ct", ct, "z", zombie), 2100).get(0).observedAt());
     }
+
+    @Test void sharedContactRetainsTheSpotterForFrontStaffing() {
+        ZombieIntelBoard board = new ZombieIntelBoard();
+        Unit ct = unit("ct", Team.CT), zombie = unit("z", Team.ZOMBIE);
+        board.report(ct, zombie, 1_000);
+        assertEquals("ct", board.contacts(Team.CT, Map.of("ct", ct, "z", zombie), 1_001)
+                .get(0).observerId());
+    }
 }

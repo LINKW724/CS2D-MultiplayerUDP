@@ -129,6 +129,6 @@ final class ZombieTacticalRuntime {
             default -> 0.8;
         };
         return new Unit(p.id, p.team, Vec.of(p.position), p.health, p.currentAmmo, p.isReloading,
-                p.isAI && !p.isControlledByPlayer(), power);
+                p.isAI && !p.isControlledByPlayer(), power, p.lastShotTime);
     }
 }
