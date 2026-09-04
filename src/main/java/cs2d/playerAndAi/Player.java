@@ -144,8 +144,9 @@ public class Player {
       public final ZOMBIEcontrol zombieController;
 
       public long lastSuppressedTime = 0;
-      public Point2D.Double lastDamageSourcePosition = null;
-      public long lastDamageSourcePositionTime = 0;
+      public volatile Point2D.Double lastDamageSourcePosition = null;
+      public volatile long lastDamageSourcePositionTime = 0;
+      public volatile Team lastDamageSourceTeam = null;
 
       public boolean isWalking = false;
       public long lastFootstepTime = 0;
@@ -552,6 +553,9 @@ public class Player {
             this.position = spawnPoint;
             this.isInvincible = SpawnProtectionPolicy.enabled(gameMode);
             this.respawnTime = System.currentTimeMillis();
+            this.lastDamageSourcePosition = null;
+            this.lastDamageSourcePositionTime = 0;
+            this.lastDamageSourceTeam = null;
             this.isReloading = false;
             this.vx = 0;
             this.vy = 0;

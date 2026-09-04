@@ -7,6 +7,7 @@ import java.awt.geom.Point2D;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class PlayerRespawnTest {
@@ -62,5 +63,22 @@ class PlayerRespawnTest {
 
         player.respawn(new Point2D.Double(200, 300), GameMode.TEAM_DEATHMATCH);
         assertTrue(player.isInvincible);
+    }
+
+    @Test
+    void respawnClearsStaleDamageThreatMemory() {
+        Player player = new Player(
+                "player-1", "Tester", new Point2D.Double(0, 0), Player.Team.CT, false,
+                GameMode.ZOMBIE_MODE, null, null, ignored -> {
+                });
+        player.lastDamageSourcePosition = new Point2D.Double(50, 60);
+        player.lastDamageSourcePositionTime = 1234;
+        player.lastDamageSourceTeam = Player.Team.ZOMBIE;
+
+        player.respawn(new Point2D.Double(100, 200), GameMode.ZOMBIE_MODE);
+
+        assertNull(player.lastDamageSourcePosition);
+        assertEquals(0, player.lastDamageSourcePositionTime);
+        assertNull(player.lastDamageSourceTeam);
     }
 }

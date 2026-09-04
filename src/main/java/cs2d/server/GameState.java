@@ -1263,9 +1263,13 @@ public class GameState {
 
         // 解决所有碰撞和穿透（人-人，人-墙），并修正最终位置
         allCharacters.forEach(p -> p.isCollidingWithTeammate = false);
-        allCharacters.stream()
-                .filter(Player::isAlive)
-                .forEach(this::resolveCollisionsAndSliding);
+        List<Player> livingCharacters = allCharacters.stream().filter(Player::isAlive).toList();
+        List<Player> collisionOrder = livingCharacters.stream()
+                .sorted(Comparator.comparing((Player p) -> p.id).reversed()).toList();
+        for (int worldPass = 0; worldPass < 3; worldPass++) {
+            if (worldPass > 0) rebuildSpatialGrid(livingCharacters);
+            collisionOrder.forEach(this::resolveCollisionsAndSliding);
+        }
 
         long timeAfterPhysics = System.nanoTime();
         // ------------------------------------
@@ -2972,6 +2976,11 @@ public class GameState {
             double healthBeforeHit = target.health;
 
             target.takeDamage(new Player.DamageInfo(finalDamage, isHeadshot)); // 1. 先施加伤害
+            if (shooter != null && shooter.position != null) {
+                target.lastDamageSourcePosition = new Point2D.Double(shooter.position.x, shooter.position.y);
+                target.lastDamageSourcePositionTime = System.currentTimeMillis();
+                target.lastDamageSourceTeam = shooter.team;
+            }
 
             // --->>> [新] actualDamageDealt: 计算实际损失的生命值 <<<---
             // 使用 Math.ceil 确保至少扣了 1 血时显示 1, Math.max 确保非负
@@ -3025,7 +3034,9 @@ public class GameState {
                 privateDamageEvents.add(new TargetedDamageEvent(targetRecipientId, payload));
             }
 
-            target.slowUntil = System.currentTimeMillis() + 300; // 中弹减速
+            long slowDuration = DamageMovementPolicy.slowDurationMillis(gameMode,
+                    shooter == null ? null : shooter.team, weaponName);
+            if (slowDuration > 0) target.slowUntil = System.currentTimeMillis() + slowDuration;
 
             // 7. 如果确实是击杀，调用 handlePlayerKill
             if (isKill) {
@@ -6192,7 +6203,7 @@ public class GameState {
      * 玩家-玩家碰撞部分已依赖于空间网格 (在 update() 中填充)。
      */
     public void resolveCollisionsAndSliding(Player player) {
-        int collisionPasses = 5; // 迭代 5 次以确保稳定
+        int collisionPasses = 2; // 配合外层全局迭代，墙体修正后会重新处理单位对
         double min_separation = 0.1; // 最小安全推离距离
         double radius = Player.SIZE / 2.0;
         double totalRadius = Player.SIZE; // 两个半径之和
@@ -6312,6 +6323,26 @@ public class GameState {
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+
+    /** Re-index corrected positions between global collision passes. */
+    private void rebuildSpatialGrid(List<Player> characters) {
+        for (int x = 0; x < gridWidth; x++) {
+            for (int y = 0; y < gridHeight; y++) {
+                synchronized (spatialGrid[x][y]) {
+                    spatialGrid[x][y].clear();
+                }
+            }
+        }
+        for (Player character : characters) {
+            int gridX = (int) (character.position.x / gridCellSize);
+            int gridY = (int) (character.position.y / gridCellSize);
+            if (gridX >= 0 && gridX < gridWidth && gridY >= 0 && gridY < gridHeight) {
+                synchronized (spatialGrid[gridX][gridY]) {
+                    spatialGrid[gridX][gridY].add(character);
                 }
             }
         }

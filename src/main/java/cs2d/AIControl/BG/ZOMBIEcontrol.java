@@ -35,6 +35,8 @@ public class ZOMBIEcontrol {
     private final ZombieGrenadeSafetyPolicy grenadeSafety = new ZombieGrenadeSafetyPolicy();
     private final ZombiePursuitPlanner pursuit = new ZombiePursuitPlanner();
     private final ZombieCrowdFirePlanner crowdFire = new ZombieCrowdFirePlanner();
+    private final ZombieSurvivorMobilityPolicy mobility = new ZombieSurvivorMobilityPolicy();
+    private final ZombieEscapePlanner escape = new ZombieEscapePlanner();
     private Player primaryTarget;
     private ZombieCrowdFirePlanner.Decision crowdFireDecision = ZombieCrowdFirePlanner.Decision.NONE;
     private Point2D.Double lastKnownPosition;
@@ -46,6 +48,7 @@ public class ZOMBIEcontrol {
     private long grenadeDeadline;
     private Item grenadeItem;
     private boolean wasEmergency;
+    private boolean kiting;
     private Vec lastZombieProgressPosition;
     private long lastZombieProgressAt;
     private Vec zombieDetourTarget;
@@ -112,19 +115,32 @@ public class ZOMBIEcontrol {
     }
 
     private AIInput executeSurvivor(AIWorldView world, long now, ZombieTacticalOrder order) {
-        List<Vec> threats = visibleThreats();
+        List<Vec> threats = new ArrayList<>(visibleThreats());
         List<ZombieAreaHazard> hazards = activeHazards(now);
         Vec origin = Vec.of(owner.position);
+        boolean inHazard = hazards.stream().anyMatch(hazard -> hazard.contains(origin, Player.SIZE));
+        long lastZombieDamageAt = owner.lastDamageSourceTeam == Player.Team.ZOMBIE
+                ? owner.lastDamageSourcePositionTime : 0;
+        if (owner.lastDamageSourcePosition != null && lastZombieDamageAt > 0
+                && now >= owner.lastDamageSourcePositionTime
+                && now - owner.lastDamageSourcePositionTime <= ZombieSurvivorMobilityPolicy.DAMAGE_ESCAPE_MS) {
+            Vec damageSource = Vec.of(owner.lastDamageSourcePosition);
+            if (threats.stream().noneMatch(t -> t.distance(damageSource) < 8)) threats.add(damageSource);
+        }
         double nearest = threats.stream().mapToDouble(origin::distance).min().orElse(Double.POSITIVE_INFINITY);
-        boolean emergency = nearest < 170
-                || hazards.stream().anyMatch(hazard -> hazard.contains(origin, Player.SIZE));
+        ZombieSurvivorMobilityPolicy.Decision mobilityDecision = mobility.decide(
+                owner.primaryWeapon, owner.secondaryWeapon, nearest, inHazard,
+                lastZombieDamageAt, now, kiting);
+        kiting = mobilityDecision.kiting();
+        boolean emergency = mobilityDecision.emergency();
         if (emergency && !wasEmergency) nextPositionAt = 0;
         wasEmergency = emergency;
-        if (owner.currentAmmo <= 0 && owner.reserveAmmo > 0 && !owner.isReloading)
-            owner.startReload();
 
         AIInput grenade = grenadeAction(world, now, nearest, threats, hazards);
         if (grenade != null) return grenade;
+        applyCombatWeapon(mobilityDecision.desiredWeaponSlot());
+        if (owner.currentAmmo <= 0 && owner.reserveAmmo > 0 && !owner.isReloading)
+            owner.startReload();
 
         List<Vec> teammates = gameState.getAllCharacters().stream()
                 .filter(p -> p != null && p != owner && p.isAlive() && p.team == owner.team && p.position != null)
@@ -134,7 +150,10 @@ public class ZOMBIEcontrol {
         if (desired == null) desired = origin;
         if (now >= nextPositionAt || movementGoal == null) {
             Vec local = desired;
-            if (emergency || positions.requiresLocalDetour(origin, desired,
+            if (emergency) {
+                local = escape.choose(origin, threats, teammates, hazards, now, this::walkable,
+                        (from, to) -> positions.safeSegment(from, to, List.of(), hazards, now, this::walkable));
+            } else if (positions.requiresLocalDetour(origin, desired,
                     threats, hazards, now, this::walkable)
                     || teammates.stream().anyMatch(p -> p.distance(origin) < 50)) {
                 local = positions.choose(origin, desired, threats, teammates, hazards, now, this::walkable,
@@ -174,7 +193,11 @@ public class ZOMBIEcontrol {
     }
 
     private void moveTo(Vec point) {
-        if (point == null || point.distance(Vec.of(owner.position)) <= 30) {
+        moveTo(point, 30);
+    }
+
+    private void moveTo(Vec point, double arrivalRadius) {
+        if (point == null || point.distance(Vec.of(owner.position)) <= arrivalRadius) {
             if (pathfindingModule.isActive()) pathfindingModule.setTarget(null);
             return;
         }
@@ -280,8 +303,14 @@ public class ZOMBIEcontrol {
     }
 
     private void restoreGun() {
-        if (owner.primaryWeapon != null) owner.switchToSlot(1);
+        if (kiting && owner.secondaryWeapon != null) owner.switchToSlot(2);
+        else if (owner.primaryWeapon != null) owner.switchToSlot(1);
         else if (owner.secondaryWeapon != null) owner.switchToSlot(2);
+    }
+
+    private void applyCombatWeapon(int desiredSlot) {
+        if (!grenadeBusy && desiredSlot > 0 && owner.currentSlot != desiredSlot)
+            owner.switchToSlot(desiredSlot);
     }
 
     private AIInput executeZombie(AIWorldView world, long now) {
@@ -299,12 +328,10 @@ public class ZOMBIEcontrol {
         double angle = Math.atan2(primaryTarget.position.y - owner.position.y,
                 primaryTarget.position.x - owner.position.x);
         if (distance < Player.SIZE * 1.5 && pathfindingModule.hasLineOfSight(primaryTarget.position)) {
-            pathfindingModule.setTarget(null);
             if (now - lastMeleeTime >= 1_000 && ZombieHostilityPolicy.canTarget(owner, primaryTarget)) {
                 gameState.requestMelee(owner, primaryTarget, 20);
                 lastMeleeTime = now;
             }
-            return new AIInput(List.of(), angle, false, false, false);
         }
         Vec origin = Vec.of(owner.position);
         List<ZombiePursuitPlanner.Neighbor> pack = gameState.getAllCharacters().stream()
@@ -326,7 +353,7 @@ public class ZOMBIEcontrol {
         Vec destination = zombieDetourTarget != null && now < zombieDetourUntil
                 ? zombieDetourTarget
                 : pursuit.engagementPoint(owner.id, Vec.of(primaryTarget.position), pack, this::walkable);
-        moveTo(destination);
+        moveTo(destination, 8);
         AIInput movement = pathfindingModule.update(world);
         return new AIInput(movement.keys(), movement.angle(), false, false, false);
     }
@@ -343,6 +370,7 @@ public class ZOMBIEcontrol {
         grenadeBusy = false;
         grenadeItem = null;
         wasEmergency = false;
+        kiting = false;
         lastZombieProgressPosition = null;
         lastZombieProgressAt = 0;
         zombieDetourTarget = null;
