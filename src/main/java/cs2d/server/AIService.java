@@ -44,6 +44,7 @@ public class AIService implements Runnable {
     private boolean freezeCleanupApplied = false;
     private final int aiTps;
     private final TeamTacticalRuntime tacticalRuntime;
+    private final ZombieTacticalRuntime zombieTacticalRuntime;
     private static final long SCHEDULER_LOG_INTERVAL_MS = Math.max(1_000L,
             Long.getLong("cs2d.ai.schedulerLogMs", 5_000L));
     private long nextSchedulerLogAt;
@@ -78,6 +79,7 @@ public class AIService implements Runnable {
         this.aiTps = aiTps;
         this.logger = logger;
         this.tacticalRuntime = new TeamTacticalRuntime(gameState, tacticalCoordinator);
+        this.zombieTacticalRuntime = new ZombieTacticalRuntime(gameState);
     }
 
     public void start() {
@@ -85,6 +87,7 @@ public class AIService implements Runnable {
         // [新增] 清空残留状态，确保重启后干净
         aiShortTermMemory.clear();
         aiPerceptionTimestamps.clear();
+        zombieTacticalRuntime.clear();
         nextSchedulerLogAt = System.currentTimeMillis() + SCHEDULER_LOG_INTERVAL_MS;
         new Thread(this, "AI-Service-Ticker").start();
     }
@@ -92,6 +95,7 @@ public class AIService implements Runnable {
     public void stop() {
         this.running = false;
         this.aiScheduler.close();
+        zombieTacticalRuntime.clear();
     }
 
     @Override
@@ -141,6 +145,7 @@ public class AIService implements Runnable {
                 aiShortTermMemory.clear();
                 aiPerceptionTimestamps.clear();
                 tacticalRuntime.clear();
+                zombieTacticalRuntime.clear();
                 aiScheduler.clearPending();
                 freezeCleanupApplied = true;
             }
@@ -189,6 +194,12 @@ public class AIService implements Runnable {
             tacticalRuntime.clear();
         }
 
+        if (currentMode == GameMode.ZOMBIE_MODE) {
+            zombieTacticalRuntime.update(currentTime, independentAIs);
+        } else {
+            zombieTacticalRuntime.clear();
+        }
+
         for (Player ai : independentAIs) {
             if (aiScheduler.isShutdown())
                 break;
@@ -230,7 +241,9 @@ public class AIService implements Runnable {
                     } else if (currentMode == GameMode.ZOMBIE_MODE) {
                         ZOMBIEcontrol zombieController = ai.getZombieController();
                         if (zombieController != null) {
-                            finalInput = zombieController.update(perception, currentTime);
+                            finalInput = zombieController.update(perception, currentTime,
+                                    zombieTacticalRuntime.orderFor(ai, currentTime));
+                            zombieTacticalRuntime.report(ai, currentTime);
                         }
                     } else if (currentMode == GameMode.DEMOLITION) {
                         // [NEW] Basic fallback for Demolition mode managed by RL
@@ -299,9 +312,15 @@ public class AIService implements Runnable {
                             }
 
                             java.awt.geom.Point2D.Double lkp = closestEnemy != null ? closestEnemy.position : null;
-                            attackInput = attackModule.update(closestEnemy, lkp, currentTime);
+                            attackInput = attackModule.update(closestEnemy, lkp, currentTime,
+                                    currentMode == GameMode.ZOMBIE_MODE
+                                            ? cs2d.AIControl.A.AttackExecutionPolicy.ZOMBIE_SURVIVOR
+                                            : cs2d.AIControl.A.AttackExecutionPolicy.STANDARD);
                             if (attackInput != null) {
                                 shouldShoot = attackInput.shooting();
+                                if (currentMode == GameMode.ZOMBIE_MODE)
+                                    shouldShoot &= cs2d.AIControl.zombie.ZombieHostilityPolicy.clearShot(
+                                            ai, closestEnemy, gameState.getAllCharacters());
                             }
                         }
 

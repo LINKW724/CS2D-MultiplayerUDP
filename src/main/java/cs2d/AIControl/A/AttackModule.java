@@ -42,6 +42,7 @@ public class AttackModule {
     private long targetAcquiredTime = 0; // 锁定当前目标的时间戳
     private long burstCooldownUntil = 0; // 连射冷却结束的时间戳
     private int shotsFiredAtCurrentTarget = 0; // 对当前目标已射击的次数
+    private long lastCountedShotTime;
 
     // --- 狙击枪 & 机枪专项状态 ---
     private boolean sniperNeedsRetreat = false; // 狙击枪开火后是否需要撤退
@@ -86,6 +87,16 @@ public class AttackModule {
      * 更新攻击模块的逻辑。
      */
     public AIInput update(Player primaryTarget, Point2D.Double lastKnownPosition, long currentTime) {
+        return update(primaryTarget, lastKnownPosition, currentTime, AttackExecutionPolicy.STANDARD);
+    }
+
+    public AIInput update(Player primaryTarget, Point2D.Double lastKnownPosition, long currentTime,
+            AttackExecutionPolicy policy) {
+        if (policy == null) policy = AttackExecutionPolicy.STANDARD;
+        if (!policy.acceptsTarget(owner, primaryTarget)) {
+            primaryTarget = null;
+            lastKnownPosition = null;
+        }
 
         // --- 1. 处理闪光弹 ---
         if (currentTime < lastFlashTime + flashDuration) {
@@ -94,7 +105,7 @@ public class AttackModule {
             this.shotsFiredAtCurrentTarget = 0; // 重置射击计数
             updateAimAngle(); // 更新角度
             // 返回随机射击的指令
-            return new AIInput(new ArrayList<>(), this.currentAngle, rand.nextDouble() < 0.1, false, false);
+            return new AIInput(new ArrayList<>(), this.currentAngle, policy.allowsBlindFire() && rand.nextDouble() < 0.1, false, false);
         }
 
         // --- 2. 处理目标切换 ---
@@ -108,6 +119,11 @@ public class AttackModule {
                 this.owner.shootTimeIndex = 0; // 添加 null 检查，重置压枪模式
             this.lastTargetId = currentTargetId; // 更新最后目标 ID
             this.lmgSweepOffset = 0; // 重置扫射
+            this.lastCountedShotTime = owner.lastShotTime;
+        }
+        if (policy == AttackExecutionPolicy.ZOMBIE_SURVIVOR && owner.lastShotTime > lastCountedShotTime) {
+            shotsFiredAtCurrentTarget++;
+            lastCountedShotTime = owner.lastShotTime;
         }
 
         // --- 3. 武器决策与切换 (狙击手近战保护) ---
@@ -144,7 +160,7 @@ public class AttackModule {
                     wantsToShoot = decideShooting(primaryTarget, currentTime, lastKnownPosition);
                 } else {
                     // 没有视线（隔着墙），走穿透射击判定
-                    wantsToShoot = decideBlindFire(primaryTarget.position, currentTime);
+                    wantsToShoot = policy.allowsBlindFire() && decideBlindFire(primaryTarget.position, currentTime);
                 }
             }
         } else if (lastKnownPosition != null) { // 机枪盲射扫射逻辑
@@ -154,7 +170,7 @@ public class AttackModule {
             } else {
                 aimAt(lastKnownPosition);
             }
-            wantsToShoot = decideBlindFire(lastKnownPosition, currentTime);
+            wantsToShoot = policy.allowsBlindFire() && decideBlindFire(lastKnownPosition, currentTime);
         }
 
         // --- 4b. 更新瞄准角度 ---
@@ -168,9 +184,12 @@ public class AttackModule {
 
         // 是否需要强制急停 (长枪/手枪/机枪)
         // 如果是盲射(lkp != null && wantsToShoot)，无论什么武器都必须急停以保证穿透点的准确性
-        boolean isAttemptingBlindFire = (lastKnownPosition != null && wantsToShoot);
-        boolean needsAccuracy = isAttemptingBlindFire
-                || (wep != null && (wep.getWeaponType().isLongRange() || wep.getWeaponType().isPistol()));
+        boolean directSight = primaryTarget != null && owner.getPathfindingModule() != null
+                && owner.getPathfindingModule().hasLineOfSight(primaryTarget.position);
+        boolean isAttemptingBlindFire = lastKnownPosition != null && wantsToShoot
+                && (policy == AttackExecutionPolicy.STANDARD || !directSight);
+        boolean needsAccuracy = policy.requiresStop(wep == null ? null : wep.getWeaponType(),
+                lastKnownPosition != null, wantsToShoot, directSight);
 
         // --- 4d. 战斗移动决策 (急停或身法) ---
         // 只有在“真正交火”时才执行身法。
@@ -235,7 +254,7 @@ public class AttackModule {
                 if (currentSpeedSq <= ACCURACY_STOP_THRESHOLD_SQ) {
                     finalShouldShoot = isAimAccurate;
                     if (finalShouldShoot) {
-                        applyBurstLogic(currentTime, wep); // 只有真正开火才处理连射
+                        applyBurstLogic(currentTime, wep, policy); // 只有真正开火才处理连射
                         if (wep.getWeaponType() == Weapon.WeaponType.SNIPER) {
                             this.sniperNeedsRetreat = true;
                         }
@@ -246,7 +265,7 @@ public class AttackModule {
             } else {
                 finalShouldShoot = isAimAccurate;
                 if (finalShouldShoot) {
-                    applyBurstLogic(currentTime, wep); // 只有真正开火才处理连射
+                    applyBurstLogic(currentTime, wep, policy); // 只有真正开火才处理连射
                 }
             }
         }
@@ -257,9 +276,12 @@ public class AttackModule {
     /**
      * 只有在真正执行射击时，才更新射击计数器并计算连射冷却。
      */
-    private void applyBurstLogic(long currentTime, Weapon wep) {
+    private void applyBurstLogic(long currentTime, Weapon wep, AttackExecutionPolicy policy) {
         if (wep == null)
             return;
+
+        // Automatic survivor weapons remain held until ammo, visibility or target validity stops fire.
+        if (policy.continuousFire(wep.getWeaponType())) return;
 
         // --- 连射限制 ---
         int maxBurst = difficulty.maxBurstShots;
