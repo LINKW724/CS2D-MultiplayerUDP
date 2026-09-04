@@ -34,7 +34,9 @@ public class ZOMBIEcontrol {
     private final ZombiePositionPlanner positions = new ZombiePositionPlanner();
     private final ZombieGrenadeSafetyPolicy grenadeSafety = new ZombieGrenadeSafetyPolicy();
     private final ZombiePursuitPlanner pursuit = new ZombiePursuitPlanner();
+    private final ZombieCrowdFirePlanner crowdFire = new ZombieCrowdFirePlanner();
     private Player primaryTarget;
+    private ZombieCrowdFirePlanner.Decision crowdFireDecision = ZombieCrowdFirePlanner.Decision.NONE;
     private Point2D.Double lastKnownPosition;
     private long nextPositionAt;
     private long nextGrenadeAt;
@@ -68,20 +70,37 @@ public class ZOMBIEcontrol {
     public AIInput update(AIWorldView world, long now, ZombieTacticalOrder order) {
         if (!owner.isAlive()) { reset(); return neutral(); }
         perceptionModule.update(world, now);
-        selectPrimaryTarget();
+        selectPrimaryTarget(now);
         if (owner.team == Player.Team.CT) return executeSurvivor(world, now, order);
         if (owner.team == Player.Team.ZOMBIE) return executeZombie(world, now);
         return neutral();
     }
 
-    private void selectPrimaryTarget() {
-        primaryTarget = perceptionModule.getAllPerceivedEnemies().values().stream()
+    private void selectPrimaryTarget(long now) {
+        List<Player> visible = perceptionModule.getAllPerceivedEnemies().values().stream()
                 .filter(info -> info != null && info.isCurrentlyVisible())
                 .map(info -> gameState.getPlayerById(info.enemyId()))
                 .filter(target -> ZombieHostilityPolicy.canTarget(owner, target))
                 .filter(target -> pathfindingModule.hasLineOfSight(target.position))
-                .min(Comparator.comparingDouble(target -> owner.position.distanceSq(target.position)))
-                .orElse(null);
+                .toList();
+        Weapon weapon = owner.getCurrentWeapon();
+        if (owner.team == Player.Team.CT && weapon != null
+                && weapon.getWeaponType() == Weapon.WeaponType.LMG) {
+            List<Player> clearTargets = visible.stream().filter(target ->
+                    ZombieHostilityPolicy.clearShot(owner, target, gameState.getAllCharacters())).toList();
+            List<Player> candidates = clearTargets.isEmpty() ? visible : clearTargets;
+            crowdFireDecision = crowdFire.select(Vec.of(owner.position), candidates.stream()
+                    .map(target -> new ZombieCrowdFirePlanner.Target(target.id,
+                            Vec.of(target.position), target.health)).toList(), now);
+            primaryTarget = candidates.stream().filter(target ->
+                    target.id.equals(crowdFireDecision.targetId())).findFirst().orElse(null);
+        } else {
+            crowdFire.reset();
+            crowdFireDecision = ZombieCrowdFirePlanner.Decision.NONE;
+            primaryTarget = visible.stream()
+                    .min(Comparator.comparingDouble(target -> owner.position.distanceSq(target.position)))
+                    .orElse(null);
+        }
         lastKnownPosition = primaryTarget == null ? null
                 : new Point2D.Double(primaryTarget.position.x, primaryTarget.position.y);
     }
@@ -132,7 +151,7 @@ public class ZOMBIEcontrol {
         moveTo(movementGoal);
         AIInput movement = pathfindingModule.update(world);
         AIInput attack = attackModule.update(primaryTarget, lastKnownPosition, now,
-                AttackExecutionPolicy.ZOMBIE_SURVIVOR);
+                AttackExecutionPolicy.ZOMBIE_SURVIVOR, crowdFireDecision.engagementId());
         boolean shoot = attack.shooting()
                 && ZombieHostilityPolicy.clearShot(owner, primaryTarget, gameState.getAllCharacters());
         double angle = primaryTarget != null ? attack.angle()
@@ -333,6 +352,8 @@ public class ZOMBIEcontrol {
         lastZombieProgressAt = 0;
         zombieDetourTarget = null;
         zombieDetourUntil = 0;
+        crowdFire.reset();
+        crowdFireDecision = ZombieCrowdFirePlanner.Decision.NONE;
         if (pathfindingModule != null) pathfindingModule.reset();
         if (attackModule != null) attackModule.reset();
         if (grenadeModule != null) grenadeModule.cancelPendingWork();

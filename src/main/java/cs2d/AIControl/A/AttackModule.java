@@ -92,6 +92,12 @@ public class AttackModule {
 
     public AIInput update(Player primaryTarget, Point2D.Double lastKnownPosition, long currentTime,
             AttackExecutionPolicy policy) {
+        return update(primaryTarget, lastKnownPosition, currentTime, policy, null);
+    }
+
+    /** An engagement key lets a mode retain reaction/recoil state while switching targets in one group. */
+    public AIInput update(Player primaryTarget, Point2D.Double lastKnownPosition, long currentTime,
+            AttackExecutionPolicy policy, String engagementKey) {
         if (policy == null) policy = AttackExecutionPolicy.STANDARD;
         if (!policy.acceptsTarget(owner, primaryTarget)) {
             primaryTarget = null;
@@ -109,7 +115,8 @@ public class AttackModule {
         }
 
         // --- 2. 处理目标切换 ---
-        String currentTargetId = (primaryTarget != null) ? primaryTarget.id : null;
+        String currentTargetId = primaryTarget == null ? null
+                : engagementKey == null ? primaryTarget.id : engagementKey;
         // 如果目标 ID 发生变化
         if (!Objects.equals(currentTargetId, lastTargetId)) {
             this.targetAcquiredTime = currentTime; // 重置反应计时器

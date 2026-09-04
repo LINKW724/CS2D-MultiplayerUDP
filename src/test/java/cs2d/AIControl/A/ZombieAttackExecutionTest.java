@@ -66,4 +66,20 @@ class ZombieAttackExecutionTest {
                     AttackExecutionPolicy.ZOMBIE_SURVIVOR).shooting());
         }
     }
+
+    @Test void switchingTargetsInsideOneCrowdPreservesReactionAndRecoilState() {
+        Shooter owner = new Shooter();
+        Player first = enemy();
+        Player second = new Player("z2", "z2", new Point2D.Double(900, 130), Player.Team.ZOMBIE,
+                false, GameMode.ZOMBIE_MODE, null, AIDifficulty.REALISTIC, ignored -> {});
+        AttackModule attack = new AttackModule(owner, AIDifficulty.REALISTIC);
+        attack.update(first, first.position, 10_000L, AttackExecutionPolicy.ZOMBIE_SURVIVOR, "crowd-1");
+        owner.shootTimeIndex = 20;
+        assertTrue(attack.update(second, second.position, 10_100L,
+                AttackExecutionPolicy.ZOMBIE_SURVIVOR, "crowd-1").shooting());
+        assertEquals(20, owner.shootTimeIndex);
+        assertFalse(attack.update(first, first.position, 10_150L,
+                AttackExecutionPolicy.ZOMBIE_SURVIVOR, "crowd-2").shooting());
+        assertEquals(0, owner.shootTimeIndex);
+    }
 }
