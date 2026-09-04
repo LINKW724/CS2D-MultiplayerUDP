@@ -20,7 +20,11 @@ public final class DamageNumberSystem {
     static final double LIFETIME_SECONDS = 0.72;
     static final long MERGE_WINDOW_MILLIS = 40L;
     static final Color NORMAL_COLOR = Color.WHITE;
-    static final Color HEADSHOT_COLOR = Color.rgb(245, 74, 74);
+    static final Color HEADSHOT_COLOR = Color.rgb(255, 159, 28);
+    static final Color INCOMING_COLOR = Color.rgb(255, 82, 82);
+    static final Color HEALING_COLOR = Color.rgb(72, 219, 124);
+    static final Color EXPLOSIVE_COLOR = Color.rgb(190, 110, 255);
+    static final Color MELEE_COLOR = Color.rgb(78, 168, 255);
 
     private static final double[] LANE_OFFSETS = { -4.0, 4.0, -8.0, 8.0, 0.0 };
     private static final Color OUTLINE_COLOR = Color.rgb(26, 32, 44, 0.92);
@@ -76,7 +80,7 @@ public final class DamageNumberSystem {
             double alpha = progress <= 0.42 ? 1.0 : clamp01((1.0 - progress) / 0.58);
             gc.setGlobalAlpha(alpha);
             gc.strokeText(number.text, x, y);
-            gc.setFill(colorFor(number.headshot));
+            gc.setFill(colorFor(number.type));
             gc.fillText(number.text, x, y);
         }
         gc.restore();
@@ -98,13 +102,20 @@ public final class DamageNumberSystem {
     List<Snapshot> snapshots() {
         List<Snapshot> snapshots = new ArrayList<>(activeNumbers.size());
         activeNumbers.forEach(number -> snapshots.add(new Snapshot(
-                number.damage, number.headshot, number.teammateDamage, number.worldX, number.worldY,
+                number.damage, number.text, number.type, number.teammateDamage, number.worldX, number.worldY,
                 number.ageSeconds, number.laneOffset)));
         return snapshots;
     }
 
-    static Color colorFor(boolean headshot) {
-        return headshot ? HEADSHOT_COLOR : NORMAL_COLOR;
+    static Color colorFor(DamageNumberType type) {
+        return switch (type) {
+            case HEADSHOT -> HEADSHOT_COLOR;
+            case INCOMING -> INCOMING_COLOR;
+            case HEALING -> HEALING_COLOR;
+            case EXPLOSIVE -> EXPLOSIVE_COLOR;
+            case MELEE -> MELEE_COLOR;
+            case NORMAL -> NORMAL_COLOR;
+        };
     }
 
     private boolean tryMerge(DamageNumberEvent event) {
@@ -114,12 +125,12 @@ public final class DamageNumberSystem {
             if (number.ageSeconds > MERGE_WINDOW_MILLIS / 1000.0) {
                 break;
             }
-            if (number.headshot == event.headshot()
+            if (number.type == event.type()
                     && number.attackerId.equals(event.attackerId())
                     && number.targetId.equals(event.targetId())
                     && Math.abs(number.serverTimestamp - event.serverTimestamp()) <= MERGE_WINDOW_MILLIS) {
                 number.damage += event.damage();
-                number.text = Integer.toString(number.damage);
+                number.text = textFor(number.type, number.damage);
                 number.worldX = event.worldX();
                 number.worldY = event.worldY();
                 number.serverTimestamp = Math.max(number.serverTimestamp, event.serverTimestamp());
@@ -139,14 +150,23 @@ public final class DamageNumberSystem {
         Point2D project(double worldX, double worldY);
     }
 
-    record Snapshot(int damage, boolean headshot, boolean teammateDamage, double worldX, double worldY,
+    private static String textFor(DamageNumberType type, int damage) {
+        return switch (type) {
+            case INCOMING -> "-" + damage;
+            case HEALING -> "+" + damage;
+            default -> Integer.toString(damage);
+        };
+    }
+
+    record Snapshot(int damage, String text, DamageNumberType type, boolean teammateDamage,
+                    double worldX, double worldY,
                     double ageSeconds, double laneOffset) {
     }
 
     private static final class ActiveDamageNumber {
         private final String attackerId;
         private final String targetId;
-        private final boolean headshot;
+        private final DamageNumberType type;
         private final boolean teammateDamage;
         private final double laneOffset;
         private int damage;
@@ -160,8 +180,8 @@ public final class DamageNumberSystem {
             this.attackerId = event.attackerId();
             this.targetId = event.targetId();
             this.damage = event.damage();
-            this.text = Integer.toString(event.damage());
-            this.headshot = event.headshot();
+            this.type = event.type();
+            this.text = textFor(type, event.damage());
             this.teammateDamage = event.teammateDamage();
             this.worldX = event.worldX();
             this.worldY = event.worldY();

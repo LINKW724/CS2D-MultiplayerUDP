@@ -162,6 +162,10 @@ public class GameSettings {
         return damageNumberModePolicy.showsTeammateDamage(gameMode);
     }
 
+    public boolean showsSelfCombatFeedback(String gameMode) {
+        return damageNumberModePolicy.showsSelfFeedback(gameMode);
+    }
+
     public static double getFollowZoomFactor() {
         return followZoomFactor.get();
     }

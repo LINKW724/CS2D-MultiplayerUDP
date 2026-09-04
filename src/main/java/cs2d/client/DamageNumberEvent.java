@@ -2,12 +2,12 @@ package cs2d.client;
 
 import java.util.Objects;
 
-/** Immutable, server-authoritative input for one outgoing damage-number effect. */
+/** Immutable, server-authoritative input for one combat feedback number. */
 public record DamageNumberEvent(
         String attackerId,
         String targetId,
         int damage,
-        boolean headshot,
+        DamageNumberType type,
         boolean teammateDamage,
         double worldX,
         double worldY,
@@ -16,6 +16,7 @@ public record DamageNumberEvent(
     public DamageNumberEvent {
         attackerId = Objects.requireNonNullElse(attackerId, "");
         targetId = Objects.requireNonNullElse(targetId, "");
+        type = Objects.requireNonNull(type, "type");
         if (damage <= 0) {
             throw new IllegalArgumentException("damage must be positive");
         }

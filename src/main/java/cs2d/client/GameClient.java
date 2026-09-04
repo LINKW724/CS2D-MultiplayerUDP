@@ -1715,12 +1715,14 @@ public class GameClient extends Application {
                     return;
                 }
 
-                handleDamageNumberPayload(payload, teammateFeedback);
+                boolean localAttack = isLocalCombatAttacker(getString(payload, "atk"));
+                boolean localVictim = isLocalCombatEntity(getString(payload, "vic"));
+                handleDamageNumberPayload(payload, teammateFeedback, localVictim);
                 if (directRecipient) {
                     currentDamageLogEntries.add(payload);
 
                     // [核心新增] 本地同步更新伤害和命中统计
-                    if (me != null && me.data != null) {
+                    if (localAttack && me != null && me.data != null) {
                         int dmg = getInt(payload, "dmg");
                         if (dmg > 0) {
                             me.mutateData(snapshot -> {
@@ -1799,14 +1801,16 @@ public class GameClient extends Application {
         return transientEventDeduplicator.accept(event.get("eventId").getAsLong());
     }
 
-    private void handleDamageNumberPayload(JsonObject payload, boolean teammateFeedback) {
+    private void handleDamageNumberPayload(JsonObject payload, boolean teammateFeedback, boolean localVictim) {
         String mode = latestGameState == null ? "" : getString(latestGameState, "mode");
         int damage = getInt(payload, "dmg");
         String attackerId = getString(payload, "atk");
         boolean localAttack = isLocalCombatAttacker(attackerId);
-        boolean sourceHidden = teammateFeedback
-                ? !gameSettings.showsTeammateDamageNumbers(mode)
-                : !localAttack || !gameSettings.showsOwnDamageNumbers(mode);
+        boolean sourceHidden = localVictim
+                ? !gameSettings.showsSelfCombatFeedback(mode)
+                : teammateFeedback
+                        ? !gameSettings.showsTeammateDamageNumbers(mode)
+                        : !localAttack || !gameSettings.showsOwnDamageNumbers(mode);
         if (damage <= 0 || sourceHidden) {
             return;
         }
@@ -1815,8 +1819,10 @@ public class GameClient extends Application {
         if (hitPosition == null) {
             return;
         }
+        DamageNumberType type = DamageNumberClassifier.classify(
+                getString(payload, "feedbackKind"), getBool(payload, "hs"), localVictim);
         damageNumberSystem.add(new DamageNumberEvent(
-                attackerId, getString(payload, "vic"), damage, getBool(payload, "hs"), teammateFeedback,
+                attackerId, getString(payload, "vic"), damage, type, teammateFeedback,
                 hitPosition.getX(), hitPosition.getY(), getLong(payload, "ts")));
     }
 
@@ -1830,7 +1836,8 @@ public class GameClient extends Application {
                 isDetachedSpectator(),
                 feedbackTeam,
                 localTeam,
-                isLocalCombatAttacker(getString(payload, "atk")));
+                isLocalCombatAttacker(getString(payload, "atk")),
+                isLocalCombatEntity(getString(payload, "vic")));
     }
 
     private boolean isDetachedSpectator() {
@@ -1860,6 +1867,10 @@ public class GameClient extends Application {
                         ? getString(me.data, "spectatorTargetId")
                         : null;
         return matchesLocalCombatAttacker(attackerId, myPlayerId, controlledBotId);
+    }
+
+    private boolean isLocalCombatEntity(String entityId) {
+        return isLocalCombatAttacker(entityId);
     }
 
     static boolean matchesLocalCombatAttacker(String attackerId, String localPlayerId, String controlledBotId) {

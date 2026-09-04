@@ -28,6 +28,8 @@ class DamageNumberModePolicyTest {
         assertTrue(restored.showsTeammateDamage(DamageNumberModePolicy.ZOMBIE_MODE));
         assertTrue(restored.showsOwnDamage("TEAM_DEATHMATCH"));
         assertTrue(restored.showsTeammateDamage("TEAM_DEATHMATCH"));
+        assertTrue(restored.showsSelfFeedback("TEAM_DEATHMATCH"));
+        assertFalse(restored.showsSelfFeedback(DamageNumberModePolicy.ZOMBIE_MODE));
     }
 
     @Test
@@ -56,6 +58,8 @@ class DamageNumberModePolicyTest {
         assertEquals(DamageNumberVisibility.OWN, DamageNumberVisibility.fromLevel(1.2));
         assertEquals(DamageNumberVisibility.TEAMMATES, DamageNumberVisibility.fromLevel(1.8));
         assertEquals(DamageNumberVisibility.ALL, DamageNumberVisibility.fromLevel(99));
+        assertFalse(DamageNumberVisibility.OWN.showsSelfFeedback());
+        assertTrue(DamageNumberVisibility.ALL.showsSelfFeedback());
     }
 
     private static JsonObject legacySettings(boolean includeTeammates) {

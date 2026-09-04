@@ -27,13 +27,21 @@ class DamageFeedbackAudiencePolicyTest {
                 false, "T", "CT", false));
         assertFalse(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
                 false, "CT", "CT", true));
+        assertFalse(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
+                false, "CT", "CT", false, true));
         assertFalse(accepts(DamageNumberVisibility.OWN, DamageNumberModePolicy.ZOMBIE_MODE,
                 false, "CT", "CT", false));
     }
 
     private static boolean accepts(DamageNumberVisibility visibility, String mode,
             boolean detachedSpectator, String feedbackTeam, String localTeam, boolean localAttacker) {
+        return accepts(visibility, mode, detachedSpectator, feedbackTeam, localTeam, localAttacker, false);
+    }
+
+    private static boolean accepts(DamageNumberVisibility visibility, String mode,
+            boolean detachedSpectator, String feedbackTeam, String localTeam,
+            boolean localAttacker, boolean localVictim) {
         return DamageFeedbackAudiencePolicy.acceptsTeamEvent(
-                visibility, mode, detachedSpectator, feedbackTeam, localTeam, localAttacker);
+                visibility, mode, detachedSpectator, feedbackTeam, localTeam, localAttacker, localVictim);
     }
 }

@@ -42,6 +42,10 @@ public final class DamageNumberModePolicy {
         return getVisibilityFor(gameMode).showsTeammateDamage();
     }
 
+    public boolean showsSelfFeedback(String gameMode) {
+        return getVisibilityFor(gameMode).showsSelfFeedback();
+    }
+
     public JsonObject toJson() {
         JsonObject modes = new JsonObject();
         visibilityByMode.forEach((mode, visibility) -> modes.addProperty(mode,

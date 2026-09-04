@@ -11,9 +11,10 @@ final class DamageFeedbackAudiencePolicy {
             boolean detachedSpectator,
             String feedbackTeam,
             String localTeam,
-            boolean localAttacker) {
+            boolean localAttacker,
+            boolean localVictim) {
         if (visibility == null || !visibility.showsTeammateDamage()
-                || feedbackTeam == null || feedbackTeam.isBlank() || localAttacker) {
+                || feedbackTeam == null || feedbackTeam.isBlank() || localAttacker || localVictim) {
             return false;
         }
         if (detachedSpectator) {
