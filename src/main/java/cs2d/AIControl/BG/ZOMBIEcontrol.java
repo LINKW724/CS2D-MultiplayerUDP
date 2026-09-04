@@ -137,7 +137,12 @@ public class ZOMBIEcontrol {
                 && ZombieHostilityPolicy.clearShot(owner, primaryTarget, gameState.getAllCharacters());
         double angle = primaryTarget != null ? attack.angle()
                 : movement.keys().isEmpty()
-                        ? order != null && order.active(now) ? order.watchAngle() : owner.angle
+                        ? order != null && order.active(now)
+                                ? order.watchPoint() != null
+                                        ? Math.atan2(order.watchPoint().y() - owner.position.y,
+                                                order.watchPoint().x() - owner.position.x)
+                                        : order.watchAngle()
+                                : owner.angle
                         : movement.angle();
         List<String> keys = movement.keys();
         Weapon weapon = owner.getCurrentWeapon();

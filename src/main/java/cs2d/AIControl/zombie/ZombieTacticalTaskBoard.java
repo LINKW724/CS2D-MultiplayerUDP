@@ -26,6 +26,11 @@ public final class ZombieTacticalTaskBoard {
     }
 
     public ZombieTacticalOrder assign(String id, Task task, String targetId, Vec destination, Vec home, long now) {
+        return assign(id, task, targetId, destination, home, null, now);
+    }
+
+    public ZombieTacticalOrder assign(String id, Task task, String targetId, Vec destination, Vec home,
+            Vec watchPoint, long now) {
         ZombieTacticalOrder old = orders.get(id);
         boolean same = old != null && old.task() == task && Objects.equals(old.targetId(), targetId)
                 && old.active(now);
@@ -33,7 +38,7 @@ public final class ZombieTacticalTaskBoard {
             cooldowns.put(id, now + CLEAR_COOLDOWN_MS);
         // Changing a moving target's position updates the intent, never resurrects a completed task.
         ZombieTacticalOrder next = new ZombieTacticalOrder(id, same ? old.generation() : ++generation,
-                task, targetId, destination, home,
+                task, targetId, destination, home, watchPoint,
                 old != null && old.task() == task ? old.startedAt() : now, now + 1_200L);
         orders.put(id, next);
         return next;

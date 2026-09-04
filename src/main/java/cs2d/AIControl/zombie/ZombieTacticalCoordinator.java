@@ -11,6 +11,7 @@ public final class ZombieTacticalCoordinator {
     private static final int CLEANUP_AGENTS_PER_TARGET = 2;
     private final ZombieThreatEvaluator threats = new ZombieThreatEvaluator();
     private final ZombiePositionPlanner positions = new ZombiePositionPlanner();
+    private final ZombieDefenseAllocator defenseAllocator = new ZombieDefenseAllocator();
 
     public Map<String, ZombieTacticalOrder> plan(ZombieTacticalSnapshot snapshot,
             ZombieTacticalTaskBoard board, Predicate<Vec> walkable) {
@@ -40,6 +41,8 @@ public final class ZombieTacticalCoordinator {
                 .limit(limit).toList();
         Set<String> clearing = candidates.stream().map(Unit::id).collect(java.util.stream.Collectors.toSet());
         Map<String, Contact> cleanupAssignments = assignCleanup(snapshot, agents);
+        Map<String, ZombieDefenseAllocator.Assignment> defenseAssignments =
+                defenseAllocator.allocate(agents, snapshot.attackLanes());
         Map<String, ZombieTacticalOrder> result = new LinkedHashMap<>();
         for (Unit agent : agents) {
             Vec home = homes.get(agent.id());
@@ -53,6 +56,7 @@ public final class ZombieTacticalCoordinator {
                     .map(Unit::position).toList();
             Task task = agent.position().distance(home) > 100 ? Task.RETURN_TO_GUARD : Task.GUARD_AREA;
             Vec destination = home;
+            Vec watchPoint = null;
             if (assessment.imminent()) {
                 task = Task.REPOSITION;
                 destination = positions.choose(agent.position(), home, threatPoints, teammates,
@@ -62,6 +66,22 @@ public final class ZombieTacticalCoordinator {
                 targetId = cleanupTarget.id();
                 destination = positions.choose(agent.position(), cleanupTarget.position(), List.of(), teammates,
                         snapshot.hazards(), snapshot.now(), walkable, cleanupTarget.position());
+                watchPoint = cleanupTarget.position();
+            } else if (nearest != null && agent.ready() && snapshot.allies().stream()
+                    .anyMatch(a -> a.reloading() && a.position().distance(agent.position()) < 450)) {
+                task = Task.COVER_RELOAD; // Immediate local support takes precedence over distant deployment.
+                watchPoint = nearest.position();
+            } else if (defenseAssignments.containsKey(agent.id())) {
+                ZombieDefenseAllocator.Assignment assignment = defenseAssignments.get(agent.id());
+                task = switch (assignment.role()) {
+                    case FORTIFY -> Task.FORTIFY_LANE;
+                    case REINFORCE -> Task.REINFORCE_LANE;
+                    case RESERVE -> Task.MOBILE_RESERVE;
+                };
+                targetId = assignment.laneId();
+                watchPoint = assignment.watchPoint();
+                destination = positions.choose(agent.position(), assignment.destination(), threatPoints, teammates,
+                        snapshot.hazards(), snapshot.now(), walkable, watchPoint);
             } else if (clearing.contains(agent.id()) && nearest != null
                     && nearest.position().distance(home) <= 650) {
                 task = Task.CLEAR_THREAT;
@@ -78,12 +98,9 @@ public final class ZombieTacticalCoordinator {
                     task = Task.GUARD_AREA;
                     destination = home;
                 }
-            } else if (nearest != null && agent.ready() && snapshot.allies().stream()
-                    .anyMatch(a -> a.reloading() && a.position().distance(agent.position()) < 450)) {
-                task = Task.COVER_RELOAD; // Hold own lane, never run into the reloading teammate.
             }
             result.put(agent.id(), board.assign(agent.id(), task, targetId,
-                    destination, home, snapshot.now()));
+                    destination, home, watchPoint, snapshot.now()));
         }
         return Map.copyOf(result);
     }

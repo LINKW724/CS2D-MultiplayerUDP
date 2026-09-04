@@ -1,23 +1,32 @@
 package cs2d.server;
 
 import cs2d.AIControl.A.PathfindingModule;
+import cs2d.AIControl.A.PathfindingModule.Node;
+import cs2d.AIControl.A.PathfindingModule.Pathfinder;
 import cs2d.AIControl.zombie.*;
 import cs2d.AIControl.zombie.ZombieTacticalSnapshot.*;
 import cs2d.playerAndAi.Player;
 import cs2d.playerAndAi.Weapon;
 import java.util.*;
 
-/** 4 Hz survivor command loop, fed by actual per-agent perception rather than global enemy locations. */
+/** 4 Hz survivor command loop with 1.3 Hz aggregated route forecasting. */
 final class ZombieTacticalRuntime {
     private final GameState gameState;
     private final ZombieIntelBoard intel = new ZombieIntelBoard();
     private final ZombieTacticalCoordinator coordinator = new ZombieTacticalCoordinator();
     private final ZombieTacticalTaskBoard tasks = new ZombieTacticalTaskBoard();
+    private final ZombieFlowForecaster flowForecaster = new ZombieFlowForecaster();
+    private final Pathfinder flowPathfinder;
     private volatile Map<String, ZombieTacticalOrder> orders = Map.of();
+    private List<ZombieAttackLane> attackLanes = List.of();
     private long lastPlanAt;
+    private long lastForecastAt;
     private long clearedAt;
 
-    ZombieTacticalRuntime(GameState gameState) { this.gameState = gameState; }
+    ZombieTacticalRuntime(GameState gameState) {
+        this.gameState = gameState;
+        this.flowPathfinder = new Pathfinder(gameState, (int) Player.SIZE);
+    }
 
     synchronized void report(Player observer, long now) {
         if (now < clearedAt || gameState.shouldFreezeAi() || !observer.isAlive()
@@ -64,10 +73,20 @@ final class ZombieTacticalRuntime {
         List<Contact> cleanupLeads = cleanupPhase ? aliveZombies.stream()
                 .map(zombie -> new Contact(zombie.id(), zombie.position(), zombie.health(), now)).toList()
                 : List.of();
+        if (!cleanupPhase && now - lastForecastAt >= 750) {
+            lastForecastAt = now;
+            attackLanes = flowForecaster.forecast(now, aliveZombies, allies, hazards,
+                    this::previewRoute, point -> point.x() >= Player.SIZE && point.y() >= Player.SIZE
+                            && point.x() < gameState.getMapWidth() - Player.SIZE
+                            && point.y() < gameState.getMapHeight() - Player.SIZE
+                            && flowPathfinder.isWalkable(point.point()));
+        } else if (cleanupPhase || aliveZombies.isEmpty()) {
+            attackLanes = List.of();
+        }
         PathfindingModule path = independentAis.stream().filter(p -> p.team == Player.Team.CT)
                 .map(Player::getPathfindingModule).filter(Objects::nonNull).findFirst().orElse(null);
         ZombieTacticalSnapshot snapshot = new ZombieTacticalSnapshot(now, allies,
-                intel.contacts(Player.Team.CT, units, now), hazards, remainingZombies, cleanupLeads);
+                intel.contacts(Player.Team.CT, units, now), hazards, remainingZombies, cleanupLeads, attackLanes);
         orders = coordinator.plan(snapshot, tasks, point -> path != null
                 && point.x() >= Player.SIZE && point.y() >= Player.SIZE
                 && point.x() < gameState.getMapWidth() - Player.SIZE
@@ -85,8 +104,19 @@ final class ZombieTacticalRuntime {
         intel.clear();
         tasks.clear();
         orders = Map.of();
+        attackLanes = List.of();
         lastPlanAt = 0;
+        lastForecastAt = 0;
         clearedAt = System.currentTimeMillis();
+    }
+
+    private List<Vec> previewRoute(Vec source, Vec target) {
+        List<Node> nodes = flowPathfinder.findPath(source.point(), target.point());
+        if (nodes == null || nodes.isEmpty()) return List.of();
+        List<Vec> route = new ArrayList<>(nodes.size() + 1);
+        route.add(source);
+        nodes.stream().map(flowPathfinder::nodeToWorld).map(Vec::of).forEach(route::add);
+        return List.copyOf(route);
     }
 
     private static Unit unit(Player p) {

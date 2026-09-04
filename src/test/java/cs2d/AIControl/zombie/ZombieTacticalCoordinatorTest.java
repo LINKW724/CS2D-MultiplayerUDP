@@ -106,4 +106,20 @@ class ZombieTacticalCoordinatorTest {
                 List.of(new Contact("z", new Vec(1500, 500), 100, 1000)));
         assertTrue(result.values().stream().noneMatch(o -> o.task() == Task.HUNT_REMAINDER));
     }
+
+    @Test void predictedLaneDeploysDefenseAndReserveWithUpstreamWatchDirection() {
+        Vec defense = new Vec(900, 580);
+        Vec watch = new Vec(1_200, 580);
+        ZombieAttackLane lane = new ZombieAttackLane("east", new Vec(1_500, 580),
+                new Vec(500, 580), defense, watch, 6, 6, 8_000,
+                List.of(new Vec(1_500, 580), watch, defense, new Vec(500, 580)));
+        var result = commander.plan(new ZombieTacticalSnapshot(1_000, squad(), List.of(), List.of(),
+                6, List.of(), List.of(lane)), board,
+                p -> p.x() > 0 && p.y() > 0 && p.x() < 2_000 && p.y() < 2_000);
+        assertEquals(3, result.values().stream().filter(o -> o.task() == Task.REINFORCE_LANE).count());
+        assertEquals(1, result.values().stream().filter(o -> o.task() == Task.MOBILE_RESERVE).count());
+        assertTrue(result.values().stream()
+                .filter(o -> o.task() == Task.REINFORCE_LANE || o.task() == Task.MOBILE_RESERVE)
+                .allMatch(o -> watch.equals(o.watchPoint())));
+    }
 }
