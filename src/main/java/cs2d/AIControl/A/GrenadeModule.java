@@ -22,11 +22,9 @@ import java.awt.geom.Path2D;
 import java.awt.geom.PathIterator;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
-import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
@@ -35,6 +33,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -76,6 +75,7 @@ public class GrenadeModule {
     // --- 当前投掷计划的状态 ---
     private Item grenadeToThrow = null;
     private Point2D.Double grenadeTargetPosition = null;
+    private Point2D.Double grenadePredictedLandingPosition = null;
     private Point2D.Double grenadeDecisionPosition = null;
     private double grenadeDecisionAngle = 0;
     private long grenadePlanStartTime = 0; // 计划开始时间 (用于超时)
@@ -94,8 +94,10 @@ public class GrenadeModule {
      * 异步计算返回的投掷计划。
      */
     public record GrenadeThrowPlan(Item itemToThrow, Point2D.Double decisionPosition, double decisionAngle,
-            Point2D.Double targetPosition) {
+            Point2D.Double targetPosition, Point2D.Double predictedLandingPosition) {
     }
+
+    private record ThrowSolution(double angle, double error, Point2D.Double predictedLandingPosition) {}
 
     /**
      * 模块返回给 AIController 的指令。
@@ -111,7 +113,11 @@ public class GrenadeModule {
     /**
      * 封装模块的指令详情。
      */
-    public record GrenadeCommand(ActionType action, Point2D.Double pathTarget, double aimAngle, int slot) {
+    public record GrenadeCommand(ActionType action, Point2D.Double pathTarget, double aimAngle, int slot,
+            Point2D.Double predictedLandingPosition) {
+        public GrenadeCommand(ActionType action, Point2D.Double pathTarget, double aimAngle, int slot) {
+            this(action, pathTarget, aimAngle, slot, null);
+        }
     }
 
     /**
@@ -158,6 +164,7 @@ public class GrenadeModule {
             // 加载计划到模块状态
             this.grenadeToThrow = plan.itemToThrow();
             this.grenadeTargetPosition = plan.targetPosition();
+            this.grenadePredictedLandingPosition = plan.predictedLandingPosition();
             this.grenadeDecisionPosition = plan.decisionPosition();
             this.grenadeDecisionAngle = plan.decisionAngle();
             this.currentState = ModuleState.PREPARING_GRENADE; // 进入准备状态
@@ -218,9 +225,13 @@ public class GrenadeModule {
                                 self.name, grenadeToThrow.name(), grenadeTargetPosition.x, grenadeTargetPosition.y));
 
                 // 记录：实际的 gameState.throwGrenade(self) 由 AIController 在收到 THROW_NOW 后调用
+                Point2D.Double predictedLanding = grenadePredictedLandingPosition == null ? null
+                        : (Point2D.Double) grenadePredictedLandingPosition.clone();
+                double throwAngle = grenadeDecisionAngle;
                 resetGrenadeState(); // 清理状态
                 // 返回“立即投掷”指令，并附上最终瞄准角度
-                return Optional.of(new GrenadeCommand(ActionType.THROW_NOW, null, grenadeDecisionAngle, -1));
+                return Optional.of(new GrenadeCommand(ActionType.THROW_NOW, null, throwAngle, -1,
+                        predictedLanding));
             } else {
                 // 还没停稳，返回“原地停下并瞄准”指令
                 return Optional.of(new GrenadeCommand(ActionType.HOLD_AND_AIM, null, grenadeDecisionAngle, -1));
@@ -266,6 +277,12 @@ public class GrenadeModule {
      * @return true 如果请求被接受（模块空闲），false 如果模块正忙或在冷却。
      */
     public boolean requestThrow(Item item, Point2D.Double targetPosition) {
+        return requestThrow(item, targetPosition, plan -> true);
+    }
+
+    /** Accepts the ballistic result only when the caller's tactical policy approves it. */
+    public boolean requestThrow(Item item, Point2D.Double targetPosition,
+            Predicate<GrenadeThrowPlan> planValidator) {
         if (gameState.shouldFreezeAi()) {
             return false;
         }
@@ -274,7 +291,8 @@ public class GrenadeModule {
             return false; // 模块正忙
         }
         // 确保 self.equipment 初始化并且非空
-        if (item == null || targetPosition == null || self.equipment == null || !self.equipment.containsKey(item)) {
+        if (item == null || targetPosition == null || planValidator == null
+                || self.equipment == null || !self.equipment.containsKey(item)) {
             if (self.equipment == null)
                 logger.accept("Warning: " + self.name + "'s equipment map is null!");
             return false; // 无效请求或没有该道具
@@ -302,7 +320,8 @@ public class GrenadeModule {
                 // 在后台线程中执行耗时的物理计算
                 GrenadeThrowPlan plan = calculateGrenadeThrow(item, targetPosition);
 
-                if (plan != null && generation == calculationGeneration.get() && !gameState.shouldFreezeAi()) {
+                if (plan != null && planValidator.test(plan)
+                        && generation == calculationGeneration.get() && !gameState.shouldFreezeAi()) {
                     // 计算成功，将结果放入待处理队列
                     this.pendingGrenadePlan = plan;
                     AiDiagnostics.trace("grenadeCalcOk", logger,
@@ -336,15 +355,17 @@ public class GrenadeModule {
     private GrenadeThrowPlan calculateGrenadeThrow(Item item, Point2D.Double targetPosition) {
 
         // --- 执行昂贵的轨迹计算 ---
-        Optional<Map.Entry<Double, Double>> throwSolution = findBestThrowAngle(item, targetPosition);
+        Optional<ThrowSolution> throwSolution = findBestThrowAngle(item, targetPosition);
 
         // 如果计算找到了一个误差在50单位以内的“好”路径
-        if (throwSolution.isPresent() && throwSolution.get().getValue() <= 50.0) {
-            double bestAngle = throwSolution.get().getKey();
+        if (throwSolution.isPresent() && throwSolution.get().error() <= 50.0) {
+            ThrowSolution solution = throwSolution.get();
+            double bestAngle = solution.angle();
             // [关键] 决策点就是 AI 发起请求时的位置
             Point2D.Double decisionPos = (Point2D.Double) self.position.clone();
             // 决策成功！返回一个完整的“投掷计划”
-            return new GrenadeThrowPlan(item, decisionPos, bestAngle, targetPosition);
+            return new GrenadeThrowPlan(item, decisionPos, bestAngle,
+                    (Point2D.Double) targetPosition.clone(), solution.predictedLandingPosition());
         }
 
         return null; // 找不到好的投掷路径
@@ -357,6 +378,7 @@ public class GrenadeModule {
         this.lastGrenadeThrowTime = System.currentTimeMillis();
         this.grenadeToThrow = null;
         this.grenadeTargetPosition = null;
+        this.grenadePredictedLandingPosition = null;
         this.grenadeDecisionPosition = null;
         this.grenadeDecisionAngle = 0;
         this.grenadePlanStartTime = 0;
@@ -426,7 +448,7 @@ public class GrenadeModule {
     /**
      * 核心辅助方法：为给定的道具和目标点，搜索最佳的投掷角度。
      */
-    private Optional<Map.Entry<Double, Double>> findBestThrowAngle(Item item, Point2D.Double targetPos) {
+    private Optional<ThrowSolution> findBestThrowAngle(Item item, Point2D.Double targetPos) {
         long fuseMillis = switch (item) {
             case HE_GRENADE, FLASHBANG, DECOY -> 2000;
             case SMOKE_GRENADE -> 1500;
@@ -438,6 +460,7 @@ public class GrenadeModule {
 
         double bestAngle = -1;
         double minLandingError = Double.MAX_VALUE;
+        Point2D.Double bestLandingPoint = null;
 
         // 添加 null 检查
         if (targetPos == null || self == null || self.position == null)
@@ -458,12 +481,13 @@ public class GrenadeModule {
                 if (landingError < minLandingError) {
                     minLandingError = landingError;
                     bestAngle = currentAngle;
+                    bestLandingPoint = new Point2D.Double(predictedLandingPoint.x, predictedLandingPoint.y);
                 }
             }
         }
 
-        if (bestAngle != -1) {
-            return Optional.of(new AbstractMap.SimpleEntry<>(bestAngle, minLandingError));
+        if (bestAngle != -1 && bestLandingPoint != null) {
+            return Optional.of(new ThrowSolution(bestAngle, minLandingError, bestLandingPoint));
         }
         return Optional.empty();
     }

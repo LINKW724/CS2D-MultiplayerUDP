@@ -33,4 +33,28 @@ class ZombiePositionPlannerTest {
         assertTrue(java.awt.geom.Line2D.ptSegDist(chosen.x(), chosen.y(), enemy.x(), enemy.y(),
                 teammate.x(), teammate.y()) >= 30);
     }
+
+    @Test void routeMayNotCrossActiveFire() {
+        ZombieAreaHazard fire = new ZombieAreaHazard(new Vec(200, 100), 40, 5_000,
+                ZombieAreaHazard.Type.ACTIVE_FIRE);
+        assertFalse(planner.safeSegment(new Vec(100, 100), new Vec(300, 100), List.of(),
+                List.of(fire), 1_000, p -> true));
+    }
+
+    @Test void unitAlreadyInFireCanEscapeOutward() {
+        ZombieAreaHazard fire = new ZombieAreaHazard(new Vec(100, 100), 40, 5_000,
+                ZombieAreaHazard.Type.ACTIVE_FIRE);
+        Vec origin = new Vec(110, 100);
+        Vec chosen = planner.choose(origin, origin, List.of(), List.of(), List.of(fire), 1_000,
+                p -> true, null);
+        assertTrue(chosen.distance(fire.center()) >= fire.radius() + 24);
+        assertTrue(planner.safeSegment(origin, chosen, List.of(), List.of(fire), 1_000, p -> true));
+    }
+
+    @Test void expiredFireDoesNotBlockRoute() {
+        ZombieAreaHazard fire = new ZombieAreaHazard(new Vec(200, 100), 40, 999,
+                ZombieAreaHazard.Type.ACTIVE_FIRE);
+        assertTrue(planner.safeSegment(new Vec(100, 100), new Vec(300, 100), List.of(),
+                List.of(fire), 1_000, p -> true));
+    }
 }

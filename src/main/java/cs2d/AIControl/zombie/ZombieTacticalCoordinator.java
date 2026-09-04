@@ -18,7 +18,8 @@ public final class ZombieTacticalCoordinator {
         Map<String, Vec> homes = new HashMap<>();
         for (Unit agent : agents) {
             homes.put(agent.id(), board.home(agent.id(), () -> positions.choose(agent.position(),
-                    agent.position(), List.of(), board.stations(), walkable)));
+                    agent.position(), List.of(), board.stations(), snapshot.hazards(), snapshot.now(),
+                    walkable, null)));
         }
         int ready = (int) agents.stream().filter(Unit::ready).count();
         int limit = Math.min(2, Math.max(1, ready / 3));
@@ -49,7 +50,8 @@ public final class ZombieTacticalCoordinator {
             Vec destination = home;
             if (assessment.imminent()) {
                 task = Task.REPOSITION;
-                destination = positions.choose(agent.position(), home, threatPoints, teammates, walkable);
+                destination = positions.choose(agent.position(), home, threatPoints, teammates,
+                        snapshot.hazards(), snapshot.now(), walkable, null);
             } else if (clearing.contains(agent.id()) && nearest != null
                     && nearest.position().distance(home) <= 650) {
                 task = Task.CLEAR_THREAT;
@@ -59,8 +61,10 @@ public final class ZombieTacticalCoordinator {
                         * travel / Math.max(1, distance),
                         agent.position().y() + (nearest.position().y() - agent.position().y())
                         * travel / Math.max(1, distance));
-                destination = positions.choose(agent.position(), desired, List.of(), teammates, walkable);
-                if (!positions.safeSegment(agent.position(), destination, threatPoints, walkable)) {
+                destination = positions.choose(agent.position(), desired, List.of(), teammates,
+                        snapshot.hazards(), snapshot.now(), walkable, null);
+                if (!positions.safeSegment(agent.position(), destination, threatPoints,
+                        snapshot.hazards(), snapshot.now(), walkable)) {
                     task = Task.GUARD_AREA;
                     destination = home;
                 }

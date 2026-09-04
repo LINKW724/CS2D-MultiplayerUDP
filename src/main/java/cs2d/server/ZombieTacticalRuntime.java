@@ -48,10 +48,16 @@ final class ZombieTacticalRuntime {
         }
         List<Unit> allies = units.values().stream().filter(p -> p.team() == Player.Team.CT && p.health() > 0)
                 .sorted(Comparator.comparing(Unit::id)).toList();
+        List<ZombieAreaHazard> hazards = gameState.getFirePatches().stream()
+                .filter(fire -> fire != null && !fire.isExpired())
+                .map(fire -> new ZombieAreaHazard(Vec.of(fire.position), GameState.FirePatch.RADIUS,
+                        fire.creationTime + GameState.FirePatch.DURATION_MS,
+                        ZombieAreaHazard.Type.ACTIVE_FIRE))
+                .toList();
         PathfindingModule path = independentAis.stream().filter(p -> p.team == Player.Team.CT)
                 .map(Player::getPathfindingModule).filter(Objects::nonNull).findFirst().orElse(null);
         ZombieTacticalSnapshot snapshot = new ZombieTacticalSnapshot(now, allies,
-                intel.contacts(Player.Team.CT, units, now));
+                intel.contacts(Player.Team.CT, units, now), hazards);
         orders = coordinator.plan(snapshot, tasks, point -> path != null
                 && point.x() >= Player.SIZE && point.y() >= Player.SIZE
                 && point.x() < gameState.getMapWidth() - Player.SIZE

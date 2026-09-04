@@ -5,10 +5,15 @@ import java.awt.geom.Point2D;
 import java.util.List;
 
 /** Immutable input: allied status is authoritative; enemy positions come only from fresh intel. */
-public record ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> contacts) {
+public record ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> contacts,
+                                     List<ZombieAreaHazard> hazards) {
     public ZombieTacticalSnapshot {
         allies = List.copyOf(allies);
         contacts = List.copyOf(contacts);
+        hazards = List.copyOf(hazards);
+    }
+    public ZombieTacticalSnapshot(long now, List<Unit> allies, List<Contact> contacts) {
+        this(now, allies, contacts, List.of());
     }
     public record Vec(double x, double y) {
         public double distance(Vec other) { return Math.hypot(x - other.x, y - other.y); }

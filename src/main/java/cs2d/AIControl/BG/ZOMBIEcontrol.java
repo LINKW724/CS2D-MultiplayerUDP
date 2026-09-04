@@ -32,6 +32,7 @@ public class ZOMBIEcontrol {
     private final GrenadeModule grenadeModule;
     private final Random rand = new Random();
     private final ZombiePositionPlanner positions = new ZombiePositionPlanner();
+    private final ZombieGrenadeSafetyPolicy grenadeSafety = new ZombieGrenadeSafetyPolicy();
     private Player primaryTarget;
     private Point2D.Double lastKnownPosition;
     private long nextPositionAt;
@@ -40,6 +41,7 @@ public class ZOMBIEcontrol {
     private Vec movementGoal;
     private boolean grenadeBusy;
     private long grenadeDeadline;
+    private Item grenadeItem;
     private boolean wasEmergency;
 
     public ZOMBIEcontrol(Player owner, GameState gameState, AIDifficulty difficulty,
@@ -90,9 +92,11 @@ public class ZOMBIEcontrol {
 
     private AIInput executeSurvivor(AIWorldView world, long now, ZombieTacticalOrder order) {
         List<Vec> threats = visibleThreats();
+        List<ZombieAreaHazard> hazards = activeHazards(now);
         Vec origin = Vec.of(owner.position);
         double nearest = threats.stream().mapToDouble(origin::distance).min().orElse(Double.POSITIVE_INFINITY);
-        boolean emergency = nearest < 170;
+        boolean emergency = nearest < 170
+                || hazards.stream().anyMatch(hazard -> hazard.contains(origin, Player.SIZE));
         if (emergency && !wasEmergency) nextPositionAt = 0;
         wasEmergency = emergency;
         boolean blockedFire = primaryTarget != null
@@ -100,7 +104,7 @@ public class ZOMBIEcontrol {
         if (owner.currentAmmo <= 0 && owner.reserveAmmo > 0 && !owner.isReloading)
             owner.startReload();
 
-        AIInput grenade = grenadeAction(world, now, nearest, threats.size());
+        AIInput grenade = grenadeAction(world, now, nearest, threats, hazards);
         if (grenade != null) return grenade;
 
         List<Vec> teammates = gameState.getAllCharacters().stream()
@@ -111,9 +115,10 @@ public class ZOMBIEcontrol {
         if (desired == null) desired = origin;
         if (now >= nextPositionAt || movementGoal == null) {
             Vec local = desired;
-            if (emergency || blockedFire || !positions.safeSegment(origin, desired, threats, this::walkable)
+            if (emergency || blockedFire || !positions.safeSegment(origin, desired, threats,
+                    hazards, now, this::walkable)
                     || teammates.stream().anyMatch(p -> p.distance(origin) < 50)) {
-                local = positions.choose(origin, desired, threats, teammates, this::walkable,
+                local = positions.choose(origin, desired, threats, teammates, hazards, now, this::walkable,
                         blockedFire && !emergency ? Vec.of(primaryTarget.position) : null);
             }
             movementGoal = local;
@@ -155,26 +160,50 @@ public class ZOMBIEcontrol {
             pathfindingModule.setTarget(point.point());
     }
 
+    private List<ZombieAreaHazard> activeHazards(long now) {
+        return gameState.getFirePatches().stream()
+                .filter(fire -> fire != null && !fire.isExpired())
+                .map(fire -> new ZombieAreaHazard(Vec.of(fire.position), GameState.FirePatch.RADIUS,
+                        fire.creationTime + GameState.FirePatch.DURATION_MS,
+                        ZombieAreaHazard.Type.ACTIVE_FIRE))
+                .filter(hazard -> hazard.active(now)).toList();
+    }
+
     /** Grenades are optional support, never a reason to stop with a zombie at melee distance. */
-    private AIInput grenadeAction(AIWorldView world, long now, double nearest, int count) {
+    private AIInput grenadeAction(AIWorldView world, long now, double nearest, List<Vec> enemies,
+            List<ZombieAreaHazard> hazards) {
         if (grenadeModule == null) return null;
-        if (nearest < 320 || (now > grenadeDeadline && grenadeBusy) || owner.isReloading
+        boolean standingInHazard = hazards.stream()
+                .anyMatch(hazard -> hazard.contains(Vec.of(owner.position), Player.SIZE));
+        if (nearest < 320 || standingInHazard || (now > grenadeDeadline && grenadeBusy) || owner.isReloading
                 || !ZombieHostilityPolicy.canTarget(owner, primaryTarget)) {
             if (grenadeBusy) {
                 grenadeModule.cancelPendingWork();
                 restoreGun();
                 grenadeBusy = false;
+                grenadeItem = null;
             }
             return null;
         }
-        if (!grenadeBusy && now >= nextGrenadeAt && count >= 3) {
+        if (!grenadeBusy && now >= nextGrenadeAt && enemies.size() >= 3) {
             Item item = owner.equipment.containsKey(Item.MOLOTOV) ? Item.MOLOTOV
                     : owner.equipment.containsKey(Item.INCENDIARY) ? Item.INCENDIARY
                     : owner.equipment.containsKey(Item.HE_GRENADE) ? Item.HE_GRENADE : null;
             nextGrenadeAt = now + 3_000;
             if (item != null) {
-                grenadeBusy = grenadeModule.requestThrow(item, primaryTarget.position);
-                grenadeDeadline = now + 5_000;
+                List<Vec> allies = liveAllies();
+                grenadeSafety.chooseTarget(item, Vec.of(owner.position), enemies, allies, hazards)
+                        .ifPresent(target -> {
+                            boolean accepted = grenadeModule.requestThrow(item, target.point(), plan ->
+                                    plan.predictedLandingPosition() != null
+                                            && grenadeSafety.isSafeImpact(item,
+                                                    Vec.of(plan.predictedLandingPosition()), allies, hazards));
+                            if (accepted) {
+                                grenadeBusy = true;
+                                grenadeItem = item;
+                                grenadeDeadline = now + 5_000;
+                            }
+                        });
             }
         }
         if (!grenadeBusy) return null;
@@ -192,25 +221,38 @@ public class ZOMBIEcontrol {
                 return new AIInput(List.of(), cmd.aimAngle(), false, false, false);
             case MOVE_TO_SPOT:
                 if (cmd.pathTarget() == null || !positions.safeSegment(Vec.of(owner.position),
-                        Vec.of(cmd.pathTarget()), visibleThreats(), this::walkable)) {
+                        Vec.of(cmd.pathTarget()), visibleThreats(), activeHazards(now), now, this::walkable)) {
                     grenadeModule.cancelPendingWork();
                     grenadeBusy = false;
+                    grenadeItem = null;
                     restoreGun();
                     return null;
                 }
                 moveTo(Vec.of(cmd.pathTarget()));
                 return pathfindingModule.update(world);
             case THROW_NOW:
-                if (ZombieHostilityPolicy.canTarget(owner, primaryTarget)) {
+                boolean safe = grenadeItem != null && cmd.predictedLandingPosition() != null
+                        && grenadeSafety.isSafeImpact(grenadeItem, Vec.of(cmd.predictedLandingPosition()),
+                                liveAllies(), activeHazards(now));
+                if (safe && ZombieHostilityPolicy.canTarget(owner, primaryTarget)) {
                     owner.angle = cmd.aimAngle();
                     gameState.throwGrenade(owner);
+                } else {
+                    grenadeModule.cancelPendingWork();
                 }
                 grenadeBusy = false;
+                grenadeItem = null;
                 restoreGun();
                 return new AIInput(List.of(), cmd.aimAngle(), false, false, false);
             default:
                 return null; // Async planning does not pause ordinary defense.
         }
+    }
+
+    private List<Vec> liveAllies() {
+        return gameState.getAllCharacters().stream()
+                .filter(p -> p != null && p.isAlive() && p.team == owner.team && p.position != null)
+                .map(p -> Vec.of(p.position)).toList();
     }
 
     private void restoreGun() {
@@ -255,6 +297,7 @@ public class ZOMBIEcontrol {
         nextGrenadeAt = 0;
         lastMeleeTime = 0;
         grenadeBusy = false;
+        grenadeItem = null;
         wasEmergency = false;
         if (pathfindingModule != null) pathfindingModule.reset();
         if (attackModule != null) attackModule.reset();
