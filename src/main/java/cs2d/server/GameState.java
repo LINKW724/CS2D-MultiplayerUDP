@@ -6468,6 +6468,10 @@ public class GameState {
         return all;
     }
 
+    public boolean isPointInForbiddenSpawnZone(Point2D.Double point) {
+        return spawnPointValidator.isForbidden(point);
+    }
+
     /** Authoritative wave remainder used by both UI serialization and survivor cleanup strategy. */
     public int getRemainingZombieCount() {
         long alive = getAllCharacters().stream()

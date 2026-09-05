@@ -273,6 +273,7 @@ public class ZOMBIEcontrol {
         return point.x() >= Player.SIZE && point.y() >= Player.SIZE
                 && point.x() < gameState.getMapWidth() - Player.SIZE
                 && point.y() < gameState.getMapHeight() - Player.SIZE
+                && !gameState.isPointInForbiddenSpawnZone(point.point())
                 && pathfindingModule.isWalkable(point.point());
     }
 

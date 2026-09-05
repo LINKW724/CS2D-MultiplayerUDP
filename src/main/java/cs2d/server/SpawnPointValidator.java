@@ -55,6 +55,12 @@ final class SpawnPointValidator {
         return true;
     }
 
+    boolean isForbidden(Point2D.Double point) {
+        if (point == null || !Double.isFinite(point.x) || !Double.isFinite(point.y)) return true;
+        return intersectsForbiddenCell(new Ellipse2D.Double(
+                point.x - radius, point.y - radius, radius * 2.0, radius * 2.0));
+    }
+
     Point2D.Double findAnyValidPoint(int step) {
         int safeStep = Math.max(1, step);
         int start = Math.max(1, (int) Math.ceil(radius));

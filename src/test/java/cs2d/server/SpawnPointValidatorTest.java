@@ -22,6 +22,8 @@ class SpawnPointValidatorTest {
 
         assertFalse(validator.isValid(new Point2D.Double(5, 80)));
         assertFalse(validator.isValid(new Point2D.Double(75, 70)));
+        assertTrue(validator.isForbidden(new Point2D.Double(75, 70)));
+        assertFalse(validator.isForbidden(new Point2D.Double(40, 40)));
         assertFalse(validator.isValid(new Point2D.Double(115, 60)));
         assertTrue(validator.isValid(new Point2D.Double(40, 40)));
     }
