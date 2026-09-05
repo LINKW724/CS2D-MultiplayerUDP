@@ -122,26 +122,26 @@
                 </executions>
             </plugin>
 
-            <!-- PLUGIN TO CREATE THE .EXE INSTALLER FOR THE CLIENT -->
+            <!-- Build a portable application image with a native .exe launcher. -->
             <plugin>
                 <groupId>org.panteleyev</groupId>
                 <artifactId>jpackage-maven-plugin</artifactId>
                 <version>1.5.0</version>
                 <configuration>
                     <!-- Name of the final application -->
-                    <name>CS2D Game</name>
+                    <name>CS2D Client</name>
                     <!-- The main class of the client application -->
                     <mainClass>cs2d.ClientMain</mainClass>
                     <!-- The JAR file to package -->
                     <mainJar>${project.build.finalName}.jar</mainJar>
                     <!-- Tell jpackage where to find the main JAR and all dependencies -->
                     <input>${project.build.directory}/jpackage-deps</input>
-                    <!-- Where to put the output installer -->
+                    <!-- Where to put the portable application image -->
                     <destination>target/dist</destination>
                     <!-- The vendor of the application -->
                     <vendor>CS2D Team</vendor>
-                    <!-- The type of installer to create. "exe" is a good choice. -->
-                    <type>EXE</type>
+                    <!-- APP_IMAGE is portable and never installs system-wide. -->
+                    <type>APP_IMAGE</type>
                     <!-- Required JavaFX modules -->
                     <modulePaths>
                         <path>${settings.localRepository}/org/openjfx/javafx-base/${javafx.version}/javafx-base-${javafx.version}-win.jar</path>
@@ -154,6 +154,9 @@
                         <module>javafx.controls</module>
                         <module>javafx.fxml</module>
                         <module>javafx.media</module>
+                        <module>java.management</module>
+                        <module>java.sql</module>
+                        <module>jdk.jfr</module>
                     </addModules>
                 </configuration>
                 <executions>

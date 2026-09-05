@@ -30,7 +30,17 @@ mvn test
 mvn package
 ```
 
-The server produces `server/target/cs2d-server.jar`. The client build prepares its application JAR and runtime dependencies under `client/target/jpackage-deps/`; on a configured Windows machine it can also create an installer through `jpackage`.
+The server produces `server/target/cs2d-server.jar`. The client build produces a portable application image under `client/target/dist/CS2D Client/`; it does not create an installer.
+
+## Portable Windows packages
+
+Build both click-to-run packages from the repository root:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/build-portable.ps1
+```
+
+The script creates two ZIP files under `release/preview-v3.1.3/`. Each archive bundles its own Java runtime. Extract it and double-click `CS2D Client.exe` or `CS2D Server.exe`; no installation or separate Java setup is required.
 
 ## Run from source
 
@@ -48,5 +58,4 @@ cd client
 mvn javafx:run
 ```
 
-Release archives contain `run-server.bat` and `run-client.bat` for convenience. Configuration files are ordinary local JSON files; do not commit private tokens or machine-specific credentials.
-
+Configuration files are ordinary local JSON files; do not commit private tokens or machine-specific credentials.
