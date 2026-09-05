@@ -1,0 +1,200 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>cs2d</groupId>
+    <artifactId>cs2d-app</artifactId>
+    <version>3.1.3</version>
+    <packaging>jar</packaging>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <javafx.version>17.0.2</javafx.version>
+    </properties>
+
+    <dependencies>
+        <!-- JSON Handling -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+        <!-- JavaFX Graphics Library -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <!-- JavaFX FXML - Good practice to include for UI -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+        <!-- ADD THIS DEPENDENCY for Sound -->
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-media</artifactId>
+            <version>${javafx.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20240303</version> </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.2</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Maven Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+            </plugin>
+
+            <!-- JavaFX Maven Plugin for running the client -->
+            <plugin>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-maven-plugin</artifactId>
+                <version>0.0.8</version>
+                <configuration>
+                    <mainClass>cs2d.ClientMain</mainClass>
+                </configuration>
+            </plugin>
+
+            <!-- Copies all dependency JARs into a specific folder -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/jpackage-deps</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- FINAL FIX: Copies the main application JAR into the same folder -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <configuration>
+                            <target>
+                                <copy file="${project.build.directory}/${project.build.finalName}.jar"
+                                      tofile="${project.build.directory}/jpackage-deps/${project.build.finalName}.jar"/>
+                            </target>
+                        </configuration>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- PLUGIN TO CREATE THE .EXE INSTALLER FOR THE CLIENT -->
+            <plugin>
+                <groupId>org.panteleyev</groupId>
+                <artifactId>jpackage-maven-plugin</artifactId>
+                <version>1.5.0</version>
+                <configuration>
+                    <!-- Name of the final application -->
+                    <name>CS2D Game</name>
+                    <!-- The main class of the client application -->
+                    <mainClass>cs2d.ClientMain</mainClass>
+                    <!-- The JAR file to package -->
+                    <mainJar>${project.build.finalName}.jar</mainJar>
+                    <!-- Tell jpackage where to find the main JAR and all dependencies -->
+                    <input>${project.build.directory}/jpackage-deps</input>
+                    <!-- Where to put the output installer -->
+                    <destination>target/dist</destination>
+                    <!-- The vendor of the application -->
+                    <vendor>CS2D Team</vendor>
+                    <!-- The type of installer to create. "exe" is a good choice. -->
+                    <type>EXE</type>
+                    <!-- Required JavaFX modules -->
+                    <modulePaths>
+                        <path>${settings.localRepository}/org/openjfx/javafx-base/${javafx.version}/javafx-base-${javafx.version}-win.jar</path>
+                        <path>${settings.localRepository}/org/openjfx/javafx-controls/${javafx.version}/javafx-controls-${javafx.version}-win.jar</path>
+                        <path>${settings.localRepository}/org/openjfx/javafx-fxml/${javafx.version}/javafx-fxml-${javafx.version}-win.jar</path>
+                        <path>${settings.localRepository}/org/openjfx/javafx-graphics/${javafx.version}/javafx-graphics-${javafx.version}-win.jar</path>
+                        <path>${settings.localRepository}/org/openjfx/javafx-media/${javafx.version}/javafx-media-${javafx.version}-win.jar</path>
+                    </modulePaths>
+                    <addModules>
+                        <module>javafx.controls</module>
+                        <module>javafx.fxml</module>
+                        <module>javafx.media</module>
+                    </addModules>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>jpackage</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>jpackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Assembly plugin to create an executable JAR for the SERVER -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>cs2d.ServerMain</mainClass>
+                        </manifest>
+                    </archive>
+                    <descriptorRefs>
+                        <descriptorRef>jar-with-dependencies</descriptorRef>
+                    </descriptorRefs>
+                    <finalName>cs2d-server</finalName>
+                    <appendAssemblyId>false</appendAssemblyId>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+
