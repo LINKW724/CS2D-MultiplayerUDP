@@ -47,4 +47,25 @@ class ZombieEscapeRoutePlannerTest {
         assertFalse(plan.empty());
         assertFalse(fire.contains(plan.routes().get(0).destination(), 20));
     }
+
+    @Test void routeBudgetScalesWithMapDiagonalButRemainsBounded() {
+        var small = ZombieEscapeRoutePlanner.SearchProfile.forMap(1_000, 800);
+        var large = ZombieEscapeRoutePlanner.SearchProfile.forMap(5_000, 4_000);
+        var enormous = ZombieEscapeRoutePlanner.SearchProfile.forMap(50_000, 50_000);
+        assertEquals(576, small.routeRadius());
+        assertTrue(large.routeRadius() > small.routeRadius());
+        assertEquals(1_280, enormous.routeRadius());
+    }
+
+    @Test void largeMapSearchCanSeePastALongCorridorIntoOpenSpace() {
+        Vec origin = new Vec(128, 128);
+        var profile = ZombieEscapeRoutePlanner.SearchProfile.forMap(4_000, 3_000);
+        var plan = planner.plan(origin, List.of(new Vec(64, 128)), List.of(), List.of(), 1_000,
+                p -> p.x() >= 32 && p.y() >= 32 && p.x() <= 3_968 && p.y() <= 2_968
+                        && (p.x() >= 896 || Math.abs(p.y() - 128) < 16),
+                (from, to) -> true, profile);
+        assertFalse(plan.empty());
+        assertTrue(plan.routes().get(0).destination().x() >= 896,
+                "scaled search must prefer the open region beyond the local corridor");
+    }
 }

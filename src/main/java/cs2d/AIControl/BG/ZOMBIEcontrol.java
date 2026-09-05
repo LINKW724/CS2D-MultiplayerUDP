@@ -37,6 +37,7 @@ public class ZOMBIEcontrol {
     private final ZombieCrowdFirePlanner crowdFire = new ZombieCrowdFirePlanner();
     private final ZombieSurvivorMobilityPolicy mobility = new ZombieSurvivorMobilityPolicy();
     private final ZombieEscapeRoutePlanner escapeRoutes = new ZombieEscapeRoutePlanner();
+    private final ZombieEscapeRoutePlanner.SearchProfile escapeSearchProfile;
     private Player primaryTarget;
     private ZombieCrowdFirePlanner.Decision crowdFireDecision = ZombieCrowdFirePlanner.Decision.NONE;
     private Point2D.Double lastKnownPosition;
@@ -69,6 +70,8 @@ public class ZOMBIEcontrol {
         this.perceptionModule = perceptionModule;
         this.attackModule = attackModule;
         this.pathfindingModule = pathfindingModule;
+        this.escapeSearchProfile = ZombieEscapeRoutePlanner.SearchProfile.forMap(
+                gameState.getMapWidth(), gameState.getMapHeight());
         this.grenadeModule = owner.team == Player.Team.CT
                 ? new GrenadeModule(owner, gameState, pathfindingModule.pathfinder, difficulty, logger, rand)
                 : null;
@@ -239,7 +242,8 @@ public class ZOMBIEcontrol {
     private void planEscape(Vec origin, List<Vec> threats, List<Vec> teammates,
             List<ZombieAreaHazard> hazards, long now) {
         escapePlan = escapeRoutes.plan(origin, threats, teammates, hazards, now, this::walkable,
-                (from, to) -> positions.safeSegment(from, to, List.of(), hazards, now, this::walkable));
+                (from, to) -> positions.safeSegment(from, to, List.of(), hazards, now, this::walkable),
+                escapeSearchProfile);
         escapeRouteIndex = 0;
         escapeWaypointIndex = initialWaypoint(currentEscapeRoute());
         escapeCommittedUntil = now + 1_200;
