@@ -80,6 +80,7 @@ public class GameState {
 
     // 僵尸生成点：
     private final List<Point2D.Double> precomputedSpawnPoints = new ArrayList<>();
+    private final SpawnPointValidator spawnPointValidator;
 
     // ========================= 脚步声 =========================
     private static final long FOOTSTEP_INTERVAL_MS = 200L; // 0.2秒间隔
@@ -651,6 +652,8 @@ public class GameState {
             this.generalForbiddenGridCells.addAll(mapData.getGeneralForbiddenZones());
             logger.accept("[GameState Init] 成功架设 " + this.generalForbiddenGridCells.size() + " 个通用禁区单元格。");
         }
+        this.spawnPointValidator = new SpawnPointValidator(
+                width, height, Player.SIZE / 2.0, BFS_GRID_CELL_SIZE, forbiddenSpawnGridCells, obstacles);
 
         // 在确认 this.width 和 this.height 有效之后，再进行路径点烘焙
         if (mapData != null && mapData.getWaypoints() != null && !mapData.getWaypoints().isEmpty()) {
@@ -723,45 +726,14 @@ public class GameState {
     }
 
     private void precomputeValidSpawnPoints() {
-        if (quadtreeRootNode == null)
-            return;
-
         final int step = 50;
         long startTime = System.currentTimeMillis();
         int count = 0;
 
-        List<MapData.ShapeWrapper> nearbyObstacles = new ArrayList<>();
-        // 对象重用
-        java.awt.geom.Rectangle2D.Double queryRect = new java.awt.geom.Rectangle2D.Double();
-        double querySize = 1.0;
-
         for (int x = step; x < this.width; x += step) {
             for (int y = step; y < this.height; y += step) {
-
-                queryRect.setRect(x - querySize / 2, y - querySize / 2, querySize, querySize);
-
-                nearbyObstacles.clear();
-                quadtreeRootNode.queryBounds(nearbyObstacles, queryRect);
-
-                boolean isSafe = true;
                 Point2D.Double p = new Point2D.Double(x, y);
-
-                for (MapData.ShapeWrapper wrapper : nearbyObstacles) {
-                    // 【核心优化】直接从缓存获取 Shape，没有任何计算和对象创建开销！
-                    Shape shape = this.shapeCache.get(wrapper);
-
-                    // 容错：万一缓存里没有（不太可能），再临时转一次
-                    if (shape == null) {
-                        shape = convertWrapperToShape(wrapper);
-                    }
-
-                    if (shape != null && shape.contains(p)) {
-                        isSafe = false;
-                        break;
-                    }
-                }
-
-                if (isSafe) {
+                if (spawnPointValidator.isValid(p)) {
                     precomputedSpawnPoints.add(p);
                     count++;
                 }
@@ -4206,110 +4178,43 @@ public class GameState {
     }
 
     private Point2D.Double getSpawnPoint(Player.Team team) {
-
-        // [新增] 检查禁区是否被激活
-        boolean useForbiddenZones = (gameMode == GameMode.DEATHMATCH || gameMode == GameMode.ZOMBIE_MODE)
-                && !this.forbiddenSpawnGridCells.isEmpty();
-
-        // 如果是(死斗/僵尸)且(禁区存在)，则跳过所有出生区逻辑，直接进入全局随机
-        if (!useForbiddenZones) {
-            // --- 原有逻辑：在指定区域内查找 ---
-            List<Rectangle> spawnAreas;
-            if (gameMode == GameMode.DEATHMATCH) {
-                spawnAreas = new ArrayList<>();
-                if (this.ctSpawnAreas != null)
-                    spawnAreas.addAll(this.ctSpawnAreas);
-                if (this.tSpawnAreas != null)
-                    spawnAreas.addAll(this.tSpawnAreas);
-            } else {
-                spawnAreas = (team == Player.Team.CT) ? this.ctSpawnAreas : this.tSpawnAreas;
-            }
-
-            if (spawnAreas != null && !spawnAreas.isEmpty()) {
-                Rectangle spawnArea = spawnAreas.get(rand.nextInt(spawnAreas.size()));
-                for (int attempts = 0; attempts < 50; attempts++) {
-                    double x = spawnArea.getX() + rand.nextDouble() * spawnArea.getWidth();
-                    double y = spawnArea.getY() + rand.nextDouble() * spawnArea.getHeight();
-                    Point2D.Double spawnPoint = new Point2D.Double(x, y);
-
-                    // 检查禁区 (即使在useForbiddenZones=false时也检查，以防万一)
-                    if (isPointInForbiddenZone(spawnPoint)) {
-                        continue;
-                    }
-
-                    // ... (检查障碍物 和 检查其他玩家 的逻辑不变) ...
-                    boolean isSafe = true;
-                    Area playerArea = new Area(new Ellipse2D.Double(spawnPoint.x - Player.SIZE / 2,
-                            spawnPoint.y - Player.SIZE / 2, Player.SIZE, Player.SIZE));
-                    for (Shape obs : obstacles) {
-                        Area obstacleArea = new Area(obs);
-                        obstacleArea.intersect(playerArea);
-                        if (!obstacleArea.isEmpty()) {
-                            isSafe = false;
-                            break;
-                        }
-                    }
-                    if (!isSafe)
-                        continue;
-
-                    for (Player otherPlayer : players) {
-                        if (otherPlayer.isAlive() && otherPlayer.position.distanceSq(spawnPoint) < (Player.SIZE * 2)
-                                * (Player.SIZE * 2)) {
-                            isSafe = false;
-                            break;
-                        }
-                    }
-                    if (isSafe)
-                        return spawnPoint;
-                }
-            }
-            // --- 原有逻辑结束 ---
+        List<Rectangle> spawnAreas = new ArrayList<>();
+        if (gameMode == GameMode.DEATHMATCH) {
+            if (ctSpawnAreas != null) spawnAreas.addAll(ctSpawnAreas);
+            if (tSpawnAreas != null) spawnAreas.addAll(tSpawnAreas);
+        } else {
+            List<Rectangle> teamAreas = team == Player.Team.CT ? ctSpawnAreas : tSpawnAreas;
+            if (teamAreas != null) spawnAreas.addAll(teamAreas);
         }
 
-        // --- 新逻辑：全局随机重生 (当 useForbiddenZones=true 或 找不到安全点时) ---
-        logger.accept("警告: 未能在指定区域找到安全点, 或禁区已激活。切换到全局随机重生...");
-
-        for (int attempts = 0; attempts < 100; attempts++) { // 增加尝试次数
-            // 在整个地图上随机选点
-            double x = rand.nextDouble() * this.width;
-            double y = rand.nextDouble() * this.height;
-            Point2D.Double spawnPoint = new Point2D.Double(x, y);
-
-            // 1. 检查禁区
-            if (isPointInForbiddenZone(spawnPoint)) {
-                continue;
+        for (int attempt = 0; attempt < 50 && !spawnAreas.isEmpty(); attempt++) {
+            Rectangle area = spawnAreas.get(rand.nextInt(spawnAreas.size()));
+            Point2D.Double candidate = new Point2D.Double(
+                    area.getX() + rand.nextDouble() * area.getWidth(),
+                    area.getY() + rand.nextDouble() * area.getHeight());
+            if (isSpawnCandidateValid(candidate, Player.SIZE * 2.0)) {
+                return candidate;
             }
-
-            // 2. 检查障碍物 (必须检查)
-            boolean isSafe = true;
-            Area playerArea = new Area(new Ellipse2D.Double(spawnPoint.x - Player.SIZE / 2,
-                    spawnPoint.y - Player.SIZE / 2, Player.SIZE, Player.SIZE));
-            for (Shape obs : obstacles) {
-                Area obstacleArea = new Area(obs);
-                obstacleArea.intersect(playerArea);
-                if (!obstacleArea.isEmpty()) {
-                    isSafe = false;
-                    break;
-                }
-            }
-            if (!isSafe)
-                continue;
-
-            // 3. 检查玩家 (可选，但在DM中最好有)
-            for (Player otherPlayer : players) {
-                if (otherPlayer.isAlive()
-                        && otherPlayer.position.distanceSq(spawnPoint) < (Player.SIZE * 2) * (Player.SIZE * 2)) {
-                    isSafe = false;
-                    break;
-                }
-            }
-            if (isSafe)
-                return spawnPoint; // 找到全局安全点
         }
 
-        // 最终备用：返回地图中心
-        logger.accept("严重警告: 无法在100次尝试内找到任何安全重生点！强制重生在地图中心。");
-        return new Point2D.Double(this.width / 2.0, this.height / 2.0);
+        logger.accept("警告: 指定出生区域没有安全点，尝试全图合法区域。");
+        for (int attempt = 0; attempt < 100; attempt++) {
+            Point2D.Double candidate = new Point2D.Double(
+                    rand.nextDouble() * width, rand.nextDouble() * height);
+            if (isSpawnCandidateValid(candidate, Player.SIZE * 2.0)) {
+                return candidate;
+            }
+        }
+
+        Point2D.Double emergency = precomputedSpawnPoints.stream()
+                .filter(point -> isFarEnoughFromAlivePlayers(point, Player.SIZE * 2.0))
+                .findFirst()
+                .orElseGet(() -> spawnPointValidator.findAnyValidPoint(20));
+        if (emergency != null) {
+            logger.accept("警告: 随机出生失败，使用经过完整验证的应急出生点。");
+            return emergency;
+        }
+        throw new IllegalStateException("地图没有任何可用出生点；拒绝将角色生成到地图外");
     }
 
     /**
@@ -4329,7 +4234,7 @@ public class GameState {
                 .map(p -> p.position)
                 .collect(Collectors.toList());
 
-        // 如果没有人类存活，直接从预选点中随机选一个
+        // 预选池中的每个点均已通过完整静态验证。
         if (humanPositions.isEmpty()) {
             return precomputedSpawnPoints.get(rand.nextInt(precomputedSpawnPoints.size()));
         }
@@ -4339,9 +4244,6 @@ public class GameState {
         // 动态过滤：从所有预选点中，筛选出当前离所有玩家都足够远的点
         List<Point2D.Double> candidatePoints = precomputedSpawnPoints.stream()
                 .filter(spawnPoint -> {
-                    if (isPointInForbiddenZone(spawnPoint)) {
-                        return false; // 在禁区内，淘汰这个点
-                    }
                     // 检查这个出生点到所有玩家的距离
                     for (Point2D.Double humanPos : humanPositions) {
                         if (spawnPoint.distanceSq(humanPos) < minDistanceToPlayerSq) {
@@ -4357,15 +4259,16 @@ public class GameState {
             // 如果有候选点，直接从里面随机选一个返回，这非常快
             return candidatePoints.get(rand.nextInt(candidatePoints.size()));
         } else {
-            // 容错：如果所有预选点都离玩家太近（比如玩家堵在角落），则退回到在地图边缘生成
-            logger.accept("所有预选点都离玩家太近，尝试在地图边缘生成。");
-            return getZombieSpawnPointRandom();
+            logger.accept("所有预选点都未达到400像素安全距离，选择离人类最远的合法点。");
+            return precomputedSpawnPoints.stream()
+                    .max(Comparator.comparingDouble(point -> humanPositions.stream()
+                            .mapToDouble(point::distanceSq).min().orElse(Double.MAX_VALUE)))
+                    .orElseGet(this::getZombieSpawnPointRandom);
         }
     }
 
     // 获取一个安全的僵尸出生点（通常在地图边缘）。
     private Point2D.Double getZombieSpawnPointRandom() {
-        Rectangle spawnBounds = new Rectangle(0, 0, (int) Player.SIZE, (int) Player.SIZE); // 创建碰撞检查矩形。
         for (int attempts = 0; attempts < 50; attempts++) { // 尝试50次。
             Point2D.Double spawnPoint;
             int padding = 50, side = rand.nextInt(4); // 随机选择一个地图边缘。
@@ -4378,23 +4281,29 @@ public class GameState {
             else
                 spawnPoint = new Point2D.Double(width - padding, rand.nextInt(height)); // 右边缘
 
-            if (isPointInForbiddenZone(spawnPoint)) {
-                continue; // 这一点在禁区内，跳过
-            }
-
-            spawnBounds.setLocation((int) (spawnPoint.x - Player.SIZE / 2), (int) (spawnPoint.y - Player.SIZE / 2)); // 移动检查矩形。
-            boolean isSafe = true; // 假设安全。
-            for (Shape obs : obstacles) { // 检查是否与障碍物重叠。
-                if (obs.intersects(spawnBounds)) {
-                    isSafe = false;
-                    break;
-                }
-            }
-            if (isSafe)
+            if (spawnPointValidator.isValid(spawnPoint))
                 return spawnPoint; // 如果安全，则返回该点。
         }
         logger.accept("警告: 无法在 50 次尝试内找到安全的僵尸出生点。"); // 失败则记录警告。
-        return new Point2D.Double(width / 2.0, 50); // 返回一个默认点。
+        if (!precomputedSpawnPoints.isEmpty()) {
+            return precomputedSpawnPoints.get(rand.nextInt(precomputedSpawnPoints.size()));
+        }
+        Point2D.Double emergency = spawnPointValidator.findAnyValidPoint(20);
+        if (emergency != null) {
+            return emergency;
+        }
+        throw new IllegalStateException("地图没有任何合法僵尸出生点；拒绝使用未验证坐标");
+    }
+
+    private boolean isSpawnCandidateValid(Point2D.Double candidate, double minimumPlayerDistance) {
+        return spawnPointValidator.isValid(candidate)
+                && isFarEnoughFromAlivePlayers(candidate, minimumPlayerDistance);
+    }
+
+    private boolean isFarEnoughFromAlivePlayers(Point2D.Double candidate, double minimumDistance) {
+        double minimumDistanceSq = minimumDistance * minimumDistance;
+        return players.stream().filter(Player::isAlive)
+                .noneMatch(player -> player.position.distanceSq(candidate) < minimumDistanceSq);
     }
 
     private static final double LINE_INTERSECTION_EPSILON = 1.0e-8;
@@ -5458,11 +5367,14 @@ public class GameState {
                                 double pushY = dy / magnitude;
                                 double overlap = minDistance - distance;
 
-                                justSpawned.position.x += pushX * (overlap + 0.1); // 加上一点边距
-                                justSpawned.position.y += pushY * (overlap + 0.1);
-
-                                justSpawned.vx += pushX * pushImpulse;
-                                justSpawned.vy += pushY * pushImpulse;
+                                Point2D.Double displaced = new Point2D.Double(
+                                        justSpawned.position.x + pushX * (overlap + 0.1),
+                                        justSpawned.position.y + pushY * (overlap + 0.1));
+                                if (spawnPointValidator.isValid(displaced)) {
+                                    justSpawned.position.setLocation(displaced);
+                                    justSpawned.vx += pushX * pushImpulse;
+                                    justSpawned.vy += pushY * pushImpulse;
+                                }
                             }
                         }
                     }
@@ -6440,21 +6352,6 @@ public class GameState {
         } else {
             logger.accept("[CONTROL_BOT] " + humanPlayer.name + " 夺舍失败，没有可用的BOT。");
         }
-    }
-
-    /**
-     * 检查一个世界坐标点是否位于禁止复活区网格内。
-     * 
-     * @param point 玩家的世界坐标
-     * @return true 如果该点在禁区内
-     */
-    private boolean isPointInForbiddenZone(Point2D.Double point) {
-        if (this.forbiddenSpawnGridCells.isEmpty()) {
-            return false; // 如果没有禁区，快速返回
-        }
-        int gridX = (int) (point.x / BFS_GRID_CELL_SIZE);
-        int gridY = (int) (point.y / BFS_GRID_CELL_SIZE);
-        return this.forbiddenSpawnGridCells.contains(new Point(gridX, gridY));
     }
 
     public boolean isPointInGeneralForbiddenZone(Point2D.Double point) {
