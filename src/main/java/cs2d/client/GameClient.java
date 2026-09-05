@@ -1833,7 +1833,7 @@ public class GameClient extends Application {
         return DamageFeedbackAudiencePolicy.acceptsTeamEvent(
                 gameSettings.getDamageNumberVisibilityFor(mode),
                 mode,
-                isDetachedSpectator(),
+                damageFeedbackViewerContext(),
                 feedbackTeam,
                 localTeam,
                 isLocalCombatAttacker(getString(payload, "atk")),
@@ -1842,6 +1842,16 @@ public class GameClient extends Application {
 
     private boolean isDetachedSpectator() {
         return clientState == ClientState.PLAYING && myPlayerId == null && me == null;
+    }
+
+    private DamageFeedbackViewerContext damageFeedbackViewerContext() {
+        if (isDetachedSpectator()) {
+            return DamageFeedbackViewerContext.DETACHED_SPECTATOR;
+        }
+        if (me != null && me.data != null && !getBool(me.data, "isAlive")) {
+            return DamageFeedbackViewerContext.ATTACHED_SPECTATOR;
+        }
+        return DamageFeedbackViewerContext.ACTIVE_PLAYER;
     }
 
     private String localCombatTeam() {
@@ -1856,6 +1866,16 @@ public class GameClient extends Application {
             }
             if (controlled != null && controlled.data != null) {
                 return getString(controlled.data, "team");
+            }
+        }
+        if (!getBool(me.data, "isAlive")) {
+            String spectatorTargetId = getString(me.data, "spectatorTargetId");
+            ClientPlayer target = clientPlayers.get(spectatorTargetId);
+            if (target == null) {
+                target = clientZombies.get(spectatorTargetId);
+            }
+            if (target != null && target.data != null) {
+                return getString(target.data, "team");
             }
         }
         return getString(me.data, "team");

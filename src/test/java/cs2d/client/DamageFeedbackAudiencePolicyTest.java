@@ -9,39 +9,50 @@ class DamageFeedbackAudiencePolicyTest {
     @Test
     void detachedSpectatorReceivesAllZombieFeedbackOnlyAtAllScope() {
         assertTrue(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
-                true, "CT", "", false));
+                DamageFeedbackViewerContext.DETACHED_SPECTATOR, "CT", "", false));
         assertTrue(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
-                true, "T", "", false));
+                DamageFeedbackViewerContext.DETACHED_SPECTATOR, "T", "", false));
 
         assertFalse(accepts(DamageNumberVisibility.TEAMMATES, DamageNumberModePolicy.ZOMBIE_MODE,
-                true, "CT", "", false));
+                DamageFeedbackViewerContext.DETACHED_SPECTATOR, "CT", "", false));
         assertFalse(accepts(DamageNumberVisibility.ALL, "TEAM_DEATHMATCH",
-                true, "CT", "", false));
+                DamageFeedbackViewerContext.DETACHED_SPECTATOR, "CT", "", false));
     }
 
     @Test
     void teamViewerStillRequiresMatchingTeamAndNonLocalAttacker() {
         assertTrue(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
-                false, "CT", "CT", false));
+                DamageFeedbackViewerContext.ACTIVE_PLAYER, "CT", "CT", false));
         assertFalse(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
-                false, "T", "CT", false));
+                DamageFeedbackViewerContext.ACTIVE_PLAYER, "T", "CT", false));
         assertFalse(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
-                false, "CT", "CT", true));
+                DamageFeedbackViewerContext.ACTIVE_PLAYER, "CT", "CT", true));
         assertFalse(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
-                false, "CT", "CT", false, true));
+                DamageFeedbackViewerContext.ACTIVE_PLAYER, "CT", "CT", false, true));
         assertFalse(accepts(DamageNumberVisibility.OWN, DamageNumberModePolicy.ZOMBIE_MODE,
-                false, "CT", "CT", false));
+                DamageFeedbackViewerContext.ACTIVE_PLAYER, "CT", "CT", false));
+    }
+
+    @Test
+    void attachedDeadSpectatorUsesTargetTeamForTeamScopeAndGlobalAudienceForAll() {
+        assertTrue(accepts(DamageNumberVisibility.TEAMMATES, DamageNumberModePolicy.ZOMBIE_MODE,
+                DamageFeedbackViewerContext.ATTACHED_SPECTATOR, "CT", "CT", false));
+        assertFalse(accepts(DamageNumberVisibility.TEAMMATES, DamageNumberModePolicy.ZOMBIE_MODE,
+                DamageFeedbackViewerContext.ATTACHED_SPECTATOR, "ZOMBIE", "CT", false));
+        assertTrue(accepts(DamageNumberVisibility.ALL, DamageNumberModePolicy.ZOMBIE_MODE,
+                DamageFeedbackViewerContext.ATTACHED_SPECTATOR, "ZOMBIE", "CT", false));
     }
 
     private static boolean accepts(DamageNumberVisibility visibility, String mode,
-            boolean detachedSpectator, String feedbackTeam, String localTeam, boolean localAttacker) {
-        return accepts(visibility, mode, detachedSpectator, feedbackTeam, localTeam, localAttacker, false);
+            DamageFeedbackViewerContext viewerContext, String feedbackTeam,
+            String localTeam, boolean localAttacker) {
+        return accepts(visibility, mode, viewerContext, feedbackTeam, localTeam, localAttacker, false);
     }
 
     private static boolean accepts(DamageNumberVisibility visibility, String mode,
-            boolean detachedSpectator, String feedbackTeam, String localTeam,
+            DamageFeedbackViewerContext viewerContext, String feedbackTeam, String localTeam,
             boolean localAttacker, boolean localVictim) {
         return DamageFeedbackAudiencePolicy.acceptsTeamEvent(
-                visibility, mode, detachedSpectator, feedbackTeam, localTeam, localAttacker, localVictim);
+                visibility, mode, viewerContext, feedbackTeam, localTeam, localAttacker, localVictim);
     }
 }

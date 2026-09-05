@@ -8,7 +8,7 @@ final class DamageFeedbackAudiencePolicy {
     static boolean acceptsTeamEvent(
             DamageNumberVisibility visibility,
             String gameMode,
-            boolean detachedSpectator,
+            DamageFeedbackViewerContext viewerContext,
             String feedbackTeam,
             String localTeam,
             boolean localAttacker,
@@ -17,9 +17,14 @@ final class DamageFeedbackAudiencePolicy {
                 || feedbackTeam == null || feedbackTeam.isBlank() || localAttacker || localVictim) {
             return false;
         }
-        if (detachedSpectator) {
+        if (viewerContext == DamageFeedbackViewerContext.DETACHED_SPECTATOR) {
             return visibility == DamageNumberVisibility.ALL
                     && DamageNumberModePolicy.ZOMBIE_MODE.equals(gameMode);
+        }
+        if (viewerContext == DamageFeedbackViewerContext.ATTACHED_SPECTATOR
+                && visibility == DamageNumberVisibility.ALL
+                && DamageNumberModePolicy.ZOMBIE_MODE.equals(gameMode)) {
+            return true;
         }
         return feedbackTeam.equals(localTeam);
     }
