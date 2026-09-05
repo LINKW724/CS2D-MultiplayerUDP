@@ -81,6 +81,10 @@ public class GameState {
     // 僵尸生成点：
     private final List<Point2D.Double> precomputedSpawnPoints = new ArrayList<>();
     private final SpawnPointValidator spawnPointValidator;
+    private final ZombieSpawnStallMonitor zombieSpawnStallMonitor = new ZombieSpawnStallMonitor();
+    private final ZombieSpawnPointSelector zombieSpawnPointSelector = new ZombieSpawnPointSelector();
+    private static final double ZOMBIE_SPAWN_SEPARATION = Player.SIZE * 3.0;
+    private static final double RECYCLED_SPAWN_SEPARATION = 250.0;
 
     // ========================= 脚步声 =========================
     private static final long FOOTSTEP_INTERVAL_MS = 200L; // 0.2秒间隔
@@ -1249,6 +1253,8 @@ public class GameState {
 
         // 游戏逻辑和性能记录[放在控制台了]
         // ------------------------------------
+        if (gameMode == GameMode.ZOMBIE_MODE && !isAiFrozen)
+            recycleSpawnStalledZombies(currentTime);
         handlePlayerZombieProximityAttacks();
         handleFootstepSounds(); // 调用脚步声处理
         handleGameModeLogic();
@@ -4106,12 +4112,16 @@ public class GameState {
     }
 
     // 生成一个僵尸。
-    private void spawnZombie() {
+    private Player spawnZombie() {
+        return spawnZombie(null);
+    }
+
+    private Player spawnZombie(Point2D.Double avoidedSpawn) {
         // 创建僵尸实例。
 
         /** 常规波数的僵尸 */
 
-        Player zombie = new Player(UUID.randomUUID().toString(), "Zombie", getZombieSpawnPoint(), Player.Team.ZOMBIE,
+        Player zombie = new Player(UUID.randomUUID().toString(), "Zombie", getZombieSpawnPoint(avoidedSpawn), Player.Team.ZOMBIE,
                 true, gameMode, this, aiDifficulty, logger);
         zombie.maxHealth = 50 + currentWave * 15; // 设置最大生命值
 
@@ -4124,6 +4134,29 @@ public class GameState {
         zombie.health = zombie.maxHealth; // 将当前生命值设为最大值
         zombies.add(zombie); // 将僵尸添加到列表。
         resolveSpawnOverlaps(zombie); // 解决僵尸出生时的重叠问题。
+        zombieSpawnStallMonitor.register(zombie.id, zombie.position, zombie.health, System.currentTimeMillis());
+        return zombie;
+    }
+
+    private void recycleSpawnStalledZombies(long now) {
+        List<ZombieSpawnStallMonitor.Sample> samples = zombies.stream()
+                .map(zombie -> new ZombieSpawnStallMonitor.Sample(zombie.id, zombie.position,
+                        zombie.health, zombie.isAlive()))
+                .toList();
+        for (String id : zombieSpawnStallMonitor.findRecyclable(samples, now)) {
+            Player stalled = zombies.stream().filter(zombie -> zombie.id.equals(id)).findFirst().orElse(null);
+            if (stalled == null || !stalled.isAlive()) continue;
+            Point2D.Double oldSpawn = new Point2D.Double(stalled.position.x, stalled.position.y);
+            spawnZombie(oldSpawn); // Replacement exists before removal, so wave remainder never reaches zero.
+            if (zombies.remove(stalled)) {
+                stalled.health = 0;
+                stalled.keysDown.clear();
+                stalled.isShooting = false;
+                aiInputMailbox.remove(stalled.id);
+                playerDamageBuffer.remove(stalled.id);
+                logger.accept("回收出生后未移动且未受伤的僵尸 " + stalled.id + "，本波剩余数保持不变。");
+            }
+        }
     }
 
     // 开始下一波僵尸。
@@ -4222,10 +4255,14 @@ public class GameState {
      * 使用“预计算网格 + 动态过滤”方案，效率极高。
      */
     private Point2D.Double getZombieSpawnPoint() {
+        return getZombieSpawnPoint(null);
+    }
+
+    private Point2D.Double getZombieSpawnPoint(Point2D.Double avoidedSpawn) {
         // 如果由于某种原因没有预选点，则退回到旧的随机边缘生成逻辑
         if (precomputedSpawnPoints.isEmpty()) {
             logger.accept("警告: 预选出生点列表为空，使用备用生成逻辑。");
-            return getZombieSpawnPointRandom();
+            return getZombieSpawnPointRandom(avoidedSpawn);
         }
 
         // 获取所有存活的人类玩家的位置
@@ -4233,60 +4270,48 @@ public class GameState {
                 .filter(p -> p.isAlive() && p.team == Player.Team.CT)
                 .map(p -> p.position)
                 .collect(Collectors.toList());
+        List<Point2D.Double> occupiedPositions = getAllCharacters().stream()
+                .filter(p -> p != null && p.isAlive() && p.position != null)
+                .map(p -> p.position).toList();
 
         // 预选池中的每个点均已通过完整静态验证。
-        if (humanPositions.isEmpty()) {
-            return precomputedSpawnPoints.get(rand.nextInt(precomputedSpawnPoints.size()));
-        }
-
-        final double minDistanceToPlayerSq = 400.0 * 400.0; // 最小安全距离的平方 (400像素)
-
-        // 动态过滤：从所有预选点中，筛选出当前离所有玩家都足够远的点
-        List<Point2D.Double> candidatePoints = precomputedSpawnPoints.stream()
-                .filter(spawnPoint -> {
-                    // 检查这个出生点到所有玩家的距离
-                    for (Point2D.Double humanPos : humanPositions) {
-                        if (spawnPoint.distanceSq(humanPos) < minDistanceToPlayerSq) {
-                            return false; // 距离太近，淘汰这个点
-                        }
-                    }
-                    return true; // 距离所有玩家都足够远，这是一个有效的候选点
-                })
-                .collect(Collectors.toList());
-
-        // 决策
-        if (!candidatePoints.isEmpty()) {
-            // 如果有候选点，直接从里面随机选一个返回，这非常快
-            return candidatePoints.get(rand.nextInt(candidatePoints.size()));
-        } else {
-            logger.accept("所有预选点都未达到400像素安全距离，选择离人类最远的合法点。");
-            return precomputedSpawnPoints.stream()
-                    .max(Comparator.comparingDouble(point -> humanPositions.stream()
-                            .mapToDouble(point::distanceSq).min().orElse(Double.MAX_VALUE)))
-                    .orElseGet(this::getZombieSpawnPointRandom);
-        }
+        Optional<Point2D.Double> selected = zombieSpawnPointSelector.choose(precomputedSpawnPoints,
+                humanPositions, occupiedPositions, avoidedSpawn, rand,
+                400, ZOMBIE_SPAWN_SEPARATION, RECYCLED_SPAWN_SEPARATION);
+        if (selected.isPresent()) return selected.get();
+        logger.accept("所有合法出生点均被占用，使用动态校验的边缘生成逻辑。");
+        return getZombieSpawnPointRandom(avoidedSpawn);
     }
 
-    // 获取一个安全的僵尸出生点（通常在地图边缘）。
     private Point2D.Double getZombieSpawnPointRandom() {
-        for (int attempts = 0; attempts < 50; attempts++) { // 尝试50次。
-            Point2D.Double spawnPoint;
-            int padding = 50, side = rand.nextInt(4); // 随机选择一个地图边缘。
-            if (side == 0)
-                spawnPoint = new Point2D.Double(rand.nextInt(width), padding); // 上边缘
-            else if (side == 1)
-                spawnPoint = new Point2D.Double(rand.nextInt(width), height - padding); // 下边缘
-            else if (side == 2)
-                spawnPoint = new Point2D.Double(padding, rand.nextInt(height)); // 左边缘
-            else
-                spawnPoint = new Point2D.Double(width - padding, rand.nextInt(height)); // 右边缘
+        return getZombieSpawnPointRandom(null);
+    }
 
-            if (spawnPointValidator.isValid(spawnPoint))
-                return spawnPoint; // 如果安全，则返回该点。
+    private Point2D.Double getZombieSpawnPointRandom(Point2D.Double avoidedSpawn) {
+        List<Point2D.Double> occupied = getAllCharacters().stream()
+                .filter(p -> p != null && p.isAlive() && p.position != null)
+                .map(p -> p.position).toList();
+        double separationSq = ZOMBIE_SPAWN_SEPARATION * ZOMBIE_SPAWN_SEPARATION;
+        double recycledSeparationSq = RECYCLED_SPAWN_SEPARATION * RECYCLED_SPAWN_SEPARATION;
+        for (int attempts = 0; attempts < 50; attempts++) {
+            Point2D.Double spawnPoint;
+            int padding = 50, side = rand.nextInt(4);
+            if (side == 0) spawnPoint = new Point2D.Double(rand.nextInt(width), padding);
+            else if (side == 1) spawnPoint = new Point2D.Double(rand.nextInt(width), height - padding);
+            else if (side == 2) spawnPoint = new Point2D.Double(padding, rand.nextInt(height));
+            else spawnPoint = new Point2D.Double(width - padding, rand.nextInt(height));
+            if (spawnPointValidator.isValid(spawnPoint)
+                    && occupied.stream().noneMatch(position -> spawnPoint.distanceSq(position) < separationSq)
+                    && (avoidedSpawn == null || spawnPoint.distanceSq(avoidedSpawn) >= recycledSeparationSq))
+                return spawnPoint;
         }
-        logger.accept("警告: 无法在 50 次尝试内找到安全的僵尸出生点。"); // 失败则记录警告。
-        if (!precomputedSpawnPoints.isEmpty()) {
-            return precomputedSpawnPoints.get(rand.nextInt(precomputedSpawnPoints.size()));
+        logger.accept("警告: 无法在 50 次尝试内找到动态分离的僵尸出生点。");
+        List<Point2D.Double> unoccupied = precomputedSpawnPoints.stream()
+                .filter(point -> occupied.stream().noneMatch(position -> point.distanceSq(position) < separationSq))
+                .toList();
+        if (!unoccupied.isEmpty()) {
+            return zombieSpawnPointSelector.choose(unoccupied, List.of(), occupied, avoidedSpawn, rand,
+                    0, ZOMBIE_SPAWN_SEPARATION, RECYCLED_SPAWN_SEPARATION).orElseThrow();
         }
         Point2D.Double emergency = spawnPointValidator.findAnyValidPoint(20);
         if (emergency != null) {
