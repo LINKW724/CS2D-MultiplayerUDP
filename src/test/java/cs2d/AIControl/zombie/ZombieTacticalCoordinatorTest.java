@@ -123,6 +123,21 @@ class ZombieTacticalCoordinatorTest {
                 .allMatch(o -> watch.equals(o.watchPoint())));
     }
 
+    @Test void briefForecastLossKeepsTheSquadAtTheCorridorInsteadOfReturningToSpawn() {
+        List<Vec> route = java.util.stream.IntStream.rangeClosed(0, 30)
+                .mapToObj(i -> new Vec(1_500 - i * 32, 580)).toList();
+        ZombieAttackLane lane = new ZombieAttackLane("east", route.get(0), route.get(route.size() - 1),
+                new Vec(900, 580), new Vec(1_100, 580), 8, 8, 8_000, route);
+        commander.plan(new ZombieTacticalSnapshot(1_000, squad(), List.of(), List.of(),
+                8, List.of(), List.of(lane)), board,
+                p -> p.x() > 0 && p.y() > 0 && p.x() < 2_000 && p.y() < 2_000);
+        var retained = commander.plan(new ZombieTacticalSnapshot(1_250, squad(), List.of()), board,
+                p -> p.x() > 0 && p.y() > 0 && p.x() < 2_000 && p.y() < 2_000);
+        assertTrue(retained.values().stream().anyMatch(order -> order.targetId() != null
+                && order.targetId().startsWith("choke:")));
+        assertTrue(retained.values().stream().noneMatch(order -> order.task() == Task.RETURN_TO_GUARD));
+    }
+
     @Test void activeFrontKeepsShooterAndPullsIdleAgentsOutOfBlindGuardAreas() {
         List<Contact> fight = new ArrayList<>();
         for (int i = 0; i < 6; i++)

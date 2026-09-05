@@ -24,4 +24,16 @@ class ZombieTacticalTaskBoardTest {
         assertEquals(first.generation(), next.generation());
         assertEquals(new Vec(600, 500), next.destination());
     }
+
+    @Test void deploymentAnchorPreventsImmediateReturnToSpawnAndCanBePromoted() {
+        ZombieTacticalTaskBoard board = new ZombieTacticalTaskBoard();
+        Vec spawn = new Vec(100, 100);
+        Vec choke = new Vec(700, 500);
+        assertEquals(spawn, board.effectiveHome("a", () -> spawn, 1_000));
+        board.holdDeployment("a", choke, 1_000);
+        assertEquals(choke, board.effectiveHome("a", () -> spawn, 20_000));
+        assertEquals(spawn, board.effectiveHome("a", () -> spawn, 31_001));
+        board.promoteHome("a", choke);
+        assertEquals(choke, board.effectiveHome("a", () -> spawn, 40_000));
+    }
 }

@@ -36,7 +36,7 @@ public class ZOMBIEcontrol {
     private final ZombiePursuitPlanner pursuit = new ZombiePursuitPlanner();
     private final ZombieCrowdFirePlanner crowdFire = new ZombieCrowdFirePlanner();
     private final ZombieSurvivorMobilityPolicy mobility = new ZombieSurvivorMobilityPolicy();
-    private final ZombieEscapePlanner escape = new ZombieEscapePlanner();
+    private final ZombieEscapeRoutePlanner escapeRoutes = new ZombieEscapeRoutePlanner();
     private Player primaryTarget;
     private ZombieCrowdFirePlanner.Decision crowdFireDecision = ZombieCrowdFirePlanner.Decision.NONE;
     private Point2D.Double lastKnownPosition;
@@ -49,6 +49,13 @@ public class ZOMBIEcontrol {
     private Item grenadeItem;
     private boolean wasEmergency;
     private boolean kiting;
+    private ZombieEscapeRoutePlanner.EscapePlan escapePlan = ZombieEscapeRoutePlanner.EscapePlan.EMPTY;
+    private int escapeRouteIndex;
+    private int escapeWaypointIndex;
+    private long escapeCommittedUntil;
+    private long nextEscapePreparationAt;
+    private Vec lastEscapeProgressPosition;
+    private long lastEscapeProgressAt;
     private Vec lastZombieProgressPosition;
     private long lastZombieProgressAt;
     private Vec zombieDetourTarget;
@@ -133,8 +140,18 @@ public class ZOMBIEcontrol {
                 lastZombieDamageAt, now, kiting);
         kiting = mobilityDecision.kiting();
         boolean emergency = mobilityDecision.emergency();
-        if (emergency && !wasEmergency) nextPositionAt = 0;
+        if (emergency && !wasEmergency) {
+            nextPositionAt = 0;
+            escapeCommittedUntil = now + 1_200;
+            lastEscapeProgressPosition = origin;
+            lastEscapeProgressAt = now;
+        }
+        if (!emergency && wasEmergency) clearEscapeRoute();
         wasEmergency = emergency;
+        if (!emergency && !threats.isEmpty() && nearest < 520 && now >= nextEscapePreparationAt) {
+            planEscape(origin, threats, liveAllyPositions(), hazards, now);
+            nextEscapePreparationAt = now + 1_500;
+        }
 
         AIInput grenade = grenadeAction(world, now, nearest, threats, hazards);
         if (grenade != null) return grenade;
@@ -142,25 +159,22 @@ public class ZOMBIEcontrol {
         if (owner.currentAmmo <= 0 && owner.reserveAmmo > 0 && !owner.isReloading)
             owner.startReload();
 
-        List<Vec> teammates = gameState.getAllCharacters().stream()
-                .filter(p -> p != null && p != owner && p.isAlive() && p.team == owner.team && p.position != null)
-                .map(p -> Vec.of(p.position)).toList();
+        List<Vec> teammates = liveAllyPositions();
         Vec desired = order != null && order.active(now) && owner.id.equals(order.agentId())
                 ? order.destination() : origin;
         if (desired == null) desired = origin;
-        if (now >= nextPositionAt || movementGoal == null) {
+        if (emergency) {
+            movementGoal = committedEscapeGoal(origin, threats, teammates, hazards, now);
+        } else if (now >= nextPositionAt || movementGoal == null) {
             Vec local = desired;
-            if (emergency) {
-                local = escape.choose(origin, threats, teammates, hazards, now, this::walkable,
-                        (from, to) -> positions.safeSegment(from, to, List.of(), hazards, now, this::walkable));
-            } else if (positions.requiresLocalDetour(origin, desired,
+            if (positions.requiresLocalDetour(origin, desired,
                     threats, hazards, now, this::walkable)
                     || teammates.stream().anyMatch(p -> p.distance(origin) < 50)) {
                 local = positions.choose(origin, desired, threats, teammates, hazards, now, this::walkable,
                         null);
             }
             movementGoal = local;
-            nextPositionAt = now + (emergency ? 250 : 500);
+            nextPositionAt = now + 500;
         }
         moveTo(movementGoal);
         AIInput movement = pathfindingModule.update(world);
@@ -183,6 +197,72 @@ public class ZOMBIEcontrol {
                 && weapon.getWeaponType() == Weapon.WeaponType.SNIPER)
             keys = attack.keys();
         return new AIInput(keys, angle, shoot, false, false);
+    }
+
+    private Vec committedEscapeGoal(Vec origin, List<Vec> threats, List<Vec> teammates,
+            List<ZombieAreaHazard> hazards, long now) {
+        if (lastEscapeProgressPosition == null || origin.distance(lastEscapeProgressPosition) >= 18) {
+            lastEscapeProgressPosition = origin;
+            lastEscapeProgressAt = now;
+        }
+        boolean stalled = lastEscapeProgressAt > 0 && now - lastEscapeProgressAt >= 700;
+        ZombieEscapeRoutePlanner.EscapeRoute route = currentEscapeRoute();
+        boolean routeUnsafe = route != null && now >= escapeCommittedUntil
+                && !escapeRoutes.routeStillSafe(route, escapeWaypointIndex, threats, hazards, now);
+        if (route == null || stalled || routeUnsafe) {
+            if (route != null && escapeRouteIndex + 1 < escapePlan.routes().size()) {
+                escapeRouteIndex++;
+                escapeWaypointIndex = initialWaypoint(currentEscapeRoute());
+                lastEscapeProgressPosition = origin;
+                lastEscapeProgressAt = now;
+            } else {
+                planEscape(origin, threats, teammates, hazards, now);
+            }
+            route = currentEscapeRoute();
+        }
+        if (route == null) {
+            return positions.choose(origin, origin, threats, teammates, hazards, now,
+                    this::walkable, null);
+        }
+        while (escapeWaypointIndex < route.waypoints().size() - 1
+                && origin.distance(route.waypoints().get(escapeWaypointIndex)) <= 46) {
+            escapeWaypointIndex = Math.min(route.waypoints().size() - 1, escapeWaypointIndex + 2);
+        }
+        if (escapeWaypointIndex >= route.waypoints().size() - 1
+                && origin.distance(route.destination()) <= 52 && now >= escapeCommittedUntil) {
+            planEscape(origin, threats, teammates, hazards, now);
+            route = currentEscapeRoute();
+        }
+        return route == null ? origin : route.waypoints().get(escapeWaypointIndex);
+    }
+
+    private void planEscape(Vec origin, List<Vec> threats, List<Vec> teammates,
+            List<ZombieAreaHazard> hazards, long now) {
+        escapePlan = escapeRoutes.plan(origin, threats, teammates, hazards, now, this::walkable,
+                (from, to) -> positions.safeSegment(from, to, List.of(), hazards, now, this::walkable));
+        escapeRouteIndex = 0;
+        escapeWaypointIndex = initialWaypoint(currentEscapeRoute());
+        escapeCommittedUntil = now + 1_200;
+        lastEscapeProgressPosition = origin;
+        lastEscapeProgressAt = now;
+    }
+
+    private ZombieEscapeRoutePlanner.EscapeRoute currentEscapeRoute() {
+        return escapeRouteIndex >= 0 && escapeRouteIndex < escapePlan.routes().size()
+                ? escapePlan.routes().get(escapeRouteIndex) : null;
+    }
+
+    private static int initialWaypoint(ZombieEscapeRoutePlanner.EscapeRoute route) {
+        return route == null ? 0 : Math.min(route.waypoints().size() - 1, 3);
+    }
+
+    private void clearEscapeRoute() {
+        escapePlan = ZombieEscapeRoutePlanner.EscapePlan.EMPTY;
+        escapeRouteIndex = 0;
+        escapeWaypointIndex = 0;
+        escapeCommittedUntil = 0;
+        lastEscapeProgressPosition = null;
+        lastEscapeProgressAt = 0;
     }
 
     private boolean walkable(Vec point) {
@@ -302,6 +382,13 @@ public class ZOMBIEcontrol {
                 .map(p -> Vec.of(p.position)).toList();
     }
 
+    private List<Vec> liveAllyPositions() {
+        return gameState.getAllCharacters().stream()
+                .filter(p -> p != null && p != owner && p.isAlive()
+                        && p.team == owner.team && p.position != null)
+                .map(p -> Vec.of(p.position)).toList();
+    }
+
     private void restoreGun() {
         if (kiting && owner.secondaryWeapon != null) owner.switchToSlot(2);
         else if (owner.primaryWeapon != null) owner.switchToSlot(1);
@@ -371,6 +458,8 @@ public class ZOMBIEcontrol {
         grenadeItem = null;
         wasEmergency = false;
         kiting = false;
+        clearEscapeRoute();
+        nextEscapePreparationAt = 0;
         lastZombieProgressPosition = null;
         lastZombieProgressAt = 0;
         zombieDetourTarget = null;

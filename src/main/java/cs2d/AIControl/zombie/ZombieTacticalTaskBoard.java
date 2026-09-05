@@ -9,12 +9,28 @@ import java.util.function.Supplier;
 public final class ZombieTacticalTaskBoard {
     public static final long CLEAR_WINDOW_MS = 8_000L;
     public static final long CLEAR_COOLDOWN_MS = 5_000L;
+    private static final long DEPLOYMENT_ANCHOR_LEASE_MS = 30_000L;
     private final Map<String, Vec> homes = new HashMap<>();
+    private final Map<String, AnchorLease> deploymentAnchors = new HashMap<>();
     private final Map<String, ZombieTacticalOrder> orders = new HashMap<>();
     private final Map<String, Long> cooldowns = new HashMap<>();
     private long generation;
 
     public Vec home(String id, Supplier<Vec> choose) { return homes.computeIfAbsent(id, ignored -> choose.get()); }
+    public Vec effectiveHome(String id, Supplier<Vec> choose, long now) {
+        Vec home = home(id, choose);
+        AnchorLease lease = deploymentAnchors.get(id);
+        if (lease != null && now <= lease.expiresAt()) return lease.point();
+        deploymentAnchors.remove(id);
+        return home;
+    }
+    public void holdDeployment(String id, Vec point, long now) {
+        if (id != null && point != null)
+            deploymentAnchors.put(id, new AnchorLease(point, now + DEPLOYMENT_ANCHOR_LEASE_MS));
+    }
+    public void promoteHome(String id, Vec point) {
+        if (id != null && point != null) homes.put(id, point);
+    }
     public List<Vec> stations() { return List.copyOf(homes.values()); }
     public ZombieTacticalOrder current(String id) { return orders.get(id); }
 
@@ -46,8 +62,10 @@ public final class ZombieTacticalTaskBoard {
 
     public void retain(Set<String> aliveIds) {
         homes.keySet().retainAll(aliveIds);
+        deploymentAnchors.keySet().retainAll(aliveIds);
         orders.keySet().retainAll(aliveIds);
         cooldowns.keySet().retainAll(aliveIds);
     }
-    public void clear() { homes.clear(); orders.clear(); cooldowns.clear(); }
+    public void clear() { homes.clear(); deploymentAnchors.clear(); orders.clear(); cooldowns.clear(); }
+    private record AnchorLease(Vec point, long expiresAt) {}
 }

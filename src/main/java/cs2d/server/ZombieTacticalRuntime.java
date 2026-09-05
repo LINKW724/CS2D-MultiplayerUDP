@@ -102,6 +102,7 @@ final class ZombieTacticalRuntime {
 
     synchronized void clear() {
         intel.clear();
+        coordinator.clear();
         tasks.clear();
         orders = Map.of();
         attackLanes = List.of();
